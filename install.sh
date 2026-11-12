@@ -88,15 +88,37 @@ setup_workspace() {
   esac
   local path_line="export PATH=\"$dir:\$PATH\""
   if [[ -n "$shell_rc" ]]; then
-    local found="" line
+    # Find this workspace's PATH line and any line that puts another
+    # workspace's mt on PATH; the last such line wins in new terminals.
+    local found=0 line number=0 folder others="" last_other=0 last_other_folder=""
+    local path_pattern='^export PATH="(.+):\$PATH"$'
     if [[ -f "$shell_rc" ]]; then
       while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ "$line" == "$path_line" ]] && found=1 && break
+        number=$((number + 1))
+        if [[ "$line" == "$path_line" ]]; then
+          found=$number
+        elif [[ "$line" =~ $path_pattern ]]; then
+          folder="${BASH_REMATCH[1]}"
+          folder="${folder/#\$HOME/$HOME}"
+          folder="${folder/#\~/$HOME}"
+          if [[ "$folder" != "$dir" ]] && is_workspace "$folder"; then
+            others="$others  $folder"$'\n'
+            last_other=$number
+            last_other_folder="$folder"
+          fi
+        fi
       done < "$shell_rc"
     fi
-    if [[ -z "$found" ]]; then
+    if [[ "$found" -eq 0 ]]; then
       printf '\n# microtask\n%s\n' "$path_line" >> "$shell_rc"
       echo "Added mt to PATH in $shell_rc"
+    fi
+    if [[ "$found" -ne 0 && "$last_other" -gt "$found" ]]; then
+      echo "warning: $shell_rc puts mt from $last_other_folder on PATH after this workspace," >&2
+      echo "so new terminals will still run that one. Remove or move that line to use $dir." >&2
+    elif [[ -n "$others" ]]; then
+      printf '%s also puts mt from other workspaces on PATH:\n%s' "$shell_rc" "$others"
+      echo "New terminals use $dir because its line comes last. Remove the older lines if you no longer use them."
     fi
   else
     echo "Unknown shell '${SHELL:-}'; add this line to your shell config:"
@@ -105,6 +127,12 @@ setup_workspace() {
 
   if ! "$dir/mt" validate >/dev/null 2>&1; then
     echo "warning: workspace validation reported problems; run 'mt validate' for details" >&2
+  fi
+
+  local current_mt
+  current_mt="$(command -v mt 2>/dev/null || true)"
+  if [[ -n "$current_mt" && "$current_mt" != "$dir/mt" ]]; then
+    printf '\nThis terminal currently runs mt from %s.\n' "${current_mt%/mt}"
   fi
 
   printf '\nmicrotask is ready in %s.\n' "$dir"

@@ -36,7 +36,10 @@ gh repo clone YOU/tasks ~/todo      # or: git clone URL ~/todo
 
 Inside an existing workspace, `install.sh` only sets up the machine: it adds
 the `upstream` remote, puts `mt` on PATH, and checks your Git identity. Running
-it again changes nothing that is already set up. Repository aliases
+it again changes nothing that is already set up. If your shell config already puts
+another workspace's `mt` on PATH, the installer lists it and says which one new
+terminals will run: the last PATH line wins. `mt` always works on the folder it
+lives in, so check with `command -v mt` or `mt info`. Repository aliases
 (`mt repo add`) and `mt-policy.local.yaml` are per machine, so recreate them if
 you use them.
 

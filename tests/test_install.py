@@ -153,6 +153,47 @@ class InstallTest(unittest.TestCase):
             self.assertIn("git config --global user.name", result.stdout)
             self.assertIn(f"microtask is ready in {workspace}", result.stdout)
 
+    def make_local_workspace(self, folder: Path) -> Path:
+        (folder / "scripts").mkdir(parents=True)
+        (folder / "scripts" / "tasklib.py").write_text("")
+        (folder / "mt").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (folder / "mt").chmod(0o755)
+        return folder
+
+    def test_reports_other_workspaces_on_path_and_which_one_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            remote = self.make_workspace_remote(root)
+            env = self.setup_env(root, remote)
+            older = self.make_local_workspace(root / "home" / "old-todo")
+            workspace = root / "mytodos"
+            self.git("clone", "--quiet", str(remote), str(workspace))
+            zshrc = root / "home" / ".zshrc"
+            older_line = 'export PATH="$HOME/old-todo:$PATH"'
+            zshrc.write_text(f"# microtask\n{older_line}\n")
+
+            result = subprocess.run([str(workspace / "install.sh")], env=env, cwd=root,
+                                    text=True, capture_output=True, check=False)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(str(older), result.stdout)
+            self.assertIn(f"New terminals use {workspace}", result.stdout)
+            lines = zshrc.read_text().splitlines()
+            self.assertEqual(lines[-1], f'export PATH="{workspace}:$PATH"')
+
+            # A later line for the older workspace wins again; say so.
+            zshrc.write_text(zshrc.read_text() + f"{older_line}\n")
+            result = subprocess.run([str(workspace / "install.sh")], env=env, cwd=root,
+                                    text=True, capture_output=True, check=False)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"puts mt from {older} on PATH after this workspace", result.stderr)
+
+            env["PATH"] = f"{older}{os.pathsep}{env['PATH']}"
+            result = subprocess.run([str(workspace / "install.sh")], env=env, cwd=root,
+                                    text=True, capture_output=True, check=False)
+            self.assertIn(f"This terminal currently runs mt from {older}", result.stdout)
+
     def test_clones_existing_origin_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
