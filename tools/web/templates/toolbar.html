@@ -34,7 +34,7 @@
               <circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>
             </svg>
             <span>Filters</span>
-            <span class="mt-filter-active" x-show="activeFilterCount() > 0" x-text="activeFilterCount() + ' active'"></span>
+            <span class="mt-badge mt-badge-accent" x-show="activeFilterCount() > 0" x-text="activeFilterCount() + ' active'"></span>
           </button>
           <button type="button" class="mt-button mt-filter-clear" x-show="filtersApply() && activeFilterCount() > 0" @click="clearFilters()">Clear filters</button>
           <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
@@ -47,112 +47,60 @@
           </button>
         </div>
       </div>
-      <div id="mt-filters" class="mt-filters" role="group" aria-label="Search and filter options"
-           x-show="filtersOpen && filtersApply()">
-        <section class="mt-filter-section" role="group" aria-labelledby="mt-filter-find">
-          <span class="mt-filter-heading" id="mt-filter-find">Find</span>
-          <div class="mt-filter-controls">
-            <label class="mt-filter-search">
-              <span class="mt-sr-only">Search</span>
-              <input class="mt-field mt-field-compact" type="search" x-model="filters.search" aria-label="Search tasks" placeholder="Search">
-            </label>
+      <search id="mt-filters" class="mt-filters" aria-label="Search and filters" x-show="filtersOpen && filtersApply()" x-cloak>
+        <label class="mt-filter-search">
+          <span class="mt-sr-only">Search</span>
+          <input class="mt-field mt-field-compact" type="search" x-model="filters.search" aria-label="Search tasks" placeholder="Search">
+        </label>
+        <template x-for="facet in filterFacets()" :key="facet.key">
+          <div class="mt-picker mt-filter" :class="{ 'is-active': facet.active, 'is-ignored': facet.note }" :title="facet.note || null"
+               @focusout="if (pickerOpen(facet.key) && !$el.contains($event.relatedTarget)) closePicker()"
+               @keydown.arrow-down.prevent="movePicker(facet.key, 1)" @keydown.arrow-up.prevent="movePicker(facet.key, -1)"
+               @keydown.enter="pickerEnter(facet.key, $event)"
+               @keydown.escape="if (pickerOpen(facet.key)) { $event.stopPropagation(); closePicker(); $el.querySelector('.mt-filter-chip').focus(); }">
+            <div class="mt-filter-control">
+              <button type="button" class="mt-button mt-button-compact mt-filter-chip" :disabled="!ready"
+                      aria-haspopup="listbox" :aria-expanded="String(pickerOpen(facet.key))" :aria-controls="'mt-filter-' + facet.key + '-options'"
+                      :aria-activedescendant="pickerOpen(facet.key) && picker.navigated && pickerRows(facet.key).length ? 'mt-filter-' + facet.key + '-option-' + picker.active : null"
+                      @click="toggleFilterMenu(facet.key, $event)">
+                <span class="mt-filter-summary" x-text="facet.summary"></span>
+                <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"/></svg>
+              </button>
+              <button type="button" class="mt-button mt-button-compact mt-button-icon mt-filter-reset" x-show="facet.active"
+                      :aria-label="'Clear ' + facet.label + ' filter'" :title="'Clear ' + facet.label + ' filter'" @click="clearFilter(facet.key)">
+                <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg>
+              </button>
+            </div>
+            <div class="mt-card-menu-items mt-menu-start mt-filter-menu" x-show="pickerOpen(facet.key)" x-cloak>
+              <input class="mt-field mt-field-compact" type="search" autocomplete="off" x-show="facet.search"
+                     :aria-label="'Narrow ' + facet.label.toLowerCase()" :placeholder="'Find ' + facet.label.toLowerCase()"
+                     :aria-activedescendant="pickerOpen(facet.key) && picker.navigated && pickerRows(facet.key).length ? 'mt-filter-' + facet.key + '-option-' + picker.active : null"
+                     :value="picker.query" @input.stop="setPickerQuery(facet.key, $event.target.value)">
+              <ul class="mt-picker-list mt-picker-inline" role="listbox" :id="'mt-filter-' + facet.key + '-options'" :aria-label="facet.label" :aria-multiselectable="String(facet.multi)">
+                <template x-for="(row, index) in pickerRows(facet.key)" :key="row.kind + ':' + row.name">
+                  <li class="mt-picker-option" role="option" :id="'mt-filter-' + facet.key + '-option-' + index"
+                      :class="{ 'is-active': picker.navigated && index === picker.active, 'is-clear': row.kind === 'clear' }"
+                      :style="row.depth ? { paddingLeft: (8 + row.depth * 14) + 'px' } : null"
+                      :aria-selected="String(row.kind === 'option' && filterHas(facet.key, row.name))"
+                      @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow(facet.key, row)">
+                    <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                    <span class="mt-picker-name" x-text="row.kind === 'clear' ? 'Clear' : row.label"></span>
+                    <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? '1 card' : row.count + ' cards'"></span>
+                  </li>
+                </template>
+                <li class="mt-picker-empty" x-show="!pickerRows(facet.key).length">No matches.</li>
+              </ul>
+            </div>
+          </div>
+        </template>
+        <details class="mt-card-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+          <summary class="mt-menu-trigger" :class="{ 'is-active': showHidden || needsReviewOnly }" aria-label="More filters" title="More filters">
+            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+          </summary>
+          <div class="mt-card-menu-items mt-menu-start">
             <label class="mt-checkbox-filter"><input type="checkbox" x-model="showHidden"> Include hidden</label>
             <label class="mt-checkbox-filter"><input type="checkbox" x-model="needsReviewOnly"> Needs review only</label>
           </div>
-        </section>
-        <section class="mt-filter-section" role="group" aria-labelledby="mt-filter-task">
-          <span class="mt-filter-heading" id="mt-filter-task">Task</span>
-          <div class="mt-filter-controls">
-            <label class="mt-field-status">
-              <span class="mt-sr-only">Status</span>
-              <select class="mt-field mt-field-compact" x-model="filters.status" aria-label="Filter by status">
-                <option value="all">All statuses</option>
-                <template x-for="s in statuses" :key="s"><option :value="s" x-text="statusText(s)"></option></template>
-              </select>
-            </label>
-            <label class="mt-field-priority">
-              <span class="mt-sr-only">Priority</span>
-              <select class="mt-field mt-field-compact" x-model="filters.priority" aria-label="Filter by priority">
-                <option value="all">All priorities</option>
-                <template x-for="p in priorities" :key="p"><option :value="p" x-text="priorityLabel(p)"></option></template>
-              </select>
-            </label>
-            <label class="mt-field-type">
-              <span class="mt-sr-only">Type</span>
-              <select class="mt-field mt-field-compact" x-model="filters.type" aria-label="Filter by type">
-                <option value="all">All types</option>
-                <template x-for="t in types" :key="t"><option :value="t" x-text="t"></option></template>
-              </select>
-            </label>
-          </div>
-        </section>
-        <section class="mt-filter-section" role="group" aria-labelledby="mt-filter-context">
-          <span class="mt-filter-heading" id="mt-filter-context">Context</span>
-          <div class="mt-filter-controls">
-            <label class="mt-field-project">
-              <span class="mt-sr-only">Project</span>
-              <select class="mt-field mt-field-compact" x-model="filters.project" aria-label="Filter by project">
-                <option value="all">All projects</option>
-                <template x-for="p in projects" :key="p"><option :value="p" x-text="p"></option></template>
-              </select>
-            </label>
-            <div class="mt-field-topic mt-picker" @focusout="if (!$el.contains($event.relatedTarget)) closeTopicFilter()">
-              <input class="mt-field mt-field-compact mt-picker-input" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
-                     aria-label="Filter by topic" aria-controls="mt-topic-filter-options" :aria-expanded="String(topicFilter.open)"
-                     :aria-activedescendant="topicFilter.open && topicFilter.navigated && topicFilterRows().length ? 'mt-topic-filter-option-' + topicFilter.active : null"
-                     :value="topicFilter.open ? topicFilter.query : (filters.topic === 'all' ? '' : filters.topic)" :title="filters.topic === 'all' ? null : filters.topic"
-                     :placeholder="topicFilter.open && filters.topic !== 'all' ? filters.topic : 'All topics'"
-                     @click="openTopicFilter()" @input.stop="setTopicFilterQuery($event.target.value)"
-                     @keydown.arrow-down.prevent="moveTopicFilter(1)" @keydown.arrow-up.prevent="moveTopicFilter(-1)"
-                     @keydown.enter="topicFilterEnter($event)"
-                     @keydown.escape="if (topicFilter.open) { $event.preventDefault(); $event.stopPropagation(); closeTopicFilter(); }">
-              <ul class="mt-picker-list" role="listbox" id="mt-topic-filter-options" x-show="topicFilter.open" x-cloak>
-                <template x-for="(row, index) in topicFilterRows()" :key="row.kind + ':' + row.name">
-                  <li class="mt-picker-option" role="option" :id="'mt-topic-filter-option-' + index"
-                      :class="{ 'is-active': topicFilter.navigated && index === topicFilter.active, 'is-clear': row.kind === 'clear' }"
-                      :style="row.depth ? { paddingLeft: (8 + row.depth * 14) + 'px' } : null"
-                      :aria-selected="String(row.kind === 'option' && row.name.toLowerCase() === filters.topic.toLowerCase())"
-                      @mousedown.prevent @mousemove="topicFilter.active = index; topicFilter.navigated = true" @click="chooseTopicFilter(row)">
-                    <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
-                    <span class="mt-picker-name" x-text="row.kind === 'clear' ? 'All topics' : row.label"></span>
-                    <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? '1 card, including subtopics' : row.count + ' cards, including subtopics'"></span>
-                  </li>
-                </template>
-                <li class="mt-picker-empty" x-show="!topicFilterRows().length">No matching topics.</li>
-              </ul>
-            </div>
-            <label class="mt-field-tag">
-              <span class="mt-sr-only">Tag</span>
-              <input class="mt-field mt-field-compact mt-tag-filter" type="search" x-model="filters.tag" aria-label="Filter by tag" placeholder="Tag">
-            </label>
-          </div>
-        </section>
-        <section class="mt-filter-section" role="group" aria-labelledby="mt-filter-time">
-          <span class="mt-filter-heading" id="mt-filter-time">Time</span>
-          <div class="mt-filter-controls">
-            <label class="mt-field-due">
-              <span class="mt-sr-only">Due</span>
-              <select class="mt-field mt-field-compact" x-model="filters.due" aria-label="Filter by due date">
-                <option value="all">All due</option>
-                <option value="overdue">Overdue</option>
-                <option value="today">Today</option>
-                <option value="next7">Next 7 days</option>
-                <option value="none">No due</option>
-              </select>
-            </label>
-            <label class="mt-field-updated">
-              <span class="mt-sr-only">Updated</span>
-              <select class="mt-field mt-field-compact" x-model="filters.updated" aria-label="Filter by last update">
-                <option value="all">Any update</option>
-                <option value="2w">Updated last 2 weeks</option>
-                <option value="1m">Updated last month</option>
-                <option value="3m">Updated last 3 months</option>
-                <option value="1y">Updated last year</option>
-                <option value="older-3m">Not updated in 3 months</option>
-                <option value="older-1y">Not updated in a year</option>
-              </select>
-            </label>
-          </div>
-        </section>
-      </div>
+        </details>
+      </search>
     </header>

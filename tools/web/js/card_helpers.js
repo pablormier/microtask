@@ -164,3 +164,9 @@ function topicPickerRows(tree, query, { create = true } = {}) {
   }
   return rows;
 }
+
+// Picker rows for plain names, most-used first. `usage` maps a name to its card count.
+function usageChoices(names, usage) {
+  return names.map(name => ({ kind: "option", name, label: name, count: usage[name] || 0 }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}

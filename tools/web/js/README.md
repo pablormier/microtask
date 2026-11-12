@@ -14,6 +14,9 @@ tests use that same loader.
 - `capture_composer.js`: capture input, dirty/recovery state, validation and
   save/discard workflows. It receives the shared draft store and narrow board
   adapters when an action runs.
+- `picker.js`: state and keyboard navigation for searchable option lists, shared
+  by the card editor (project, topic, tags) and the toolbar filter chips. The host
+  supplies `pickerRows`, `choosePickerRow`, `pickerMulti` and `pickerSelected`.
 - `property_editor.js`: selected-card property values, dirty baseline, conflict
   state, validation and patch creation.
 - `content_editor.js`: inline content input, local persistence, preview, save
@@ -49,8 +52,13 @@ searches and mutations bypass this guard; failed or stale responses do not exten
 the grace period.
 
 `/api/items` accepts search, status, priority, type, project, topic (the path and
-everything under it), tag, due,
-show_hidden and needs_review query parameters. `tools/web_queries.py` selects and
+everything under it), tag, due, updated,
+show_hidden and needs_review query parameters. Every filter except search and
+updated may repeat (`status=doing&status=waiting`): a card matches any value of a
+facet and must match every facet. Tags match whole names. The server echoes the
+lists in the order received, and the client keeps its values in a stable order,
+so `applyPayload` can compare the echoed query with the current one. Mutation
+requests send the same query as JSON. `tools/web_queries.py` selects and
 orders each view, returning ID arrays in `collections` alongside card summaries.
 Search reads full bodies on the server. Summaries omit body, references and reference spans; counts and filter choices still
 use the entire summary collection. Changes to filters request new results after

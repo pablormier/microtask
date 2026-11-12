@@ -5,11 +5,20 @@ import card_format  # on sys.path via tools/taskweb.py, which inserts scripts/
 
 
 FILTER_FIELDS = ("search", "status", "priority", "type", "project", "topic", "tag", "due", "updated")
+# Lists of selected values: a card matches one of them (OR); all filters must match (AND).
+FILTER_LISTS = ("status", "priority", "type", "project", "topic", "tag", "due")
+
+
+def selected_values(value):
+    """Selected values in the order received. A single string (the older form) selects one."""
+    items = value if isinstance(value, list) else [value]
+    return [text for text in (str(item or "").strip() for item in items) if text and text != "all"]
 
 
 def normalize_query(values=None):
     values = values or {}
-    query = {key: str(values.get(key) or ("" if key in ("search", "tag") else "all"))
+    query = {key: selected_values(values.get(key)) if key in FILTER_LISTS
+             else str(values.get(key) or ("" if key == "search" else "all"))
              for key in FILTER_FIELDS}
     for key in ("show_hidden", "needs_review"):
         query[key] = values.get(key) is True or values.get(key) == "true"
@@ -29,6 +38,32 @@ def due_datetime(value, now):
         return None
 
 
+def due_matches(value, option, now):
+    if option == "none":
+        return not value
+    if not value:
+        return False
+    due = due_datetime(value, now)
+    days = (due.date() - now.date()).days if due else None
+    if option == "overdue":
+        return due is None or due < now
+    if option == "today":
+        return days == 0
+    if option == "next7":
+        return days is not None and 0 <= days <= 7
+    return True
+
+
+def value_selected(key, value, wanted):
+    if key == "topic":
+        # A topic selects its path and everything under it.
+        return any(card_format.topic_within(value, path) for path in wanted)
+    if key == "project":
+        # Match `mt list --project`, so `mt web --project` links work in any case.
+        return str(value).casefold() in {name.casefold() for name in wanted}
+    return value in wanted
+
+
 def matches(item, query, now, *, status=True):
     if query["needs_review"] and not item.get("needs_review"):
         return False
@@ -36,35 +71,13 @@ def matches(item, query, now, *, status=True):
         if key == "status" and not status:
             continue
         value = item.get(key) or (item.get("kind") if key == "type" else "")
-        if query[key] == "all":
-            continue
-        if key == "topic":
-            # A topic filter selects the path and everything under it.
-            if not card_format.topic_within(value, query[key]):
-                return False
-        elif key == "project":
-            # Match `mt list --project`, so `mt web --project` links work in any case.
-            if str(value).casefold() != query[key].casefold():
-                return False
-        elif value != query[key]:
+        if query[key] and not value_selected(key, value, query[key]):
             return False
-    tag = query["tag"].strip().lower()
-    if tag and not any(tag in value.lower() for value in item.get("tags", [])):
+    # Tags match whole names, like `mt list --tag`.
+    if query["tag"] and not {tag.casefold() for tag in query["tag"]} & {tag.casefold() for tag in item.get("tags", [])}:
         return False
-    due_filter = query["due"]
-    if due_filter != "all":
-        value = item.get("due")
-        if (due_filter == "none" and value) or (due_filter != "none" and not value):
-            return False
-        if value:
-            due = due_datetime(value, now)
-            days = (due.date() - now.date()).days if due else None
-            if due_filter == "overdue" and due and due >= now:
-                return False
-            if due_filter == "today" and days != 0:
-                return False
-            if due_filter == "next7" and (days is None or not 0 <= days <= 7):
-                return False
+    if query["due"] and not any(due_matches(item.get("due"), option, now) for option in query["due"]):
+        return False
     updated_filter = query["updated"]
     cutoff = card_format.relative_date(updated_filter.removeprefix("older-"), now.date())
     if cutoff:

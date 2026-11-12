@@ -23,9 +23,18 @@ selector specificity as their base and follow it in the stylesheet.
   their own focus ring, so `.mt-segmented` suppresses Pico's group ring.
   Preserve `aria-pressed` and `aria-expanded` states.
 - **Toolbar:** brand and view tabs on the left; display choices, then actions
-  (Filters, Clear, Resume, and the primary New last) on the right. At narrow
-  widths the view tabs move to their own horizontally scrolling row.
-- **Icons:** use the shared 16px stroke SVG style for New (plus), Filters,
+  (Filters, Clear filters, Resume, and the primary New last) on the right. The
+  Filters toggle counts active filters. At narrow widths the view tabs move to
+  their own horizontally scrolling row.
+- **Filter chips:** the Filters toggle shows a row below the title row (not on
+  Drafts): search, then one `mt-filter-chip` button per facet and a `...` menu.
+  The row is a `search` element, never a
+  `role="group"`, so Pico's group styling does not apply. An empty chip shows
+  its name; an active chip is tinted, summarizes its values, and has a sibling
+  reset button (not a nested button). A chip that does not apply on the current
+  tab is dimmed with a tooltip. The row wraps at narrow widths, where each
+  dropdown spans the row below it so none runs off screen.
+- **Icons:** use the shared 16px stroke SVG style for New (plus),
   Back, and Close. Keep other actions text-only; icons aid recognition of these
   common controls rather than indicate importance. Keep visible text except
   on Close, which must have an accessible label. Do not mix emoji or text glyphs
@@ -57,14 +66,17 @@ selector specificity as their base and follow it in the stylesheet.
   a `div`, not a `label`, so option clicks do not refocus the input.
   Topic rows are the derived topic tree (indented, counts include descendants);
   typing `a/` lists that folder's descendants and a bare word matches any
-  segment. The toolbar Topic filter reuses the picker; the active filter shows
+  segment. The toolbar filter chips reuse the picker list inside a menu panel
+  (`mt-card-menu-items`), as an inline list (`mt-picker-inline`), with a narrowing field for Project, Topic, and Tags;
+  multi-value lists keep it open and tick values. One selected topic also shows
   as a `mt-topic-crumbs` breadcrumb above the board, and cards show their path
   as plain `mt-card-topic` text (not a nested button, hidden when grouped by topic).
 - **Fields:** use `mt-field` on inputs, selects, and textareas. Use
   `mt-field-compact` for dense controls. Wrapper labels set widths and
   label/help/error placement.
 - **Checkbox filters:** wrap a native checkbox in `label.mt-checkbox-filter`.
-  The checkbox remains the state source.
+  The checkbox remains the state source. Include hidden and Needs review only
+  live in the toolbar's `...` overflow menu.
 - **Segmented choices:** use a `mt-segmented` container and `mt-segment`
   buttons with `aria-pressed`. Use `mt-segmented-quiet` for text-size choices.
 - **Layout groups:** add `mt-layout-group` to a `role="group"` wrapper when

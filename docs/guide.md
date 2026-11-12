@@ -134,17 +134,25 @@ Archive, and Deadlines views. You can edit card content and properties, comment,
 and track time there. It edits the same files as the CLI, and nothing leaves
 your machine. `mt show REF` opens a read-only preview of a single card.
 
+Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
+Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where
+you tick one or more values; a card matches when it has any value ticked in a
+chip, and it must match every chip you use. An active chip shows its values and
+has an x to clear it. The Filters button shows how many filters are active,
+and Clear filters resets them all. Include hidden and Needs
+review only are in the `...` menu. Status does not filter Notes or the Archive.
 The Updated filter shows cards changed in the last 2 weeks, month, 3 months, or
-year, or cards not changed in 3 months or a year.
+year, or cards not changed in 3 months or a year; it takes one choice.
 
 Board filters are kept in the page address, so a reload keeps them and a
 bookmark returns to the same board. They apply to every tab except Drafts, and
-a card created while the board is filtered to a project or topic starts there.
-To keep one workspace for many efforts and open the board for just one of them:
+a card created while the board is filtered to exactly one project or topic
+starts there. To keep one workspace for many efforts and open the board for just
+one of them (repeat a flag to show several):
 
 ```sh
 mt web --project release              # or --topic work/infra, --tag review, --updated older-1y
-mt web --project release --port 8765  # a fixed port keeps bookmarks working
+mt web --project release --project docs --port 8765  # a fixed port keeps bookmarks working
 ```
 
 To stay in one project from the command line, set `MT_PROJECT` (or

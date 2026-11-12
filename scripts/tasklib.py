@@ -5457,8 +5457,9 @@ def command_web(args: argparse.Namespace) -> int:
     if args.port is not None:
         command.extend(["--port", str(args.port)])
     for option in WEB_FILTERS:
-        if getattr(args, option):
-            command.extend([f"--{option}", getattr(args, option)])
+        values = getattr(args, option)  # a list from the flags, or a string from MT_PROJECT / MT_TOPIC
+        for value in [values] if isinstance(values, str) else values or []:
+            command.extend([f"--{option}", value])
     try:
         return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
     except KeyboardInterrupt:
@@ -5474,9 +5475,10 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument("--host", default="127.0.0.1", help="server host; defaults to 127.0.0.1")
     parser.add_argument("--port", type=int, default=0, help="server port; defaults to an available port")
-    parser.add_argument("--project", help="open the board filtered to this project")
-    parser.add_argument("--topic", metavar="PATH", help="open the board filtered to this topic and everything under it")
-    parser.add_argument("--tag", help="open the board filtered to this tag")
+    parser.add_argument("--project", action="append", help="open the board filtered to this project; repeat to show several")
+    parser.add_argument("--topic", action="append", metavar="PATH",
+                        help="open the board filtered to this topic and everything under it; repeat to show several")
+    parser.add_argument("--tag", action="append", help="open the board filtered to this tag; repeat to show several")
     parser.add_argument("--updated", choices=WEB_UPDATED_CHOICES, help="open the board filtered by last update")
 
 
@@ -6069,7 +6071,8 @@ def parser() -> argparse.ArgumentParser:
     web = sub.add_parser(
         "web", help="open the local web dashboard",
         description="Open the local web dashboard. Board filters are kept in the page address, so a "
-                    "reload keeps them; --project, --topic, and --tag open the board already filtered.",
+                    "reload keeps them; --project, --topic, and --tag open the board already filtered, and each "
+                    "can be repeated to show cards matching any of the values.",
     )
     add_web_arguments(web)
     web.set_defaults(func=command_web)

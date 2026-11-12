@@ -23,10 +23,10 @@ import tasklib  # noqa: E402
 import drafts as draft_store  # noqa: E402
 
 try:
-    from .web_queries import collection_results, normalize_query
+    from .web_queries import FILTER_LISTS, collection_results, normalize_query
 except ImportError:  # Direct script entry point or file-based test loader.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from web_queries import collection_results, normalize_query
+    from web_queries import FILTER_LISTS, collection_results, normalize_query
 
 
 PICO_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
@@ -56,6 +56,7 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
     js_files = [
         "markdown.js",
         "card_helpers.js",
+        "picker.js",
         "draft_store.js",
         "capture_composer.js",
         "property_editor.js",
@@ -392,7 +393,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if url.path == "/api/items":
             try:
                 payload = dashboard_payload(api_token=self.server.token, query={
-                    key: values[-1] for key, values in parse_qs(url.query).items()
+                    key: values if key in FILTER_LISTS else values[-1] for key, values in parse_qs(url.query).items()
                 })
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
@@ -851,7 +852,7 @@ def board_filters(args: argparse.Namespace) -> dict:
 
 def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
     """Return the dashboard address, opening on the given board filters."""
-    query = urlencode({key: value for key, value in (filters or {}).items() if value})
+    query = urlencode({key: value for key, value in (filters or {}).items() if value}, doseq=True)
     return f"http://{host}:{port}/" + (f"?{query}" if query else "")
 
 

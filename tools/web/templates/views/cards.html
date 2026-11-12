@@ -30,15 +30,15 @@
               </svg>
             </button>
           </div>
-          <nav class="mt-topic-crumbs" aria-label="Topic filter" x-show="filters.topic !== 'all'" x-cloak>
+          <nav class="mt-topic-crumbs" aria-label="Topic filter" x-show="filters.topic.length === 1" x-cloak>
             <template x-for="(crumb, index) in topicCrumbs()" :key="crumb.path">
               <span class="mt-topic-crumb-item">
                 <span class="mt-topic-crumb-sep" aria-hidden="true" x-show="index > 0">›</span>
                 <button type="button" class="mt-button mt-button-quiet mt-topic-crumb" :aria-current="index === topicCrumbs().length - 1 ? 'location' : null"
-                        :title="'Show ' + crumb.path" @click="setTopicFilter(crumb.path)" x-text="crumb.label"></button>
+                        :title="'Show ' + crumb.path" @click="filters.topic = [crumb.path]" x-text="crumb.label"></button>
               </span>
             </template>
-            <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-crumb-clear" aria-label="Clear topic filter" title="Clear topic filter" @click="setTopicFilter('')">
+            <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-crumb-clear" aria-label="Clear topic filter" title="Clear topic filter" @click="clearFilter('topic')">
               <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg>
             </button>
           </nav>

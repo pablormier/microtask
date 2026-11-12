@@ -101,6 +101,32 @@ summary.mt-menu-trigger::-webkit-details-marker { display: none; }
 summary.mt-menu-trigger:hover { background: var(--mt-button-hover); border-color: var(--mt-border-strong); }
 details[open] > summary.mt-menu-trigger { background: var(--mt-button-active); border-color: var(--mt-border-strong); box-shadow: none; }
 summary.mt-menu-trigger:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 2px; }
+/* Menu panels open below their trigger, aligned to its end; mt-menu-start aligns them to its start. */
+.mt-card-menu { position: relative; margin: 0; padding: 0; border: 0; }
+.mt-card-menu-items {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  gap: 2px;
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface-raised);
+  box-shadow: var(--mt-shadow-hover-strong);
+}
+/* Menu entries read as a list, not a stack of buttons. */
+.mt-card-menu-items > button.mt-button {
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 500;
+}
+.mt-card-menu-items > button.mt-button:enabled:hover { border-color: transparent; background: var(--mt-surface-hover); box-shadow: none; }
+.mt-card-menu-items.mt-menu-start { right: auto; left: 0; }
 
 input.mt-field, select.mt-field, textarea.mt-field {
   display: block;
@@ -164,6 +190,17 @@ ul.mt-picker-list {
   background: var(--mt-surface-raised);
   box-shadow: var(--mt-shadow-hover-strong);
   list-style: none;
+}
+/* An inline list sits inside a panel that already provides the surface (toolbar filters). */
+ul.mt-picker-inline {
+  position: static;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 ul.mt-picker-list > li {
   display: flex;
@@ -352,19 +389,31 @@ input.mt-field[type="search"] {
 .mt-segmented-quiet .mt-segment:not([aria-pressed="true"]):enabled:hover { background: var(--mt-surface-hover); }
 .mt-segmented-quiet .mt-segment[aria-pressed="true"] { background: var(--mt-accent-soft); color: var(--mt-accent); box-shadow: none; }
 .mt-segmented-quiet .mt-segment[aria-pressed="true"]:enabled:hover { background: var(--mt-accent-soft); color: var(--mt-accent-hover); }
-.mt-filter-toggle[aria-expanded="true"] { border-color: var(--mt-focus-soft); background: var(--mt-accent-soft); color: var(--mt-accent-hover); }
+/* Filter chips: a compact button opens a picker. An active chip is tinted and shows
+   its values; the reset button clears that filter. */
+.mt-filter-control { display: inline-flex; }
+button.mt-button.mt-filter-chip { max-width: 18rem; padding-right: 6px; }
+.mt-filter-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mt-filter-chip .mt-icon { width: 14px; height: 14px; flex-basis: 14px; }
+.mt-filter.is-ignored .mt-filter-control { opacity: .5; }
+.mt-filter.is-active button.mt-button.mt-filter-chip { border-radius: var(--mt-radius-md) 0 0 var(--mt-radius-md); }
+button.mt-button.mt-filter-reset { margin-left: -1px; border-radius: 0 var(--mt-radius-md) var(--mt-radius-md) 0; }
+.mt-filter.is-active .mt-filter-control > button.mt-button,
+summary.mt-menu-trigger.is-active,
+button.mt-button.mt-filter-toggle[aria-expanded="true"] {
+  border-color: var(--mt-focus-soft);
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent-hover);
+}
+.mt-filter.is-active .mt-filter-control > button.mt-button:enabled:hover,
+details:not([open]) > summary.mt-menu-trigger.is-active:hover,
 button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
   border-color: var(--mt-focus-soft);
   background: var(--mt-accent-soft);
-  color: var(--mt-accent-hover);
   box-shadow: var(--mt-shadow-control-hover);
 }
-button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:active {
-  border-color: var(--mt-focus-soft);
-  background: var(--mt-accent-soft);
-  color: var(--mt-accent-hover);
-}
-.mt-filter-active { padding: 2px 7px; border-radius: var(--mt-radius-pill); background: var(--mt-accent-soft); color: var(--mt-accent); font-size: var(--mt-font-size-xs); font-weight: 750; }
+/* The dropdown is a menu panel holding a narrowing field above the picker list. */
+.mt-filter-menu { min-width: 14rem; max-width: min(22rem, 90vw); }
 
 .mt-icon {
   display: block;
@@ -380,7 +429,7 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:active {
 
 /* Badges share one base; tone and shape are separate semantic choices. */
 .mt-badge, .mt-count, .mt-priority, .mt-status-badge, .mt-due, .mt-due-kind,
-.mt-restart-badge, .mt-tag, .mt-needs-review, .mt-filter-active {
+.mt-restart-badge, .mt-tag, .mt-needs-review {
   display: inline-flex;
   align-items: center;
   width: fit-content;
@@ -397,8 +446,7 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:active {
   white-space: nowrap;
 }
 .mt-badge-neutral, .mt-priority.priority-low, .mt-count { background: var(--mt-surface-hover); color: var(--mt-text-muted); }
-.mt-badge-accent, .mt-priority.priority-medium, .mt-status-badge, .mt-due-kind.is-soft,
-.mt-filter-active { background: var(--mt-accent-soft); color: var(--mt-accent); }
+.mt-badge-accent, .mt-priority.priority-medium, .mt-status-badge, .mt-due-kind.is-soft { background: var(--mt-accent-soft); color: var(--mt-accent); }
 .mt-badge-success { background: var(--mt-success-soft); color: var(--mt-success); }
 .mt-badge-warning, .mt-priority.priority-high, .mt-needs-review { background: var(--mt-warning-soft); color: var(--mt-warning); }
 .mt-badge-danger, .mt-priority.priority-urgent, .mt-due.is-overdue, .mt-due-kind.is-hard,

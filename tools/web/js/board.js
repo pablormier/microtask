@@ -4,6 +4,7 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
   config = config || {};
   const value = normalizeMetadataValue(initial, config);
   const due = String(value.due || "");
+  const picker = createPicker();
   return {
     createMode: Boolean(createMode),
     cardKind: kind,
@@ -28,7 +29,7 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     tags: Array.from(new Set([...(config.suggested_tags || []), ...(config.workspace_tags || [])])).sort(),
     usage: config.workspace_usage || {},
     // Project, topic, and tags share one searchable picker; only one is open at a time.
-    picker: { field: "", query: "", active: 0, navigated: false },
+    ...picker,
     replaceValue(next) {
       this.value = normalizeMetadataValue(next, config);
       const due = String(this.value.due || "");
@@ -72,9 +73,7 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     pickerChoices(field) {
       if (field === "topic") return topicPickerRows(this.topicTree, "", { create: false });
       const names = { project: this.projects, tags: this.tags }[field] || [];
-      const counts = this.usage[field === "tags" ? "tag" : field] || {};
-      return names.map(name => ({ kind: "option", name, count: counts[name] || 0 }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      return usageChoices(names, this.usage[field === "tags" ? "tag" : field] || {});
     },
     pickerMatch(field, text) {
       if (field === "topic") {
@@ -100,38 +99,20 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
       if (field !== "tags" && !query && this.value[field]) rows.unshift({ kind: "clear", name: "", count: 0 });
       return rows;
     },
-    pickerOpen(field) {
-      return this.picker.field === field;
+    pickerMulti(field) {
+      return field === "tags";
     },
-    openPicker(field) {
-      if (this.disabled || this.picker.field === field) return;
-      this.picker = { field, query: "", active: 0, navigated: false };
-      if (field !== "tags") {
-        this.picker.active = Math.max(0, this.pickerRows(field).findIndex(row => row.name === this.value[field]));
-      }
-    },
-    closePicker() {
-      this.picker = { field: "", query: "", active: 0, navigated: false };
+    pickerSelected(field, row) {
+      return row.name === this.value[field];
     },
     setPickerQuery(field, text) {
-      if (this.picker.field !== field) this.openPicker(field);
       if (field === "tags" && String(text).includes(",")) {
         // A comma (typed or pasted) completes each tag before it.
         const parts = String(text).split(",");
         text = parts.pop().trimStart();
         parts.forEach(part => this.addTag(part));
       }
-      this.picker.query = text;
-      this.picker.active = 0;
-      this.picker.navigated = Boolean(String(text).trim());
-    },
-    movePicker(field, step) {
-      if (!this.pickerOpen(field)) this.openPicker(field);
-      const count = this.pickerRows(field).length;
-      if (!count) return;
-      // The first arrow press highlights the current (or first) row before moving on.
-      if (this.picker.navigated) this.picker.active = (this.picker.active + step + count) % count;
-      this.picker.navigated = true;
+      picker.setPickerQuery.call(this, field, text);
     },
     choosePickerRow(field, row) {
       if (!row) return;
@@ -142,12 +123,6 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
       this.value[field] = row.kind === "clear" ? "" : row.name;
       this.closePicker();
       this.emitChange();
-    },
-    pickerEnter(field, event) {
-      if (!this.pickerOpen(field)) return;
-      event.preventDefault();
-      if (this.picker.navigated) this.choosePickerRow(field, this.pickerRows(field)[this.picker.active]);
-      else if (field !== "tags") this.closePicker();
     },
     leavePicker(field) {
       // Typed text is kept when focus leaves, matching an existing value's spelling.
@@ -201,8 +176,25 @@ const VIEW_SETTINGS_KEY = "mt-view-settings";
 const FILTER_PARAMS = { search: "q", status: "status", priority: "priority", type: "type",
   project: "project", topic: "topic", tag: "tag", due: "due", updated: "updated" };
 
+// Every facet but Updated holds a list of values: a card matches any of them, and all
+// facets must match. Updated holds one value, or "all".
 function defaultFilters() {
-  return { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all", updated: "all" };
+  return { search: "", status: [], priority: [], type: [], project: [], topic: [], tag: [], due: [], updated: "all" };
+}
+
+// Filter chips in toolbar order, as [key, label].
+const FILTER_FACETS = [["status", "Status"], ["priority", "Priority"], ["type", "Type"], ["project", "Project"],
+  ["topic", "Topic"], ["tag", "Tags"], ["due", "Due"], ["updated", "Updated"]];
+const SEARCHABLE_FILTERS = ["project", "topic", "tag"];
+const FILTER_OPTIONS = {
+  due: [["overdue", "Overdue"], ["today", "Today"], ["next7", "Next 7 days"], ["none", "No due"]],
+  updated: [["2w", "Last 2 weeks"], ["1m", "Last month"], ["3m", "Last 3 months"], ["1y", "Last year"],
+    ["older-3m", "Older than 3 months"], ["older-1y", "Older than a year"]]
+};
+
+// Add one parameter per value, so lists repeat the name instead of joining.
+function appendParams(params, name, value) {
+  for (const item of [].concat(value)) params.append(name, item);
 }
 
 function cardGroupOptions(kind) {
@@ -271,11 +263,11 @@ function taskBoard() {
     settings: normalizeViewSettings({}),
     textSize: "medium",
     filtersOpen: false,
+    ...createPicker(),
     showHidden: false,
     priorities: [],
     types: [],
     projects: [],
-    topicFilter: { open: false, query: "", active: 0, navigated: false },
     filters: defaultFilters(),
     needsReviewOnly: false,
     detailLoading: false,
@@ -447,55 +439,102 @@ function taskBoard() {
     // Filters, Search & Item Visibility
     // ---------------------------------------------------------------------------
 
-    activeFilterCount() {
-      const f = this.filters;
-      return [
-        f.search.trim(), f.status !== "all", f.priority !== "all", f.type !== "all",
-        f.project !== "all", f.topic !== "all", f.tag.trim(), f.due !== "all", f.updated !== "all", this.showHidden,
-        this.needsReviewOnly
-      ].filter(Boolean).length;
+    // Selected values of a facet; empty when it is unset ("", or Updated's "all").
+    filterValues(key) {
+      const value = this.filters[key];
+      return (Array.isArray(value) ? value : [value]).map(item => String(item).trim()).filter(item => item && item !== "all");
     },
 
-    // Topic filter: a tree picker and breadcrumb; a topic includes everything under it.
-    topicFilterRows() {
-      const query = this.topicFilter.query.trim();
-      const rows = topicPickerRows(this.topicTree, query, { create: false });
-      if (!query && this.filters.topic !== "all") rows.unshift({ kind: "clear", name: "", label: "", depth: 0, count: 0 });
+    activeFilterCount() {
+      return Object.keys(FILTER_PARAMS).filter(key => this.filterValues(key).length).length
+        + (this.showHidden ? 1 : 0) + (this.needsReviewOnly ? 1 : 0);
+    },
+
+    filterHas(key, name) {
+      return this.filterValues(key).some(value => value.toLowerCase() === name.toLowerCase());
+    },
+
+    toggleFilter(key, name) {
+      const values = this.filterValues(key);
+      this.filters[key] = this.filterHas(key, name)
+        ? values.filter(value => value.toLowerCase() !== name.toLowerCase())
+        : [...values, name];
+    },
+
+    clearFilter(key) {
+      this.filters[key] = defaultFilters()[key];
+    },
+
+    // The server ignores Status on Notes and Archive (see tools/web_queries.py).
+    filterFacets() {
+      const statusIgnored = this.mode === "notes" || this.mode === "archive";
+      return FILTER_FACETS.map(([key, label]) => {
+        const names = this.filterValues(key);
+        // Topics show their full path; other values show their option label.
+        const labels = new Map(names.length && key !== "topic" ? this.filterChoices(key).map(row => [row.name, row.label]) : []);
+        const shown = names.map(name => labels.get(name) || name);
+        return {
+          key, label, search: SEARCHABLE_FILTERS.includes(key), multi: this.pickerMulti(key), active: names.length > 0,
+          summary: !names.length ? label : label + (names.length > 2 ? " · " + names.length : ": " + shown.join(", ")),
+          note: key === "status" && statusIgnored ? "Status does not filter " + (this.mode === "notes" ? "notes" : "the archive") : ""
+        };
+      });
+    },
+
+    // Every option of a facet, plus any selected value no card uses (say, from a link),
+    // so each selection has a row to untick.
+    filterChoices(key) {
+      const rows = this.facetOptions(key);
+      const known = new Set(rows.map(row => row.name.toLowerCase()));
+      return rows.concat(this.filterValues(key).filter(name => !known.has(name.toLowerCase()))
+        .map(name => ({ kind: "option", name, label: name, depth: 0, count: 0 })));
+    },
+    facetOptions(key) {
+      if (key === "topic") return topicPickerRows(this.topicTree, "", { create: false });
+      if (key === "project") return usageChoices(this.projects, this.workspaceUsage.project || {});
+      if (key === "tag") return usageChoices(this.workspaceTags, this.workspaceUsage.tag || {});
+      const options = FILTER_OPTIONS[key] || {
+        status: this.statuses.map(name => [name, this.statusText(name)]),
+        priority: this.priorities.map(name => [name, this.priorityLabel(name)]),
+        type: this.types.map(name => [name, name])
+      }[key];
+      return options.map(([name, label]) => ({ kind: "option", name, label, count: 0 }));
+    },
+
+    // The toolbar filters use the shared picker: lists keep it open and toggle values, Updated closes.
+    pickerMulti(field) {
+      return field !== "updated";
+    },
+    pickerSelected(field, row) {
+      return this.filterHas(field, row.name);
+    },
+    pickerRows(field) {
+      const query = this.picker.field === field ? this.picker.query.trim() : "";
+      const lower = query.toLowerCase();
+      // A typed topic narrows the tree by path segments; other lists narrow by label.
+      const rows = field === "topic" && query
+        ? topicPickerRows(this.topicTree, query, { create: false })
+        : this.filterChoices(field).filter(row => row.label.toLowerCase().includes(lower));
+      if (!query && this.filterValues(field).length) rows.unshift({ kind: "clear", name: "", label: "", depth: 0, count: 0 });
       return rows;
     },
-    openTopicFilter() {
-      if (this.topicFilter.open) return;
-      this.topicFilter = { open: true, query: "", active: 0, navigated: false };
-    },
-    closeTopicFilter() {
-      this.topicFilter = { open: false, query: "", active: 0, navigated: false };
-    },
-    setTopicFilterQuery(text) {
-      this.topicFilter = { open: true, query: text, active: 0, navigated: Boolean(String(text).trim()) };
-    },
-    moveTopicFilter(step) {
-      this.openTopicFilter();
-      const count = this.topicFilterRows().length;
-      if (!count) return;
-      if (this.topicFilter.navigated) this.topicFilter.active = (this.topicFilter.active + step + count) % count;
-      this.topicFilter.navigated = true;
-    },
-    chooseTopicFilter(row) {
+    choosePickerRow(field, row) {
       if (!row) return;
-      this.setTopicFilter(row.kind === "clear" ? "" : row.name);
+      if (row.kind === "clear") this.clearFilter(field);
+      else if (this.pickerMulti(field)) return this.toggleFilter(field, row.name);
+      else this.filters[field] = row.name;
+      this.closePicker();
     },
-    topicFilterEnter(event) {
-      if (!this.topicFilter.open) return;
-      event.preventDefault();
-      if (this.topicFilter.navigated) this.chooseTopicFilter(this.topicFilterRows()[this.topicFilter.active]);
-      else this.closeTopicFilter();
+    toggleFilterMenu(key, event) {
+      if (this.pickerOpen(key)) return this.closePicker();
+      const menu = event.currentTarget.closest(".mt-filter");
+      this.openPicker(key);
+      this.$nextTick(() => menu.querySelector("input")?.focus());
     },
-    setTopicFilter(path) {
-      this.filters.topic = normalizeTopicPath(path) || "all";
-      this.closeTopicFilter();
-    },
+
+    // The breadcrumb shows one selected topic; several topics show only in the chip.
     topicCrumbs() {
-      const parts = this.filters.topic === "all" ? [] : topicSegments(this.filters.topic);
+      const parts = this.filters.topic.length === 1 ? topicSegments(this.filters.topic[0]) : [];
       return parts.map((label, index) => ({ label, path: parts.slice(0, index + 1).join("/") }));
     },
 
@@ -504,8 +543,9 @@ function taskBoard() {
       try { params = new URLSearchParams(location.search); } catch (_) { return; }
       const filters = defaultFilters();
       for (const [field, name] of Object.entries(FILTER_PARAMS)) {
-        const value = (params.get(name) || "").trim();
-        if (value) filters[field] = field === "topic" ? topicSegments(value).join("/") || "all" : value;
+        const values = params.getAll(name).map(value => (field === "topic" ? topicSegments(value).join("/") : value).trim()).filter(Boolean);
+        if (Array.isArray(filters[field])) filters[field] = values;
+        else if (values.length) filters[field] = values[0];
       }
       this.filters = filters;
       this.showHidden = params.get("hidden") === "1";
@@ -515,11 +555,9 @@ function taskBoard() {
     writeFilterLocation() {
       let params;
       try { params = new URLSearchParams(location.search); } catch (_) { return; }
-      const defaults = defaultFilters();
       for (const [field, name] of Object.entries(FILTER_PARAMS)) {
-        const value = String(this.filters[field] ?? "").trim();
-        if (value && value !== defaults[field]) params.set(name, value);
-        else params.delete(name);
+        params.delete(name);
+        appendParams(params, name, this.filterValues(field));
       }
       for (const [name, on] of [["hidden", this.showHidden], ["review", this.needsReviewOnly]]) {
         if (on) params.set(name, "1");
@@ -879,8 +917,9 @@ function taskBoard() {
         taskPriorityPolicy: this.taskPriorityPolicy,
         taskTypePolicy: this.taskTypePolicy,
         scopeDefaults: {
-          project: this.filters.project === "all" ? "" : this.filters.project,
-          topic: this.filters.topic === "all" ? "" : this.filters.topic,
+          // A card created under several selected projects or topics has no obvious home.
+          project: this.filters.project.length === 1 ? this.filters.project[0] : "",
+          topic: this.filters.topic.length === 1 ? this.filters.topic[0] : "",
         },
         taskOptionsFromDraft: draft => this.taskOptionsFromDraft(draft),
         metadataSnapshot: draft => this.draftMetadataSnapshot(draft),
@@ -1507,13 +1546,13 @@ function taskBoard() {
         ? Object.keys(this.taskTypePolicy)
         : Array.from(new Set(this.tasks.map(t => t.type || t.kind).filter(Boolean)));
       this.projects = Array.from(new Set(this.tasks.map(t => t.project).filter(Boolean))).sort();
-      // A linked project may differ in case or have no cards yet; keep the select showing it.
-      const linked = this.filters.project;
-      if (linked !== "all" && !this.projects.includes(linked)) {
+      // A linked project may differ in case; use the workspace spelling. One with no
+      // cards yet still shows in the filter (see filterChoices).
+      this.filters.project.forEach((linked, index) => {
+        if (this.projects.includes(linked)) return;
         const spelling = this.projects.find(name => name.toLowerCase() === linked.toLowerCase());
-        if (spelling) this.filters.project = spelling;
-        else this.projects = [...this.projects, linked].sort();
-      }
+        if (spelling) this.filters.project.splice(index, 1, spelling);
+      });
     },
 
     applyPayload(payload, fromQuery = false) {
@@ -1593,7 +1632,8 @@ function taskBoard() {
       this.queryLoading = true;
       this.itemRequestsInFlight += 1;
       try {
-        const params = new URLSearchParams(query);
+        const params = new URLSearchParams();
+        for (const [name, value] of Object.entries(query)) appendParams(params, name, value);
         const response = await fetch("/api/items?" + params, { cache: "no-store" });
         const payload = await response.json();
         if (sequence !== this.querySequence) return;

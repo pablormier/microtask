@@ -212,7 +212,9 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
 /* Tasks, Notes and Archive share one grouped card view. */
 /* The view fills main's height so grouped columns can scroll individually. */
 .mt-cards-view { display: flex; flex-direction: column; height: 100%; }
-.mt-cards-view > .mt-view-controls { flex: none; padding: 16px 18px 0; }
+/* Group by sits in a slim row; the board below starts close to it. */
+.mt-cards-view > .mt-view-controls { flex: none; padding: 8px 18px 0; }
+.mt-cards-view > .mt-view-controls + .mt-groups { padding-top: 8px; }
 .mt-card.is-note { min-height: 8rem; }
 .mt-sync-warning {
   flex-basis: 100%;
@@ -323,7 +325,7 @@ textarea.mt-field.mt-task-draft-body { min-height: 48vh; font-family: var(--mt-f
 }
 @media (max-width: 38rem) {
   .mt-groups, .mt-focus-list { padding: 12px; }
-  .mt-cards-view > .mt-view-controls { padding: 12px 12px 0; }
+  .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   .mt-groups:not(.is-horizontal, .is-flat) .mt-column { flex-basis: calc(100vw - 3.5rem); min-width: calc(100vw - 3.5rem); scroll-snap-align: start; }
 }

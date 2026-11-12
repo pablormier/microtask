@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import date, timedelta
 import urllib.error
 import urllib.request
@@ -309,7 +310,6 @@ view_labels:
         self.assertEqual(meta["status_labels"]["review"], "Needs review")
         self.assertEqual(meta["view_labels"]["archive"], "History")
         self.assertEqual(next(item for item in data if item["id"] == custom.stem)["status"], "review")
-        self.assertIn('x-text="statusText(s)"', rendered)
         self.assertIn('x-text="statusText(status)"', rendered)
         self.assertIn('x-text="viewLabel(\'archive\')"', rendered)
         self.assertIn("mt-status-badge", rendered)
@@ -342,68 +342,24 @@ view_labels:
         self.assertIn('<span class="mt-brand-mark" aria-hidden="true">MT</span>', rendered)
         self.assertIn('<span class="mt-brand-wordmark">MicroTask</span>', rendered)
         self.assertIn("<title>MicroTask</title>", rendered)
-        self.assertIn("mt-filter-section", rendered)
-        self.assertIn("mt-filter-heading", rendered)
-        self.assertIn("mt-filter-controls", rendered)
-        self.assertRegex(rendered, r'<button\b[^>]*class="[^"]*\bmt-filter-toggle\b[^"]*"')
-        self.assertIn(':aria-expanded="filtersOpen" aria-controls="mt-filters"', rendered)
+        self.assertIn('<search id="mt-filters" class="mt-filters"', rendered)
+        self.assertEqual(rendered.count('<template x-for="facet in filterFacets()"'), 1)
+        # The Filters toggle shows and hides the chip row and counts active filters.
         self.assertIn('x-show="filtersOpen && filtersApply()"', rendered)
-        self.assertIn('</div>\n      <div id="mt-filters" class="mt-filters"', rendered)
-        self.assertNotIn('<details class="mt-filter-menu"', rendered)
-        filter_styles = re.search(r"\.mt-filters\s*\{([^}]*)\}", rendered)
-        self.assertIsNotNone(filter_styles)
-        self.assertIn("display: flex", filter_styles.group(1))
-        self.assertNotIn("position:", filter_styles.group(1))
-        self.assertNotIn("box-shadow", filter_styles.group(1))
-        filter_group_styles = re.search(r"\.mt-filters\[role=\"group\"\]\s*\{([^}]*)\}", rendered)
-        self.assertIsNotNone(filter_group_styles)
-        self.assertIn("margin: 6px 0 0", filter_group_styles.group(1))
-        self.assertIn("box-shadow: none", filter_group_styles.group(1))
-        self.assertIn("border-top: 1px solid var(--mt-border)", filter_group_styles.group(1))
-        section_styles = re.search(r"\.mt-filter-section\s*\{([^}]*)\}", rendered)
-        self.assertIsNotNone(section_styles)
-        self.assertIn("width: max-content", section_styles.group(1))
-        section_group_styles = re.search(r"\.mt-filter-section\[role=\"group\"\]\s*\{([^}]*)\}", rendered)
-        self.assertIsNotNone(section_group_styles)
-        self.assertIn("margin: 0", section_group_styles.group(1))
-        self.assertIn("border: 0", section_group_styles.group(1))
-        self.assertIn("box-shadow: none", section_group_styles.group(1))
-        controls_styles = re.search(r"\.mt-filter-controls\s*\{([^}]*)\}", rendered)
-        self.assertIsNotNone(controls_styles)
-        self.assertIn("width: max-content", controls_styles.group(1))
-        self.assertIn("activeFilterCount()", rendered)
+        self.assertIn('aria-controls="mt-filters"', rendered)
+        self.assertIn("activeFilterCount() + ' active'", rendered)
+        self.assertEqual(rendered.count("@click=\"clearFilters()\""), 1)
+        self.assertRegex(rendered, r'<button\b[^>]*class="mt-button mt-button-compact mt-filter-chip"')
+        self.assertIn('aria-label="Search tasks"', rendered)
+        self.assertIn(":aria-label=\"'Clear ' + facet.label + ' filter'\"", rendered)
+        self.assertIn(":aria-multiselectable=\"String(facet.multi)\"", rendered)
+        self.assertIn("activeFilterCount() > 0", rendered)
         self.assertIn("clearFilters()", rendered)
-        self.assertIn("filtersOpen: false", rendered)
-        clear_button = re.search(r'<button\b[^>]*class="[^"]*\bmt-filter-clear\b[^"]*"', rendered)
-        self.assertIsNotNone(clear_button)
-        self.assertLess(clear_button.start(), rendered.index('id="mt-filters"'))
+        self.assertIn('<label class="mt-checkbox-filter"><input type="checkbox" x-model="showHidden">', rendered)
         self.assertIn(".mt-title-row .mt-mode-toggle { margin: 0; }", rendered)
-        self.assertIn(".mt-filter-controls .mt-field-status { flex: 0 0 130px; width: 130px; }", rendered)
-        self.assertIn(".mt-filter-controls .mt-field-due { flex: 0 0 130px; width: 130px; }", rendered)
         self.assertIn('role="group" aria-label="Dashboard mode"', rendered)
         self.assertIn(':aria-pressed="mode === \'tasks\'"', rendered)
-        self.assertIn("Find", rendered)
-        self.assertIn("Task", rendered)
-        self.assertIn("Context", rendered)
-        self.assertIn("Time", rendered)
         self.assertIn("mt-sr-only", rendered)
-        self.assertIn('aria-label="Search tasks"', rendered)
-        self.assertIn('placeholder="Search"', rendered)
-        self.assertIn('aria-label="Filter by status"', rendered)
-        self.assertIn('aria-label="Filter by priority"', rendered)
-        self.assertIn('aria-label="Filter by type"', rendered)
-        self.assertIn('aria-label="Filter by project"', rendered)
-        self.assertIn('aria-label="Filter by topic"', rendered)
-        self.assertIn('aria-label="Filter by tag"', rendered)
-        self.assertIn('placeholder="Tag"', rendered)
-        self.assertIn('aria-label="Filter by due date"', rendered)
-        self.assertIn("All statuses", rendered)
-        self.assertIn("All priorities", rendered)
-        self.assertIn("All types", rendered)
-        self.assertIn("All projects", rendered)
-        self.assertIn("All topics", rendered)
-        self.assertIn("All due", rendered)
-        self.assertIn("border-top: 1px solid var(--mt-border)", rendered)
 
     def test_focus_and_board_mode_controls_are_present(self) -> None:
         self.render_dashboard()
@@ -421,8 +377,6 @@ view_labels:
         self.assertIn("mt-cards-view", rendered)
         self.assertNotIn("mt-notes-grid", rendered)
         self.assertNotIn("mt-archive-grid", rendered)
-        self.assertRegex(rendered, r'<button\b[^>]*class="[^"]*\bmt-filter-toggle\b[^"]*"')
-        self.assertIn('id="mt-filters" class="mt-filters"', rendered)
         self.assertIn('.mt-segmented .mt-segment[aria-pressed="true"]', rendered)
         self.assertIn(':aria-pressed="mode === \'tasks\'"', rendered)
         self.assertIn('aria-label="Card kind"', rendered)
@@ -970,7 +924,7 @@ view_labels:
         js_source = json.dumps(load_js(self.root / "tools/web"))
         probe = (
             'global.location = {hash: "#mt-card-a", pathname: "/", '
-            'search: "?layout=horizontal&project=myproj&topic=Work//infra/&q=login&review=1"};\n'
+            'search: "?layout=horizontal&project=myproj&topic=Work//infra/&topic=home&tag=a&tag=b&q=login&review=1"};\n'
             'global.history = {state: {kept: true}, replaceState(state, _, url) {\n'
             '  this.state = state; const u = new URL(url, "http://x");\n'
             '  location.pathname = u.pathname; location.search = u.search; location.hash = u.hash;\n'
@@ -979,29 +933,38 @@ view_labels:
             'getElementById: () => ({textContent: "{}"})};\n'
             f'eval({js_source} + `\n'
             'const app = taskBoard(); app.readFilterLocation();\n'
-            'const read = {filters: {...app.filters}, review: app.needsReviewOnly, hidden: app.showHidden};\n'
+            'const read = {filters: JSON.parse(JSON.stringify(app.filters)), review: app.needsReviewOnly, hidden: app.showHidden};\n'
+            'const unlisted = app.pickerRows("tag").map(row => row.kind + ":" + row.name);\n'
             'app.tasks = [{id: "a", project: "MyProj"}]; app.refreshDerivedLists({});\n'
             'const canonical = app.filters.project;\n'
-            'app.filters.search = ""; app.filters.status = "doing"; app.showHidden = true; app.needsReviewOnly = false;\n'
+            'app.filters.search = ""; app.filters.status = ["doing", "todo"]; app.showHidden = true; app.needsReviewOnly = false;\n'
             'app.writeFilterLocation();\n'
             'const written = location.search + location.hash;\n'
+            'const params = new URLSearchParams(); for (const [k, v] of Object.entries(app.collectionQuery())) appendParams(params, k, v);\n'
+            'const request = params.toString();\n'
             'app.clearFilters(); app.writeFilterLocation();\n'
-            'console.log(JSON.stringify({read, canonical, written, cleared: location.search, state: history.state}));\n'
+            'console.log(JSON.stringify({read, unlisted, canonical, written, request, cleared: location.search, state: history.state}));\n'
             '`);\n'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True, check=False)
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["read"]["filters"]["project"], "myproj")
-        self.assertEqual(payload["read"]["filters"]["topic"], "Work/infra")
+        self.assertEqual(payload["read"]["filters"]["project"], ["myproj"])
+        self.assertEqual(payload["read"]["filters"]["topic"], ["Work/infra", "home"])
+        self.assertEqual(payload["read"]["filters"]["tag"], ["a", "b"])
         self.assertEqual(payload["read"]["filters"]["search"], "login")
-        self.assertEqual(payload["read"]["filters"]["status"], "all")
+        self.assertEqual(payload["read"]["filters"]["status"], [])
         self.assertTrue(payload["read"]["review"])
         self.assertFalse(payload["read"]["hidden"])
-        self.assertEqual(payload["canonical"], "MyProj")
+        # Selected tags that no card uses still get rows, so they can be unticked.
+        self.assertEqual(payload["unlisted"], ["clear:", "option:a", "option:b"])
+        self.assertEqual(payload["canonical"], ["MyProj"])
         self.assertEqual(payload["written"],
-                         "?layout=horizontal&project=MyProj&topic=Work%2Finfra&status=doing&hidden=1#mt-card-a")
+                         "?layout=horizontal&status=doing&status=todo&project=MyProj&topic=Work%2Finfra&topic=home"
+                         "&tag=a&tag=b&hidden=1#mt-card-a")
+        self.assertIn("status=doing&status=todo&", payload["request"])
+        self.assertIn("tag=a&tag=b&", payload["request"])
         self.assertEqual(payload["cleared"], "?layout=horizontal")
         self.assertEqual(payload["state"], {"kept": True})
 
@@ -1010,10 +973,23 @@ view_labels:
         spec = importlib.util.spec_from_file_location("taskweb_url_test", SOURCE_ROOT / "tools/taskweb.py")
         taskweb = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(taskweb)
-        args = taskweb.parse_args(["--project", "Big project", "--topic", "work/infra", "--updated", "older-1y"])
+        args = taskweb.parse_args(["--project", "Big project", "--project", "Other", "--topic", "work/infra",
+                                   "--updated", "older-1y"])
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(args)),
-                         "http://127.0.0.1:8123/?project=Big+project&topic=work%2Finfra&updated=older-1y")
+                         "http://127.0.0.1:8123/?project=Big+project&project=Other&topic=work%2Finfra&updated=older-1y")
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
+
+    def test_mt_web_passes_each_repeated_filter_to_the_dashboard(self) -> None:
+        tasklib = taskweb.tasklib
+        args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated", "1m"])
+        with mock.patch.object(tasklib.subprocess, "run") as run:
+            tasklib.command_web(args)
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--project"):], ["--project", "a", "--project", "b", "--tag", "x", "--updated", "1m"])
+        args.project, args.tag, args.updated = "env-project", None, None  # MT_PROJECT supplies a string
+        with mock.patch.object(tasklib.subprocess, "run") as run:
+            tasklib.command_web(args)
+        self.assertEqual(run.call_args.args[0][-2:], ["--project", "env-project"])
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
         for path in [*self.tasks, self.note]:
@@ -1478,11 +1454,11 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             'const app = taskBoard(); app.collections = collections.normal; app.applyPayload({tasks: typeof data === "undefined" ? [] : data, meta: typeof meta === "undefined" ? {} : meta, statuses: typeof statuses === "undefined" ? [] : statuses}); app.ready = true;\n'
             'const normal = {id: app.focusTask().id, reason: app.focusReason(app.focusTask()), '
             'alerts: app.focusAlerts().map(t => t.id), followups: app.followupTasks().map(t => t.id)};\n'
-            'app.filters.status = "active"; app.collections = collections.active;\n'
+            'app.filters.status = ["active"]; app.collections = collections.active;\n'
             'const active = app.focusTask().id;\n'
             'app.filters.search = "Tomorrow deadline"; app.collections = collections.search;\n'
             'const searched = {id: app.focusTask().id, reason: app.focusReason(app.focusTask())};\n'
-            'app.filters.status = "waiting"; app.filters.search = ""; app.collections = collections.waiting;\n'
+            'app.filters.status = ["waiting"]; app.filters.search = ""; app.collections = collections.waiting;\n'
             'console.log(JSON.stringify({normal, active, searched, blocked: app.focusTask()}));\n'
             '`);'
         )

@@ -37,7 +37,8 @@ class WebCollectionQueryTests(unittest.TestCase):
                 self.assertTrue(matches(item, normalize_query({"search": " needle "}), self.now))
         result = self.results(search="RESEARCH")
         self.assertEqual(result["cards"], ["today", "note"])
-        self.assertEqual(self.results(tag="sear")["cards"], ["today"])
+        self.assertEqual(self.results(tag="research")["cards"], ["today"])
+        self.assertEqual(self.results(tag="sear")["cards"], [])
 
     def test_filters_combine_and_notes_and_archive_ignore_status(self):
         self.cards[0].update(project="Project one", topic="Work")
@@ -55,6 +56,27 @@ class WebCollectionQueryTests(unittest.TestCase):
         self.assertEqual(self.results(topic="learning")["cards"], ["past", "today"])
         self.assertEqual(self.results(topic="LEARNING/rust")["cards"], ["past"])
         self.assertEqual(self.results(topic="learn")["cards"], [])
+
+    def test_a_facet_matches_any_selected_value_and_facets_combine(self):
+        self.cards[0].update(project="Alpha", topic="learning/rust", tags=["a"])
+        self.cards[1].update(project="beta", topic="work", tags=["b"], priority="high")
+        self.assertEqual(self.results(status=["active", "doing"])["cards"], ["past", "today", "note"])
+        self.assertEqual(self.results(project=["ALPHA", "Beta"])["cards"], ["past", "today"])
+        self.assertEqual(self.results(topic=["learning", "work"])["cards"], ["past", "today"])
+        self.assertEqual(self.results(topic=["learning", "garden"])["cards"], ["today"])
+        self.assertEqual(self.results(tag=["A", "b"])["cards"], ["past", "today"])
+        self.assertEqual(self.results(tag=["a", "b"], priority=["high"])["cards"], ["past"])
+        self.assertEqual(self.results(type=["note", "task"], status=["doing"])["cards"], ["past", "note"])
+
+    def test_a_single_string_and_all_still_work_for_every_list_facet(self):
+        self.assertEqual(normalize_query({"status": "doing", "tag": " x ", "due": "all", "topic": ""}),
+                         normalize_query({"status": ["doing"], "tag": ["x"]}))
+        self.assertEqual(normalize_query({"status": "all"})["status"], [])
+        self.assertEqual(self.results(status="doing")["cards"], ["past", "note"])
+
+    def test_due_selection_matches_any_selected_option(self):
+        self.assertEqual(set(self.results(due=["overdue", "today"])["cards"]), {"past", "today"})
+        self.assertEqual(set(self.results(due=["today", "none"])["cards"]), {"today", "done-b", "done-a", "note"})
 
     def test_due_boundaries_include_end_of_day_and_calendar_days_across_dst(self):
         self.assertEqual(self.results(due="overdue")["cards"], ["past"])

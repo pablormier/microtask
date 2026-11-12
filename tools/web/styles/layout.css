@@ -90,44 +90,16 @@
   padding-left: 12px;
   border-left: 1px solid var(--mt-border);
 }
+/* Filter row below the title row, shown by the Filters toggle. It is a plain
+   element, not a role="group", so Pico's group styling never applies to it. */
 .mt-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--mt-border);
-}
-.mt-filters[role="group"] {
-  margin: 6px 0 0;
-  border: 0;
-  border-top: 1px solid var(--mt-border);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.mt-filter-section {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
   gap: 6px;
-  min-width: 0;
-  width: max-content;
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  margin-top: 8px;
 }
-.mt-filter-section[role="group"] {
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
+.mt-filter-search { flex: 0 1 12rem; min-width: 8rem; margin: 0; }
 .mt-filter-heading {
   flex: 0 0 auto;
   margin: 0;
@@ -137,42 +109,6 @@
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.mt-filter-controls {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  width: max-content;
-  max-width: 100%;
-}
-.mt-filter-controls label {
-  flex: 0 0 auto;
-  width: auto;
-  max-width: 100%;
-  margin: 0;
-  color: var(--mt-text);
-  font-size: var(--mt-font-size-sm);
-  line-height: 1.2;
-}
-.mt-filter-controls .mt-filter-search { flex: 0 0 150px; width: 150px; }
-.mt-filter-controls .mt-field-status { flex: 0 0 130px; width: 130px; }
-.mt-filter-controls .mt-field-priority { flex: 0 0 125px; width: 125px; }
-.mt-filter-controls .mt-field-type { flex: 0 0 110px; width: 110px; }
-.mt-filter-controls .mt-field-project { flex: 0 0 130px; width: 130px; }
-.mt-filter-controls .mt-field-topic { flex: 0 0 150px; width: 150px; }
-.mt-filter-controls .mt-field-tag { flex: 0 0 100px; width: 100px; }
-.mt-filter-controls .mt-field-due { flex: 0 0 130px; width: 130px; }
-.mt-filter-controls .mt-field-updated { flex: 0 0 200px; width: 200px; }
-.mt-filter-controls .mt-field-status select,
-.mt-filter-controls .mt-field-priority select,
-.mt-filter-controls .mt-field-type select,
-.mt-filter-controls .mt-field-project select,
-.mt-filter-controls .mt-field-topic input,
-.mt-filter-controls .mt-field-due select,
-.mt-filter-controls .mt-field-updated select,
-.mt-filter-controls .mt-field-tag input { width: 100%; min-width: 0; }
 .mt-demo-banner {
   flex: 1 1 12rem;
   min-width: 8rem;
@@ -194,7 +130,6 @@
   .mt-mode-toggle { max-width: 100%; }
   .mt-demo-banner { flex-basis: 100%; max-width: none; margin-left: 0; }
   .mt-view-indicator { max-width: min(18rem, 42vw); }
-  .mt-filter-section { flex: 0 1 auto; }
 }
 @media (max-width: 38rem) {
   .mt-toolbar { padding: 8px 12px; }
@@ -207,9 +142,11 @@
     scrollbar-width: none;
   }
   .mt-mode-toggle::-webkit-scrollbar { display: none; }
-  .mt-filter-section { flex: 1 1 100%; flex-wrap: wrap; width: auto; }
-  .mt-filter-controls { flex: 1 1 auto; width: auto; }
- .mt-filter-controls .mt-filter-search { flex: 1 1 10rem; width: auto; }
+  .mt-filter-search { flex-basis: 100%; }
+  /* Filter menus span the wrapped row, below it, so chips near the edge stay on screen. */
+  .mt-filters { position: relative; }
+  .mt-filters .mt-filter { position: static; }
+  .mt-filters .mt-filter-menu { right: 0; left: 0; min-width: 0; max-width: none; }
 }
 
 /* Keep workspace text wrapping while busy; Pico's busy style assumes a control. */
