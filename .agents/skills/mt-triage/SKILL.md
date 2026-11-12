@@ -53,10 +53,12 @@ and follow it for this triage only.
 
 ## Propose, then apply
 
-Show the batch as a table: reference, current and proposed title, destination,
-metadata changes with reasons, and any open question. One approval can cover
-the whole batch. New cards split from a capture still need the full proposal
-from the capture workflow.
+Show the batch as one compact table, one row per card: reference, proposed
+title, destination, priority, and due date. Keep cells short. Below the table,
+add a one-line reason only where a choice isn't obvious, and at most one
+short question per card. When a card is reasonably clear, propose your best
+guess instead of asking. One approval can cover the whole batch. New cards
+split from a capture still need the full proposal from the capture workflow.
 
 If the user already approved triage within a scope, apply within it and ask
 about ambiguous cards while continuing with the rest.
@@ -65,5 +67,5 @@ Before each change, read the card again; if it changed, reassess. On a conflict
 or error, stop on that card and report it. Clear `needs_review` on a note only
 after its approved changes are applied.
 
-Finish with the changed references, open questions, and any cards you didn't
-get to.
+Finish briefly: one line per changed card with its reference and new status,
+then any open questions and cards you didn't get to. Don't repeat the reasons.

@@ -97,12 +97,31 @@ installed, and stops when you press Ctrl+C.
 
 ## Working with AI agents
 
-Open your workspace in an agent such as Claude Code or Codex and ask in plain
-language:
+Start your agent inside the workspace from any directory with `mt run`:
+
+```sh
+mt run claude      # or: mt run codex, mt run gemini
+```
+
+Then ask in plain language:
 
 - *"Add a task to renew my passport before March, high priority."*
-- *"Go through my inbox and suggest a status and topic for each card."*
+- *"Triage my inbox."*
 - *"What should I work on next? Start it and keep notes in the card."*
+
+<p align="center">
+  <img src="docs/images/triage.gif" width="900" alt="Running mt run claude, asking Claude Code to triage the inbox, approving its proposed titles, statuses, priorities and dates, and listing the organized tasks">
+</p>
+
+Skills in [`.agents/skills`](.agents/skills) cover the common workflows:
+
+- **[mt-triage](.agents/skills/mt-triage/SKILL.md)** turns raw captures into
+  clear tasks and notes. It proposes a title, status, priority, and dates for
+  each card in a table, and applies them once you approve.
+- **[mt-focus](.agents/skills/mt-focus/SKILL.md)** picks what to work on next
+  for the time and energy you have, and gives a small first step.
+- **[mt-paper-review](.agents/skills/mt-paper-review/SKILL.md)** reads a paper
+  with you, journal-club style, and saves the review as a note.
 
 The agent follows [AGENTS.md](AGENTS.md) and the
 [microtask skill](.agents/skills/microtask/SKILL.md). Codex and Cursor read
