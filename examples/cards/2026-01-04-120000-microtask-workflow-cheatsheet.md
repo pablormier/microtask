@@ -4,7 +4,7 @@ title: microtask workflow cheatsheet
 kind: note
 priority: none
 project: null
-topic: learning
+topic: personal/learning
 due: null
 due_kind: null
 created: '2026-01-04T12:00:00'

@@ -125,7 +125,7 @@ class TopicCliTests(unittest.TestCase):
         roots = self.ok("topic", "list").splitlines()
         self.assertEqual([line for line in roots if "/" in line or "(0)" not in line],
                          ["learning/ (4)", "work/ (2)"])
-        self.assertEqual(roots[0], "admin (0)")  # suggested_topics seed empty roots
+        self.assertIn("personal (0)", roots)  # suggested_topics seed empty roots
         self.assertEqual(self.ok("topic", "list", "learning"), "papers/ (3)\nrust (1)\n")
         self.assertEqual(self.ok("topic", "list", "learning/"), "papers/ (3)\nrust (1)\n")  # as printed above
         self.assertEqual(self.ok("topic", "list", "LEARNING/Papers"), "causality (2)\noptimization (1)\n")
@@ -136,7 +136,7 @@ class TopicCliTests(unittest.TestCase):
         result = self.mt("topic", "list", "nope")
         self.assertEqual((result.returncode, result.stdout), (1, ""))
         self.assertEqual(result.stderr.strip(), "error: unknown topic: nope")
-        self.assertEqual(self.ok("topic", "list", "health"), "")  # suggested_topics counts as known
+        self.assertEqual(self.ok("topic", "list", "personal"), "")  # suggested_topics counts as known
 
     def test_topic_list_tree_draws_connectors(self) -> None:
         self.nested()

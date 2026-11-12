@@ -28,27 +28,21 @@ due_kinds:
   target: "Soft or ideal planning date"
   reminder: "Date to resurface the item, not completion pressure"
 
-suggested_topics:
-  - personal
+suggested_topics:   # where a card belongs; nest with /, e.g. work/project-x, personal/home
   - work
-  - finance
-  - health
-  - admin
-  - learning
-  - home
-  - relationships
+  - personal
 
-suggested_tags:
-  - reading       # read/review an article, paper, book, or link
-  - writing       # create, edit, or produce written output
-  - code          # write, review, or debug code
-  - research      # investigate/explore a topic before deciding
-  - admin         # errands, paperwork, accounts, logistics
-  - followup      # waiting on a nudge/reply from someone
-  - finance       # money: invoices, taxes, payments, budgeting
-  - health        # appointments, fitness, medical
-  - meeting       # schedule/prepare/attend a meeting or call
-  - home          # household, chores, repairs
+suggested_tags:     # what kind of work it is; works across topics
+  - reading       # articles, papers, books, docs
+  - writing       # drafting or editing text
+  - research      # investigating before deciding or building
+  - code          # writing, reviewing, or debugging code
+  - review        # giving feedback: PRs, papers, documents
+  - meeting       # scheduling, preparing, or attending
+  - followup      # waiting on or nudging someone
+  - admin         # forms, accounts, expenses, paperwork
+  - errand        # needs you somewhere in person
+  - quick         # under 15 minutes; good for gaps
 
 default_status: inbox
 default_priority: none

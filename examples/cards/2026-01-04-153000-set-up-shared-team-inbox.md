@@ -6,7 +6,7 @@ status: done
 priority: medium
 type: task
 project: null
-topic: admin
+topic: work
 due: null
 due_kind: null
 created: '2026-01-04T08:00:00'

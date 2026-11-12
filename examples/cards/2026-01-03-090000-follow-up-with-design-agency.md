@@ -14,6 +14,7 @@ updated: '2026-01-03T09:00:00'
 archived: false
 tags:
 - launch
+- followup
 next_action: Wait for their reply; nudge if nothing arrives by the reminder date.
 comments:
 - at: '2026-01-03T17:00:00'

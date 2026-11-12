@@ -6,14 +6,14 @@ status: inbox
 priority: low
 type: idea
 project: null
-topic: personal
+topic: personal/learning
 due: null
 due_kind: null
 created: '2026-01-01T12:00:00'
 updated: '2026-01-01T12:00:00'
 archived: false
 tags:
-- learning
+- research
 next_action: Research local beginner maintenance courses.
 ---
 Take a basic bike maintenance course so routine repairs do not require a shop visit.
