@@ -43,8 +43,8 @@
           </template>
         </article>
 
-        <article class="mt-panel mt-surface">
-          <h2>Follow-ups</h2>
+        <article class="mt-panel mt-surface mt-followups-panel">
+          <h2>Follow-ups <span class="mt-panel-count" x-show="followupTasks().length" x-text="followupTasks().length"></span></h2>
           <template x-if="followupTasks().length === 0">
             <p class="mt-empty">No waiting follow-ups.</p>
           </template>

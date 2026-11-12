@@ -35,10 +35,17 @@
 .mt-focus-alerts h2 { margin-bottom: 2px; }
 .mt-focus-alerts .mt-card-line { overflow-wrap: anywhere; }
 .mt-time-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* The follow-ups panel matches the Focus panel's height: size containment
+   keeps the list from growing the row, and it scrolls only when it overflows. */
+.mt-followups-panel { display: flex; flex-direction: column; }
+.mt-panel-count { margin-left: 4px; color: var(--mt-text); font-variant-numeric: tabular-nums; }
 .mt-followups {
   display: grid;
+  align-content: start;
   gap: 8px;
-  max-height: 11rem;
+  flex: 1 1 auto;
+  min-height: 11rem;
+  contain: size;
   overflow: auto;
 }
 .mt-followup-item {
@@ -312,6 +319,7 @@ textarea.mt-field.mt-task-draft-body { min-height: 48vh; font-family: var(--mt-f
 
 @media (max-width: 70rem) {
   .mt-overview { grid-template-columns: 1fr; padding: 12px 12px 0; }
+  .mt-followups { min-height: 0; contain: none; overflow: visible; }
 }
 @media (max-width: 38rem) {
   .mt-groups, .mt-focus-list { padding: 12px; }
