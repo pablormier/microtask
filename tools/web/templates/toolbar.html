@@ -26,7 +26,7 @@
           <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
         </div>
         <div class="mt-toolbar-actions">
-          <button type="button" class="mt-button mt-filter-toggle" :disabled="!ready" x-show="isCardsView()"
+          <button type="button" class="mt-button mt-filter-toggle" :disabled="!ready" x-show="filtersApply()"
                   :aria-expanded="filtersOpen" aria-controls="mt-filters" :aria-label="'Filters, ' + activeFilterCount() + ' active'"
                   @click="filtersOpen = !filtersOpen">
             <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -36,7 +36,7 @@
             <span>Filters</span>
             <span class="mt-filter-active" x-show="activeFilterCount() > 0" x-text="activeFilterCount() + ' active'"></span>
           </button>
-          <button type="button" class="mt-button mt-filter-clear" x-show="activeFilterCount() > 0" @click="clearFilters()">Clear filters</button>
+          <button type="button" class="mt-button mt-filter-clear" x-show="filtersApply() && activeFilterCount() > 0" @click="clearFilters()">Clear filters</button>
           <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
                   @click="captureComposer.resume(captureContext(), $event)">Resume draft</button>
           <button type="button" class="mt-button mt-button-primary mt-capture-new" @click="beginNewCapture($event)" :disabled="!ready">
@@ -48,7 +48,7 @@
         </div>
       </div>
       <div id="mt-filters" class="mt-filters" role="group" aria-label="Search and filter options"
-           x-show="filtersOpen && isCardsView()">
+           x-show="filtersOpen && filtersApply()">
         <section class="mt-filter-section" role="group" aria-labelledby="mt-filter-find">
           <span class="mt-filter-heading" id="mt-filter-find">Find</span>
           <div class="mt-filter-controls">

@@ -55,6 +55,11 @@ assert.equal(editor.persist(ctx),true);
 assert.equal(editor.persisted,true);
 assert.equal(rows.length,1);
 assert.equal(editor.canSave(ctx),true);
+assert.equal(editor.draft.taskOptions.project,'');
+const scoped=createCaptureComposer();
+scoped.beginNew({...ctx,scopeDefaults:{project:'launch',topic:'work/web'}},null,'task');
+assert.equal(scoped.draft.taskOptions.project,'launch');
+assert.equal(scoped.draft.taskOptions.topic,'work/web');
 """)
 
     def test_failed_property_save_keeps_values_and_reports_component_error(self) -> None:

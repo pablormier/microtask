@@ -124,6 +124,28 @@ Archive, and Deadlines views. You can edit card content and properties, comment,
 and track time there. It edits the same files as the CLI, and nothing leaves
 your machine. `mt show REF` opens a read-only preview of a single card.
 
+Board filters are kept in the page address, so a reload keeps them and a
+bookmark returns to the same board. They apply to every tab except Drafts, and
+a card created while the board is filtered to a project or topic starts there.
+To keep one workspace for many efforts and open the board for just one of them:
+
+```sh
+mt web --project release              # or --topic work/infra, --tag review
+mt web --project release --port 8765  # a fixed port keeps bookmarks working
+```
+
+To stay in one project from the command line, set `MT_PROJECT` (or
+`MT_TOPIC`) for the shell. `add`, `note`, `list`, `search`, `focus`, `view`,
+`bulk-edit`, and `web` then behave as if you had passed `--project`, and print a
+`Scope:` line so you can tell. An explicit `--project` or `--topic` wins.
+
+```sh
+export MT_PROJECT=release
+mt add "Write release notes"          # filed under project release
+mt list                               # only release cards
+unset MT_PROJECT
+```
+
 ![A task open in the dashboard, with its Markdown content and properties](images/card.webp)
 
 ## Drafts
@@ -152,8 +174,40 @@ mt repo add work "$HOME/work-tasks"   # short alias, stored on this machine
 mt -R work list                       # -R goes before the command
 ```
 
+For agents working in another project to track their work in your workspace,
+add a section to that project's `AGENTS.md`. `--project` files their cards
+under that project and limits what they see to it:
+
+```sh
+mt agent-setup --project myapp >> ~/code/myapp/AGENTS.md
+```
+
+The section tells agents to run `mt` and to read the rules and skills with
+`mt run cat`, so it contains no paths from your machine and is safe to commit.
+It needs `mt` installed on each machine where the agents run.
+
+To give a project its own workspace, for example one where agents developing
+a package plan their work and someone else supervises it, create a second
+workspace outside the project. Plain `mt` keeps running your personal one:
+
+```sh
+mt init ~/work/pkg-tasks                                  # downloads microtask
+mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git # and shares it with mt sync
+mt init ~/work/pkg-tasks --local                          # offline copy of your mt
+mt repo add pkg ~/work/pkg-tasks
+mt -R pkg agent-setup >> ~/code/my-package/AGENTS.md
+```
+
+The default downloads the latest microtask, ready for `mt update`. `--local`
+works without internet: it copies the app and your settings from the `mt` you
+run, never your cards, drafts, or local state, and has no Git until you add it.
+For a workspace that is not the `mt` on PATH, the section uses `mt -R pkg`, so
+run `mt repo add pkg PATH` on each machine where the agents run.
+
 A **view** is a disposable, editable copy of part of a workspace, for focused
-work or experiments. Edits stay in the copy and are never written back:
+work or experiments. Edits stay in the copy and are never written back, so to
+see or work on one project's live cards, filter instead (`mt list --project`,
+`mt web --project`):
 
 ```sh
 mt view --project release             # creates .mt/views/release

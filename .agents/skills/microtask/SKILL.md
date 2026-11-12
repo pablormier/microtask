@@ -38,6 +38,9 @@ mt read @REF [@REF2 ...] --json     # properties, body, ref, path, content_hash
 Seeing a card for context does not make it yours to change, and reading a
 task does not mean you should do its work.
 
+A `Scope:` line on stderr means `MT_PROJECT` or `MT_TOPIC` limits what you see
+and files new cards there. Mention it when a card seems missing.
+
 ## Create
 
 Follow [capture and review](references/capture.md): search for duplicates,

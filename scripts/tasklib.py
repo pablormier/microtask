@@ -4542,6 +4542,55 @@ def add_card_metadata_arguments(command: argparse.ArgumentParser, *, editing: bo
                              help=f"clear {description}")
 
 
+def portable_invocation() -> tuple[str, str | None]:
+    """Return a path-free command that reaches this workspace, and the alias it uses.
+
+    Plain mt when this workspace is the one on PATH, otherwise mt -R ALIAS.
+    Raises ValueError when neither reaches it.
+    """
+    on_path = shutil.which("mt")
+    if on_path and Path(on_path).resolve() == (REPO_ROOT / "mt").resolve():
+        return "mt", None
+    here = REPO_ROOT.resolve()
+    for name, path in sorted(load_repo_aliases().items()):
+        if Path(path).resolve() == here:
+            return f"mt -R {name}", name
+    raise ValueError(f"give this workspace a name first: mt repo add NAME {shlex.quote(str(here))}")
+
+
+def command_agent_setup(args: argparse.Namespace) -> int:
+    try:
+        mt, alias = portable_invocation()
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    scope = [f"MT_PROJECT={shlex.quote(args.project)}"] if args.project else []
+    scope += [f"MT_TOPIC={shlex.quote(args.topic)}"] if args.topic else []
+    run = " ".join([*scope, mt, "COMMAND"])
+    intro = f"Plan and track this project's work as microtask cards. Run every command as `{run}`."
+    if alias:
+        intro += f" If the `{alias}` alias is unknown, ask the user to run `mt repo add {alias} PATH` on this machine."
+    check = ("Each command prints `Workspace:` and `Scope:` lines on stderr"
+             if scope else "Each command prints a `Workspace:` line on stderr")
+    lines = [
+        "## Task tracking with microtask",
+        "",
+        intro,
+        "",
+        f"{check}. Stop and ask if they are missing or look wrong." if scope
+        else f"{check}. Stop and ask if it is missing or looks wrong.",
+        "",
+        f"Before your first command, read the rules with `{mt} run cat AGENTS.md`, then the main skill "
+        f"with `{mt} run cat .agents/skills/microtask/SKILL.md`. The other skills are in the same folder "
+        f"(`{mt} run ls .agents/skills`). Where they say `./mt`, use `{mt}`.",
+        "",
+        "Claim work under your own name with `--by NAME` or `MT_USERNAME=NAME`, so other agents "
+        "and the people supervising you can tell who is doing what.",
+    ]
+    print("\n".join(lines))
+    return 0
+
+
 def command_info(args: argparse.Namespace) -> int:
     repository = git_ops.repository_info(REPO_ROOT)
     tasks = discover("task")
@@ -4809,26 +4858,28 @@ def validated_view_items(records: object) -> list[tuple[str, str, bytes, str]]:
     return selected
 
 
-def copy_view_application(candidate: Path) -> None:
-    """Copy the self-contained application without source data or local state."""
-    for name in ("mt", "mt-policy.yaml"):
-        shutil.copy2(REPO_ROOT / name, candidate / name)
-    for name in ("install.sh", "README.md", "AGENTS.md", ".gitignore"):
-        source = REPO_ROOT / name
-        if source.is_file():
-            shutil.copy2(source, candidate / name)
-    local_policy = REPO_ROOT / "mt-policy.local.yaml"
-    if local_policy.is_file():
-        shutil.copy2(local_policy, candidate / local_policy.name)
-    for name in ("scripts", "tools", "templates", ".agents", ".github"):
-        source = REPO_ROOT / name
-        if source.is_dir():
-            shutil.copytree(
-                source,
-                candidate / name,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.swp"),
-            )
-    (candidate / "cards").mkdir()
+# Application files a new workspace copy needs. A fixed list, so cards, drafts,
+# local state, and anything else kept in the workspace folder never leave it.
+APPLICATION_FILES = ("mt", "mt-policy.yaml", "install.sh", "README.md", "LICENSE", "AGENTS.md",
+                     "CLAUDE.md", "GEMINI.md", "CONTRIBUTING.md", ".gitignore")
+APPLICATION_FOLDERS = ("scripts", "tools", "templates", ".agents")
+
+
+def copy_application(target: Path, *, local_policy: bool = False, examples: bool = False) -> None:
+    """Copy the self-contained application into TARGET with an empty cards/ folder.
+
+    Views keep this machine's mt-policy.local.yaml; a new workspace gets the demo examples.
+    """
+    files = APPLICATION_FILES + (("mt-policy.local.yaml",) if local_policy else ())
+    folders = APPLICATION_FOLDERS + (("examples",) if examples else ())
+    for name in files:
+        if (REPO_ROOT / name).is_file():
+            shutil.copy2(REPO_ROOT / name, target / name)
+    for name in folders:
+        if (REPO_ROOT / name).is_dir():
+            shutil.copytree(REPO_ROOT / name, target / name,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.swp", ".env"))
+    (target / "cards").mkdir()
 
 
 def create_view(args: argparse.Namespace) -> int:
@@ -4876,7 +4927,7 @@ def create_view(args: argparse.Namespace) -> int:
             return 2
         selected = filtered
 
-        copy_view_application(work_root)
+        copy_application(work_root, local_policy=True)
         items: list[dict[str, str]] = []
         for kind, source_path, raw, content_hash in selected:
             filename = Path(source_path).name
@@ -4990,6 +5041,23 @@ def command_repo_remove(args: argparse.Namespace) -> int:
     write_repo_aliases(aliases)
     print(f"Removed repository alias: {args.name}\t{path}")
     return 0
+
+
+# Commands whose --project/--topic select cards, plus add/note, where they file new ones.
+SCOPED_COMMANDS = {"add", "note", "list", "search", "focus", "view", "bulk-edit", "web"}
+
+
+def apply_env_scope(args: argparse.Namespace) -> list[str]:
+    """Default --project/--topic from MT_PROJECT/MT_TOPIC; explicit options win."""
+    if args.command not in SCOPED_COMMANDS:
+        return []
+    applied = []
+    for field, variable in (("project", "MT_PROJECT"), ("topic", "MT_TOPIC")):
+        value = os.environ.get(variable, "").strip()
+        if value and hasattr(args, field) and getattr(args, field) is None:
+            setattr(args, field, value)
+            applied.append(f"{field} {value} ({variable})")
+    return applied
 
 
 def show_workspace(*, command: str | None = None) -> None:
@@ -5339,6 +5407,44 @@ def command_draft_save(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_init(args: argparse.Namespace) -> int:
+    destination = Path(args.directory).expanduser().resolve()
+    if not args.local:
+        command = ["bash", str(REPO_ROOT / "install.sh"), "--no-path", str(destination)]
+        if args.origin:
+            command.append(args.origin)
+        return subprocess.run(command, check=False).returncode
+    if args.origin:
+        print("error: --local copies files without Git, so it cannot connect ORIGIN-URL; "
+              "see 'mt init --help'", file=sys.stderr)
+        return 2
+    if destination.exists():
+        if validate_repo_workspace(destination) is None:
+            print(f"{destination} is already a microtask workspace; nothing was copied.")
+            return 0
+        print(f"error: {destination} already exists and is not a microtask workspace", file=sys.stderr)
+        return 1
+    if not destination.parent.is_dir():
+        print(f"error: parent folder does not exist: {destination.parent}", file=sys.stderr)
+        return 1
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+    try:
+        copy_application(staging, examples=True)
+        (staging / "cards" / ".gitkeep").touch()
+        staging.chmod(0o755)
+        os.rename(staging, destination)
+    except OSError as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"error: could not create {destination}: {error}", file=sys.stderr)
+        return 1
+    print(f"Copied microtask from {REPO_ROOT} without network access, with your settings "
+          "(mt-policy.yaml) and no cards. It has no Git yet; see 'mt init --help' to add sync and updates.",
+          flush=True)
+    # The installer checks the copy and prints the same next steps as the online path.
+    return subprocess.run(["bash", str(destination / "install.sh"), "--no-path", str(destination)],
+                          check=False).returncode
+
+
 def command_web(args: argparse.Namespace) -> int:
     command = [sys.executable, str(REPO_ROOT / "tools" / "taskweb.py")]
     if args.no_open:
@@ -5347,10 +5453,16 @@ def command_web(args: argparse.Namespace) -> int:
         command.extend(["--host", args.host])
     if args.port is not None:
         command.extend(["--port", str(args.port)])
+    for option in WEB_FILTERS:
+        if getattr(args, option):
+            command.extend([f"--{option}", getattr(args, option)])
     try:
         return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
     except KeyboardInterrupt:
         return 130
+
+
+WEB_FILTERS = ("project", "topic", "tag")
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
@@ -5358,6 +5470,9 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument("--host", default="127.0.0.1", help="server host; defaults to 127.0.0.1")
     parser.add_argument("--port", type=int, default=0, help="server port; defaults to an available port")
+    parser.add_argument("--project", help="open the board filtered to this project")
+    parser.add_argument("--topic", metavar="PATH", help="open the board filtered to this topic and everything under it")
+    parser.add_argument("--tag", help="open the board filtered to this tag")
 
 
 class MtArgumentParser(argparse.ArgumentParser):
@@ -5401,7 +5516,9 @@ def parser() -> argparse.ArgumentParser:
         epilog="Capture with 'mt add <text>', 'mt note <text>', or guided 'mt capture'. "
                "Use 'mt <command> --help' for command-specific options and matching behavior. "
                "For metadata and body changes, see 'mt edit --help'; "
-               "for configured values and defaults, use 'mt policy --json'.",
+               "for configured values and defaults, use 'mt policy --json'. "
+               "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, view, bulk-edit, "
+               "and web to one project or topic; an explicit --project or --topic wins.",
     )
     root.add_argument(
         "-R",
@@ -5414,6 +5531,36 @@ def parser() -> argparse.ArgumentParser:
 
     info = sub.add_parser("info", help="show workspace, Git remotes, and task counts")
     info.set_defaults(func=command_info)
+
+    init = sub.add_parser(
+        "init", help="create another workspace, e.g. for a project, without changing which mt you run",
+        description="Create a new workspace in DIRECTORY, for example one where a project's agents track their "
+                    "work. Your shell config and plain mt stay as they are. By default it runs this workspace's "
+                    "install.sh --no-path, which clones microtask from the internet (latest version, ready for "
+                    "mt update, and for mt sync when ORIGIN-URL is given). --local works offline: it copies "
+                    "this workspace's application files and settings, never its cards, drafts, or local state. "
+                    "A --local copy has no Git; to add sync and updates later, run git init there, commit, "
+                    "and run its ./install.sh --no-path. An existing workspace is left unchanged; any other "
+                    "existing path is refused.",
+    )
+    init.add_argument("directory", metavar="DIRECTORY", help="folder to create")
+    init.add_argument("origin", nargs="?", metavar="ORIGIN-URL",
+                      help="private repository for mt sync (not with --local)")
+    init.add_argument("--local", action="store_true",
+                      help="copy this workspace's application instead of downloading it; works offline")
+    init.set_defaults(func=command_init)
+
+    agent_setup = sub.add_parser(
+        "agent-setup", help="print instructions for agents in another project to use this workspace",
+        description="Print a Markdown block for another project's AGENTS.md or CLAUDE.md. It tells agents "
+                    "working there how to run this workspace's mt and read its rules and skills, without "
+                    "absolute paths, so the block is safe to commit. It uses plain mt when this workspace is "
+                    "the mt on PATH, otherwise mt -R ALIAS; give the workspace an alias first with "
+                    "mt repo add NAME PATH. Example: mt agent-setup --project myapp >> AGENTS.md",
+    )
+    agent_setup.add_argument("--project", help="ask agents to scope every command to this project (MT_PROJECT)")
+    agent_setup.add_argument("--topic", metavar="PATH", help="ask agents to scope every command to this topic (MT_TOPIC)")
+    agent_setup.set_defaults(func=command_agent_setup)
 
     run = sub.add_parser(
         "run",
@@ -5914,7 +6061,11 @@ def parser() -> argparse.ArgumentParser:
     validate.set_defaults(func=command_validate)
 
 
-    web = sub.add_parser("web", help="open the local web dashboard")
+    web = sub.add_parser(
+        "web", help="open the local web dashboard",
+        description="Open the local web dashboard. Board filters are kept in the page address, so a "
+                    "reload keeps them; --project, --topic, and --tag open the board already filtered.",
+    )
     add_web_arguments(web)
     web.set_defaults(func=command_web)
 
@@ -5951,6 +6102,7 @@ def main() -> int:
         return 2
     root_parser = parser()
     args = root_parser.parse_args(arguments)
+    scope = apply_env_scope(args)
     if args.command == "run":
         if args.argv and args.argv[0] == "--":
             args.argv = args.argv[1:]
@@ -6075,6 +6227,8 @@ def main() -> int:
         "comment", "move", "convert", "done", "delete", "sync", "validate", "draft",
     }:
         show_workspace(command=args.command)
+    if scope:
+        print("Scope: " + ", ".join(scope), file=sys.stderr)
     return args.func(args)
 
 

@@ -4,12 +4,27 @@
 #   ./install.sh                    inside a cloned workspace: set it up here
 #   install.sh [DIR] [ORIGIN-URL]   create DIR (default ~/todo); if ORIGIN-URL
 #                                   already holds a workspace, clone it instead
+#   --no-path (or MT_NO_PATH=1)     leave the shell config alone, so the mt
+#                                   that new terminals run stays the same; use
+#                                   this for an extra workspace, e.g. a project's
 #
 # Safe to run again: it only adds what is missing.
 set -euo pipefail
 
 repository="${MT_UPSTREAM_URL:-https://github.com/pablormier/microtask.git}"
 archive_url="${MT_ARCHIVE_URL:-https://github.com/pablormier/microtask/archive/refs/heads/main.tar.gz}"
+
+add_to_path=1
+[[ "${MT_NO_PATH:-}" != 1 ]] || add_to_path=""
+arguments=()
+for argument in "$@"; do
+  case "$argument" in
+    --no-path) add_to_path="" ;;
+    -*) echo "error: unknown option $argument" >&2; exit 2 ;;
+    *) arguments+=("$argument") ;;
+  esac
+done
+set -- ${arguments[@]+"${arguments[@]}"}
 
 is_workspace() {
   [[ -x "$1/mt" && -f "$1/scripts/tasklib.py" ]]
@@ -78,6 +93,18 @@ setup_workspace() {
       echo "  git config --global user.name \"Your Name\""
       echo "  git config --global user.email \"you@example.com\""
     fi
+  fi
+
+  if [[ -z "$add_to_path" ]]; then
+    if ! "$dir/mt" validate >/dev/null 2>&1; then
+      echo "warning: workspace validation reported problems; run '$dir/mt validate' for details" >&2
+    fi
+    printf '\nmicrotask is ready in %s.\n' "$dir"
+    printf 'Your shell config and the mt on PATH are unchanged. Run this workspace as:\n\n'
+    printf '  %s/mt list\n\n' "$dir"
+    printf 'or give it a short name for mt -R:\n\n  mt repo add NAME %s\n\n' "$dir"
+    printf 'To let agents in another project use it, see: %s/mt agent-setup --help\n' "$dir"
+    return 0
   fi
 
   # Persist PATH for new terminals in the file each shell actually reads.
@@ -279,4 +306,6 @@ if [[ -x "$destination/mt" ]]; then
 else
   printf '\nInstalled microtask in %s.\n' "$destination"
 fi
-printf 'Create your first task:\n\n  mt add "Call dentist about appointment"\n  mt list\n'
+if [[ -n "$add_to_path" ]]; then
+  printf 'Create your first task:\n\n  mt add "Call dentist about appointment"\n  mt list\n'
+fi

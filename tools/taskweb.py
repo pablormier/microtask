@@ -14,7 +14,7 @@ import secrets
 import subprocess
 import sys
 import uuid
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -844,7 +844,13 @@ def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, di
     return HTTPStatus.NOT_FOUND, {"error": "not found"}
 
 
-def serve_dashboard(host: str, port: int, *, no_open: bool) -> int:
+def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
+    """Return the dashboard address, opening on the given board filters."""
+    query = urlencode({key: value for key, value in (filters or {}).items() if value})
+    return f"http://{host}:{port}/" + (f"?{query}" if query else "")
+
+
+def serve_dashboard(host: str, port: int, *, no_open: bool, filters: dict | None = None) -> int:
     token = secrets.token_urlsafe(24)
     try:
         server = TaskWebServer((host, port), token)
@@ -852,7 +858,7 @@ def serve_dashboard(host: str, port: int, *, no_open: bool) -> int:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
     actual_host, actual_port = server.server_address
-    url = f"http://{actual_host}:{actual_port}/"
+    url = dashboard_url(actual_host, actual_port, filters)
     if not no_open:
         tasklib.open_in_browser(url)
     print(url, flush=True)
@@ -873,7 +879,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    return serve_dashboard(args.host, args.port, no_open=args.no_open)
+    filters = {name: getattr(args, name) for name in tasklib.WEB_FILTERS}
+    return serve_dashboard(args.host, args.port, no_open=args.no_open, filters=filters)
 
 
 if __name__ == "__main__":

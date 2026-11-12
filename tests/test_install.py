@@ -153,6 +153,32 @@ class InstallTest(unittest.TestCase):
             self.assertIn("git config --global user.name", result.stdout)
             self.assertIn(f"microtask is ready in {workspace}", result.stdout)
 
+    def test_no_path_sets_up_an_extra_workspace_without_touching_the_shell_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = self.make_workspace_remote(root)
+            env = self.setup_env(root, remote)
+            workspace = root / "project-tasks"
+            self.git("clone", "--quiet", str(remote), str(workspace))
+            zshrc = root / "home" / ".zshrc"
+            zshrc.write_text('# microtask\nexport PATH="$HOME/todo:$PATH"\n')
+            before = zshrc.read_text()
+
+            for command, extra in (([str(workspace / "install.sh"), "--no-path"], {}),
+                                   ([str(workspace / "install.sh")], {"MT_NO_PATH": "1"})):
+                result = subprocess.run(command, env={**env, **extra}, cwd=root,
+                                        text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(zshrc.read_text(), before)
+                self.assertIn(f"{workspace}/mt list", result.stdout)
+                self.assertIn(f"mt repo add NAME {workspace}", result.stdout)
+                self.assertEqual(self.git("-C", str(workspace), "remote", "get-url", "upstream"), str(remote))
+
+            result = subprocess.run([str(workspace / "install.sh"), "--no-pth"], env=env, cwd=root,
+                                    text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown option --no-pth", result.stderr)
+
     def make_local_workspace(self, folder: Path) -> Path:
         (folder / "scripts").mkdir(parents=True)
         (folder / "scripts" / "tasklib.py").write_text("")

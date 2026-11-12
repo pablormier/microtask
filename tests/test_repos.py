@@ -154,6 +154,86 @@ class RepositorySelectorTests(unittest.TestCase):
         self.assertIn("Selected workspace item", target_text)
         self.assertNotIn("Launcher workspace item", target_text)
 
+    def test_agent_setup_prints_path_free_instructions_for_the_selected_workspace(self) -> None:
+        unnamed = self.run_mt("-R", str(self.target), "agent-setup")
+        self.assertEqual(unnamed.returncode, 1)
+        self.assertIn("mt repo add NAME", unnamed.stderr)
+        self.assertEqual(unnamed.stdout, "")
+
+        self.assertEqual(self.run_mt("repo", "add", "pkg", str(self.target)).returncode, 0)
+        aliased = self.run_mt("-R", "pkg", "agent-setup", "--project", "my package")
+        self.assertEqual(aliased.returncode, 0, aliased.stderr)
+        self.assertIn("`MT_PROJECT='my package' mt -R pkg COMMAND`", aliased.stdout)
+        self.assertIn("`mt repo add pkg PATH`", aliased.stdout)
+        self.assertIn("`mt -R pkg run cat AGENTS.md`", aliased.stdout)
+        self.assertIn("`Scope:`", aliased.stdout)
+
+        bin_dir = self.home / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "mt").symlink_to(self.launcher / "mt")
+        env = {**self.env, "PATH": f"{bin_dir}{os.pathsep}{self.env['PATH']}"}
+        on_path = self.run_mt("agent-setup", env=env)
+        self.assertEqual(on_path.returncode, 0, on_path.stderr)
+        self.assertIn("`mt COMMAND`", on_path.stdout)
+        self.assertIn("`mt run cat .agents/skills/microtask/SKILL.md`", on_path.stdout)
+        self.assertNotIn("-R", on_path.stdout)
+        self.assertNotIn("MT_PROJECT", on_path.stdout)
+
+        for result in (aliased, on_path):
+            self.assertNotIn(str(self.home), result.stdout)
+        # The rules the instructions point at resolve inside the selected workspace.
+        rules = self.run_mt("-R", "pkg", "run", "cat", "AGENTS.md")
+        self.assertEqual(rules.stdout, (self.target / "AGENTS.md").read_text())
+
+    def test_init_local_copies_the_application_but_never_workspace_data(self) -> None:
+        source = self.launcher
+        (source / "cards" / "2026-01-01-120000-private.md").write_text("SECRET-7f3a card\n")
+        (source / "drafts").mkdir(exist_ok=True)
+        (source / "drafts" / "private.md").write_text("SECRET-7f3a draft\n")
+        (source / ".mt").mkdir(exist_ok=True)
+        (source / ".mt" / "focus.json").write_text("{}")
+        (source / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: false\n")
+        (source / "my-notes.txt").write_text("SECRET-7f3a notes\n")
+        destination = self.home / "project tasks"
+
+        result = self.run_mt("init", str(destination), "--local")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([path.name for path in (destination / "cards").iterdir()], [".gitkeep"])
+        for private in ("drafts", ".mt/focus.json", "mt-policy.local.yaml", "my-notes.txt", ".git"):
+            self.assertFalse((destination / private).exists(), private)
+        self.assertTrue((destination / ".agents/skills/microtask/SKILL.md").is_file())
+        self.assertEqual((destination / "mt-policy.yaml").read_text(), (source / "mt-policy.yaml").read_text())
+        self.assertTrue(os.access(destination / "mt", os.X_OK))
+        self.assertNotIn("SECRET-7f3a", "".join(p.read_text(errors="ignore") for p in destination.rglob("*") if p.is_file()))
+        added = subprocess.run([str(destination / "mt"), "add", "Project task"], cwd=self.home,
+                               env=self.env, text=True, capture_output=True, check=False)
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.startswith(".project")], [])
+
+        again = self.run_mt("init", str(destination), "--local")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("already a microtask workspace", again.stdout)
+        self.assertEqual(len(list((destination / "cards").glob("*.md"))), 1)
+        other = self.home / "code"
+        other.mkdir()
+        refused = self.run_mt("init", str(other), "--local")
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(list(other.iterdir()), [])
+        self.assertEqual(self.run_mt("init", str(self.home / "x"), "git@example.com:me/x.git",
+                                     "--local").returncode, 2)
+
+    def test_init_without_local_runs_the_installer_without_changing_path(self) -> None:
+        log = self.home / "install.log"
+        installer = self.launcher / "install.sh"
+        installer.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "{log}"\n')
+
+        result = self.run_mt("init", "~/project-tasks", "git@example.com:me/tasks.git")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(log.read_text().splitlines(),
+                         ["--no-path", str(self.home / "project-tasks"), "git@example.com:me/tasks.git"])
+
     def test_alias_lifecycle_and_stale_target_errors(self) -> None:
         added = self.run_mt("repo", "add", "work", str(self.target))
         duplicate = self.run_mt("repo", "add", "work", str(self.launcher))

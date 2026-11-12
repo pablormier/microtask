@@ -347,7 +347,7 @@ view_labels:
         self.assertIn("mt-filter-controls", rendered)
         self.assertRegex(rendered, r'<button\b[^>]*class="[^"]*\bmt-filter-toggle\b[^"]*"')
         self.assertIn(':aria-expanded="filtersOpen" aria-controls="mt-filters"', rendered)
-        self.assertIn('x-show="filtersOpen && isCardsView()"', rendered)
+        self.assertIn('x-show="filtersOpen && filtersApply()"', rendered)
         self.assertIn('</div>\n      <div id="mt-filters" class="mt-filters"', rendered)
         self.assertNotIn('<details class="mt-filter-menu"', rendered)
         filter_styles = re.search(r"\.mt-filters\s*\{([^}]*)\}", rendered)
@@ -962,6 +962,59 @@ view_labels:
         self.assertTrue(payload["stop"])
         self.assertTrue(payload["actionError"])
         self.assertEqual(payload["message"], "timer state changed; refresh and retry")
+
+    def test_board_filters_round_trip_through_the_page_address(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        js_source = json.dumps(load_js(self.root / "tools/web"))
+        probe = (
+            'global.location = {hash: "#mt-card-a", pathname: "/", '
+            'search: "?layout=horizontal&project=myproj&topic=Work//infra/&q=login&review=1"};\n'
+            'global.history = {state: {kept: true}, replaceState(state, _, url) {\n'
+            '  this.state = state; const u = new URL(url, "http://x");\n'
+            '  location.pathname = u.pathname; location.search = u.search; location.hash = u.hash;\n'
+            '}};\n'
+            'global.document = {documentElement: {dataset: {}}, '
+            'getElementById: () => ({textContent: "{}"})};\n'
+            f'eval({js_source} + `\n'
+            'const app = taskBoard(); app.readFilterLocation();\n'
+            'const read = {filters: {...app.filters}, review: app.needsReviewOnly, hidden: app.showHidden};\n'
+            'app.tasks = [{id: "a", project: "MyProj"}]; app.refreshDerivedLists({});\n'
+            'const canonical = app.filters.project;\n'
+            'app.filters.search = ""; app.filters.status = "doing"; app.showHidden = true; app.needsReviewOnly = false;\n'
+            'app.writeFilterLocation();\n'
+            'const written = location.search + location.hash;\n'
+            'app.clearFilters(); app.writeFilterLocation();\n'
+            'console.log(JSON.stringify({read, canonical, written, cleared: location.search, state: history.state}));\n'
+            '`);\n'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True, check=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["read"]["filters"]["project"], "myproj")
+        self.assertEqual(payload["read"]["filters"]["topic"], "Work/infra")
+        self.assertEqual(payload["read"]["filters"]["search"], "login")
+        self.assertEqual(payload["read"]["filters"]["status"], "all")
+        self.assertTrue(payload["read"]["review"])
+        self.assertFalse(payload["read"]["hidden"])
+        self.assertEqual(payload["canonical"], "MyProj")
+        self.assertEqual(payload["written"],
+                         "?layout=horizontal&project=MyProj&topic=Work%2Finfra&status=doing&hidden=1#mt-card-a")
+        self.assertEqual(payload["cleared"], "?layout=horizontal")
+        self.assertEqual(payload["state"], {"kept": True})
+
+    def test_web_command_opens_the_board_on_the_given_filters(self) -> None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("taskweb_url_test", SOURCE_ROOT / "tools/taskweb.py")
+        taskweb = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(taskweb)
+        args = taskweb.parse_args(["--project", "Big project", "--topic", "work/infra"])
+        filters = {"project": args.project, "topic": args.topic, "tag": args.tag}
+        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, filters),
+                         "http://127.0.0.1:8123/?project=Big+project&topic=work%2Finfra")
+        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
         for path in [*self.tasks, self.note]:

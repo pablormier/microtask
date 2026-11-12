@@ -102,6 +102,28 @@ class TopicCliTests(unittest.TestCase):
         search = json.loads(self.ok("search", "Deep", "--topic", "learning", "--all", "--json"))
         self.assertEqual([item["title"] for item in search], ["Deep"])
 
+    def test_environment_scope_files_and_selects_cards_until_an_option_overrides_it(self) -> None:
+        import os
+        scope = {**os.environ, "MT_PROJECT": "launch", "MT_TOPIC": "work"}
+
+        def scoped(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, capture_output=True,
+                                  text=True, stdin=subprocess.DEVNULL, env=scope)
+
+        created = scoped("add", "--kind", "note", "--title", "Scoped", "--json")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.assertIn("Scope: project launch (MT_PROJECT), topic work (MT_TOPIC)", created.stderr)
+        properties = json.loads(self.ok("read", json.loads(created.stdout)["ref"], "--json"))["properties"]
+        self.assertEqual((properties["project"], properties["topic"]), ("launch", "work"))
+        self.add("Elsewhere", "home")
+        listed = scoped("list", "--all", "--json")
+        self.assertEqual([item["title"] for item in json.loads(listed.stdout)], ["Scoped"])
+        override = scoped("list", "--all", "--json", "--topic", "home", "--project", "LAUNCH")
+        self.assertEqual(json.loads(override.stdout), [])
+        self.assertNotIn("Scope:", override.stderr)
+        self.assertEqual(sorted(item["title"] for item in json.loads(self.ok("list", "--all", "--json"))),
+                         ["Elsewhere", "Scoped"])
+
     def test_topic_list_shows_tree_with_implied_parents_and_suggestions(self) -> None:
         self.add("A", "learning/rust/async")
         self.add("B", "learning")

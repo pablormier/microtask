@@ -42,6 +42,10 @@ def matches(item, query, now, *, status=True):
             # A topic filter selects the path and everything under it.
             if not card_format.topic_within(value, query[key]):
                 return False
+        elif key == "project":
+            # Match `mt list --project`, so `mt web --project` links work in any case.
+            if str(value).casefold() != query[key].casefold():
+                return False
         elif value != query[key]:
             return False
     tag = query["tag"].strip().lower()
@@ -103,9 +107,11 @@ def collection_results(items, values=None, *, now=None):
         "cards": ordered + notes,
         "open": [item for item in ordered if not item.get("hidden") and item.get("status") != "done"],
         "archive": sorted(archived, key=recent_rank, reverse=True),
-        # Deadlines historically include hidden cards and ignore toolbar filters.
+        # Deadlines include hidden cards but follow the board filters, so one
+        # project's board shows only that project's dates.
         "deadlines": sorted((item for item in items if not item.get("archived") and item.get("due")
-                             and item.get("status") != "done"),
+                             and item.get("status") != "done"
+                             and matches(item, query, now, status=item["kind"] == "task")),
                             key=lambda item: due_datetime(item["due"], now) or datetime.max.replace(tzinfo=now.tzinfo)),
     }
     return {name: [item["id"] for item in values] for name, values in collections.items()}

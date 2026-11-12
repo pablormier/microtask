@@ -197,6 +197,13 @@ const VIEW_DEFAULTS = {
   deadlines: { group: "due_kind" }
 };
 const VIEW_SETTINGS_KEY = "mt-view-settings";
+// Board filters live in the page address so a reload or bookmark keeps them.
+const FILTER_PARAMS = { search: "q", status: "status", priority: "priority", type: "type",
+  project: "project", topic: "topic", tag: "tag", due: "due" };
+
+function defaultFilters() {
+  return { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all" };
+}
 
 function cardGroupOptions(kind) {
   return CARD_GROUPS.filter(([value]) => kind !== "note" || !TASK_ONLY_GROUPS.includes(value))
@@ -269,7 +276,7 @@ function taskBoard() {
     types: [],
     projects: [],
     topicFilter: { open: false, query: "", active: 0, navigated: false },
-    filters: { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all" },
+    filters: defaultFilters(),
     needsReviewOnly: false,
     detailLoading: false,
     detailError: "",
@@ -325,6 +332,7 @@ function taskBoard() {
       } catch (_) {}
       this.setLayout(savedLayout);
       this.loadSettings();
+      this.readFilterLocation();
       this.nowAtLoad = Date.now();
       setInterval(() => { this.now = Date.now(); }, 1000);
       window.addEventListener("load", () => {
@@ -332,7 +340,10 @@ function taskBoard() {
       }, { once: true });
       if (typeof this.$watch === "function") {
         for (const field of ["filters", "showHidden", "needsReviewOnly"]) {
-          this.$watch(field, () => this.scheduleQuery());
+          this.$watch(field, () => {
+            this.writeFilterLocation();
+            this.scheduleQuery();
+          });
         }
         this.$watch("settings", () => this.saveSettings());
         this.$watch("mode", () => this.updatePageTitle());
@@ -488,10 +499,41 @@ function taskBoard() {
       return parts.map((label, index) => ({ label, path: parts.slice(0, index + 1).join("/") }));
     },
 
+    readFilterLocation() {
+      let params;
+      try { params = new URLSearchParams(location.search); } catch (_) { return; }
+      const filters = defaultFilters();
+      for (const [field, name] of Object.entries(FILTER_PARAMS)) {
+        const value = (params.get(name) || "").trim();
+        if (value) filters[field] = field === "topic" ? topicSegments(value).join("/") || "all" : value;
+      }
+      this.filters = filters;
+      this.showHidden = params.get("hidden") === "1";
+      this.needsReviewOnly = params.get("review") === "1";
+    },
+
+    writeFilterLocation() {
+      let params;
+      try { params = new URLSearchParams(location.search); } catch (_) { return; }
+      const defaults = defaultFilters();
+      for (const [field, name] of Object.entries(FILTER_PARAMS)) {
+        const value = String(this.filters[field] ?? "").trim();
+        if (value && value !== defaults[field]) params.set(name, value);
+        else params.delete(name);
+      }
+      for (const [name, on] of [["hidden", this.showHidden], ["review", this.needsReviewOnly]]) {
+        if (on) params.set(name, "1");
+        else params.delete(name);
+      }
+      const search = params.toString();
+      const target = location.pathname + (search ? "?" + search : "") + location.hash;
+      if (target !== location.pathname + location.search + location.hash) history.replaceState(history.state, "", target);
+    },
+
     clearFilters() {
       this.showHidden = false;
       this.needsReviewOnly = false;
-      this.filters = { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all" };
+      this.filters = defaultFilters();
     },
 
     collectionItems(name) {
@@ -500,6 +542,8 @@ function taskBoard() {
     },
 
     isCardsView() { return this.mode === "tasks" || this.mode === "notes" || this.mode === "archive"; },
+    // Every tab except Drafts shows filtered cards, so it also shows the filter controls.
+    filtersApply() { return this.mode !== "drafts"; },
     openTasks() { return this.collectionItems("open"); },
 
     taskItems() {
@@ -834,6 +878,10 @@ function taskBoard() {
         taskStatuses: this.taskStatuses,
         taskPriorityPolicy: this.taskPriorityPolicy,
         taskTypePolicy: this.taskTypePolicy,
+        scopeDefaults: {
+          project: this.filters.project === "all" ? "" : this.filters.project,
+          topic: this.filters.topic === "all" ? "" : this.filters.topic,
+        },
         taskOptionsFromDraft: draft => this.taskOptionsFromDraft(draft),
         metadataSnapshot: draft => this.draftMetadataSnapshot(draft),
         captureDraftFields: draft => this.captureDraftFields(draft),
@@ -1459,6 +1507,13 @@ function taskBoard() {
         ? Object.keys(this.taskTypePolicy)
         : Array.from(new Set(this.tasks.map(t => t.type || t.kind).filter(Boolean)));
       this.projects = Array.from(new Set(this.tasks.map(t => t.project).filter(Boolean))).sort();
+      // A linked project may differ in case or have no cards yet; keep the select showing it.
+      const linked = this.filters.project;
+      if (linked !== "all" && !this.projects.includes(linked)) {
+        const spelling = this.projects.find(name => name.toLowerCase() === linked.toLowerCase());
+        if (spelling) this.filters.project = spelling;
+        else this.projects = [...this.projects, linked].sort();
+      }
     },
 
     applyPayload(payload, fromQuery = false) {

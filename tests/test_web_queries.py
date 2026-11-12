@@ -43,6 +43,7 @@ class WebCollectionQueryTests(unittest.TestCase):
         self.cards[0].update(project="Project one", topic="Work")
         self.assertEqual(self.results(project="Project one", topic="Work", priority="medium",
                                       type="task", status="active")["cards"], ["today"])
+        self.assertEqual(self.results(project="PROJECT ONE")["cards"], ["today"])
         self.assertEqual(self.results(project="Project one", priority="high")["cards"], [])
         result = self.results(status="doing", type="note")
         self.assertEqual(result["cards"], ["note"])
@@ -70,8 +71,10 @@ class WebCollectionQueryTests(unittest.TestCase):
         self.assertIn("hidden", self.results(show_hidden="true")["cards"])
         self.assertNotIn("hidden", self.results(show_hidden=True)["open"])
         self.assertNotIn("done-b", result["open"])
-        self.assertEqual(self.results(search="no matches", status="done")["deadlines"],
-                         ["past", "today", "hidden"])
+        self.assertEqual(result["deadlines"], ["past", "today", "hidden"])
+        self.cards[0].update(project="Launch")
+        self.assertEqual(self.results(project="launch")["deadlines"], ["today"])
+        self.assertEqual(self.results(search="no matches")["deadlines"], [])
         self.assertIn("archived", result["archive"])
         self.assertNotIn("archived", result["cards"])
 
