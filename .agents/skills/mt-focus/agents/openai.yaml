@@ -1,0 +1,4 @@
+interface:
+  display_name: "Microtask Focus"
+  short_description: "Choose what to do next and make starting easier"
+  default_prompt: "Use $mt-focus to suggest what I should work on next and give me a clear starting step."

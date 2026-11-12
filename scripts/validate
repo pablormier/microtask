@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Validate the microtask workspace (the trust boundary behind ./mt validate).
+
+Orchestrates validation of every Markdown card in cards/ (kind comes from frontmatter):
+  * has YAML frontmatter
+  * has all required fields
+  * task status is configured in policy
+  * priority / type are valid
+  * due is YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, or null
+  * due_kind is consistent with due
+  * metadata time fields are YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+  * archived is a boolean when present
+  * the configured doing-task limit is not exceeded
+  * notes have the note schema and no task lifecycle fields
+  * task ids are unique
+  * card properties, comments, and saved time records are structurally valid
+  * Markdown bodies remain opaque to structural validation
+
+Internal --changes mode reads a JSON candidate/previous overlay from stdin and
+validates affected cards plus only newly affected cross-card invariants. It never
+copies or writes workspace data. The default command remains a complete audit.
+
+Per-item checks live in scripts/validators.py; this script owns file
+discovery, cross-file checks, and reporting.
+
+Exits non-zero with a list of errors if validation fails.
+"""
+from __future__ import annotations
+
+import sys
+import json
+import re
+from pathlib import Path
+
+# Add scripts directory to path to import tasklib and validators
+_here = Path(__file__).resolve().parent
+sys.path.insert(0, str(_here))
+
+import tasklib
+import validators
+import drafts as draft_store
+
+def repo_root() -> Path:
+    here = Path(__file__).resolve().parent
+    return here.parent
+
+
+_DATA_ROOT: Path | None = None
+
+
+def data_root() -> Path:
+    return _DATA_ROOT or repo_root()
+
+
+def cards_dir() -> Path:
+    return data_root() / "cards"
+
+
+def check_item(
+    path: Path, seen_ids: dict[str, Path],
+    seen_time_sessions: dict[str, Path], seen_capture_ids: dict[str, Path], errors: list[str],
+    policy: dict[str, object], *, raw: str | None = None, collect: dict[str, list] | None = None,
+) -> tuple[str | None, str | None]:
+    """Validate one card; return its (kind, status), or (None, None) when unreadable."""
+    rel = path.relative_to(data_root())
+    raw = path.read_bytes().decode("utf-8") if raw is None else raw
+    if raw.strip() == "":
+        errors.append(f"{rel}: file is empty")
+        return None, None
+    fm_text, body = tasklib.parse_frontmatter(raw)
+    if fm_text is None:
+        errors.append(f"{rel}: missing YAML frontmatter")
+        return None, None
+    try:
+        fm = tasklib.parse_yaml(fm_text)
+    except ValueError as error:
+        errors.append(f"{rel}: {error}")
+        return None, None
+    if collect is not None:
+        if isinstance(fm.get("topic"), str):
+            collect["topics"].append(fm["topic"])
+        if "area" in fm:
+            collect["area"].append(str(rel))
+    kind = fm.get("kind")
+    if not isinstance(fm.get("title"), str) or not isinstance(kind, str):
+        errors.append(f"{rel}: card must have title and kind properties")
+        return None, None
+    if kind not in ("task", "note"):
+        errors.append(f"{rel}: kind must be task or note")
+        return None, None
+    errors.extend(
+        validators.run_item_validators(
+            validators.CheckContext(
+                kind=kind,
+                rel=rel,
+                fm=fm,
+                body=body,
+                policy=policy,
+            )
+        )
+    )
+    if kind == "task":
+        try:
+            entries = tasklib.time_log_entries(raw)
+        except ValueError:
+            entries = []
+        for entry in entries:
+            session_id = str(entry["session_id"])
+            if session_id in seen_time_sessions:
+                errors.append(
+                    f"{rel}: duplicate time session id '{session_id}' "
+                    f"(also in {seen_time_sessions[session_id].relative_to(data_root())})"
+                )
+            else:
+                seen_time_sessions[session_id] = path
+    item_id = fm.get("id")
+    if isinstance(item_id, str) and item_id:
+        if item_id in seen_ids:
+            errors.append(
+                f"{rel}: duplicate id '{item_id}' (also in {seen_ids[item_id].relative_to(data_root())})"
+            )
+        else:
+            seen_ids[item_id] = path
+    capture_id = fm.get("capture_id")
+    if isinstance(capture_id, str):
+        if capture_id in seen_capture_ids:
+            errors.append(
+                f"{rel}: duplicate capture_id '{capture_id}' "
+                f"(also in {seen_capture_ids[capture_id].relative_to(data_root())})"
+            )
+        else:
+            seen_capture_ids[capture_id] = path
+    status = fm.get("status") if kind == "task" else None
+    return kind, status if isinstance(status, str) else None
+
+
+def item_identity(raw: str | None, path: Path, *, strict_time: bool = False) -> tuple[dict[str, set[str]], bool]:
+    """Only the values that can introduce cross-card conflicts."""
+    fm_text, body = tasklib.parse_frontmatter(raw or "")
+    fm = tasklib.parse_yaml(fm_text) if fm_text is not None else {}
+    capture = fm.get("capture_id")
+    if raw is None:
+        return {"id": set(), "capture_id": set(), "time session id": set()}, False
+    try:
+        sessions = {str(entry["session_id"]) for entry in tasklib.time_log_entries(raw)} if fm.get("kind") == "task" else set()
+    except ValueError as error:
+        if strict_time:
+            raise ValueError(f"{path.relative_to(data_root())}: cannot check time-session uniqueness: {error}") from error
+        sessions = set()  # The changed card's validators report malformed time logs.
+    return {
+        "id": {str(fm["id"])} if fm.get("id") else set(),
+        "capture_id": {capture} if isinstance(capture, str) else set(),
+        "time session id": sessions,
+    }, fm.get("kind") == "task" and fm.get("status") == "doing"
+
+
+def check_changes(request: object, policy: dict) -> list[str]:
+    """Validate changed content and only cross-file invariants it can affect.
+
+    The caller holds the mutation lock. `previous` pins the same baseline for
+    candidate and post-write checks; no temporary workspace is needed.
+    """
+    if not isinstance(request, dict) or set(request) - {"changes", "deletions", "previous"}:
+        raise ValueError("changes request must contain changes, deletions and optional previous content")
+    changes = request.get("changes", {})
+    deletions = request.get("deletions", [])
+    previous = request.get("previous")
+    if not isinstance(changes, dict) or any(not isinstance(raw, str) for raw in changes.values()):
+        raise ValueError("changes must map item paths to Markdown text")
+    if not isinstance(deletions, list) or any(not isinstance(path, str) for path in deletions):
+        raise ValueError("deletions must be an array of item paths")
+    affected = set(changes) | set(deletions)
+    if any(not isinstance(path, str) or not re.fullmatch(r"cards/[^/]+\.md", path)
+           or ".." in Path(path).parts for path in affected):
+        raise ValueError("invalid item path in changes")
+    if previous is not None and (not isinstance(previous, dict) or set(previous) != affected
+                                 or any(raw is not None and not isinstance(raw, str) for raw in previous.values())):
+        raise ValueError("previous must supply the original text or null for every affected path")
+    errors: list[str] = []
+    seen = {"id": {}, "capture_id": {}, "time session id": {}}
+    added = {key: set() for key in seen}
+    doing_delta = 0
+    changed_doing = 0
+    for relative in sorted(affected):
+        path = data_root() / relative
+        if path.is_symlink() or path.parent.is_symlink():
+            raise ValueError(f"{relative}: symbolic links are not supported for card changes")
+        before = previous[relative] if previous is not None else (path.read_text(encoding="utf-8") if path.exists() else None)
+        try:
+            before_keys, before_doing = item_identity(before, path)
+        except ValueError:
+            before_keys, before_doing = {key: set() for key in seen}, False
+        after = changes.get(relative)
+        after_keys, after_doing = item_identity(after, path)
+        for key in added:
+            added[key].update(after_keys[key] - before_keys[key])
+        doing_delta += int(after_doing) - int(before_doing)
+        changed_doing += int(after_doing)
+        if after is not None:
+            check_item(path, seen["id"], seen["time session id"],
+                       seen["capture_id"], errors, policy, raw=after)
+    if errors or (not any(added.values()) and doing_delta <= 0):
+        return errors
+
+    # Read only metadata from other cards, except when new time-session IDs
+    # require checking their time logs. Do not validate unrelated card bodies.
+    other_doing = 0
+    for path in sorted(cards_dir().glob("*.md")):
+        relative = str(path.relative_to(data_root()))
+        if relative in affected:
+            continue
+        raw = path.read_text(encoding="utf-8")
+        fm_text, body = tasklib.parse_frontmatter(raw)
+        if fm_text is None:
+            raise ValueError(f"cannot check cross-card invariants: {relative} has no frontmatter; run mt validate")
+        fm = tasklib.parse_yaml(fm_text)
+        other_doing += int(fm.get("kind") == "task" and fm.get("status") == "doing")
+        identity, _ = item_identity(raw if added["time session id"] else ("---\n" + fm_text + "\n---\n"),
+                                    path, strict_time=bool(added["time session id"]))
+        for key, values in added.items():
+            for value in values & identity[key]:
+                errors.append(f"{relative}: duplicate {key} '{value}' introduced by card changes")
+    limit = int(str(policy.get("rules", {}).get("max_doing_tasks") or 0))
+    if doing_delta > 0 and limit > 0 and other_doing + changed_doing > limit:
+        errors.append(f"doing task limit exceeded: {other_doing + changed_doing} tasks, maximum {limit}")
+    return errors
+
+
+def topic_case_warnings(topics: list[str]) -> list[str]:
+    """Warn when one topic path is spelled with different casing across cards."""
+    separator = tasklib.card_format.TOPIC_SEPARATOR
+    spellings: dict[tuple[str, ...], dict[str, int]] = {}
+    for topic in topics:
+        parts = topic.split(separator)
+        for depth in range(1, len(parts) + 1):
+            prefix = separator.join(parts[:depth])
+            counts = spellings.setdefault(tasklib.card_format.topic_key(prefix), {})
+            counts[prefix] = counts.get(prefix, 0) + 1
+    return [
+        "topic '" + "' and '".join(sorted(counts)) + "' differ only by letter case; they are treated as one topic, "
+        "so pick one spelling (mt topic rename OLD NEW)"
+        for counts in spellings.values() if len(counts) > 1
+    ]
+
+
+def migration_warnings(area_cards: list[str], policy_file: Path) -> list[str]:
+    """Remind users to run the one-time area-to-topic migration."""
+    hint = "run python3 scripts/migrate_area_to_topic.py --plan, then --apply"
+    warnings = []
+    if area_cards:
+        warnings.append(f"{len(area_cards)} card(s) still have the retired 'area' property, which is ignored "
+                        f"({', '.join(sorted(area_cards))}); {hint}")
+    if policy_file.is_file() and re.search(r"(?m)^suggested_areas:", policy_file.read_text(encoding="utf-8")):
+        warnings.append(f"policy still uses 'suggested_areas', which is ignored; {hint}")
+    return warnings
+
+
+def main() -> int:
+    global _DATA_ROOT
+    arguments = sys.argv[1:]
+    changes_mode = "--changes" in arguments
+    if changes_mode:
+        arguments.remove("--changes")
+    if len(arguments) == 2 and arguments[0] == "--data-root":
+        _DATA_ROOT = Path(arguments[1])
+    elif arguments:
+        print(f"error: unexpected arguments: {' '.join(arguments)}", file=sys.stderr)
+        return 2
+    try:
+        effective_policy = tasklib.policy()
+    except (OSError, ValueError) as error:
+        print("FAILED: invalid policy:", file=sys.stderr)
+        for line in str(error).splitlines():
+            print(f"  - {line}", file=sys.stderr)
+        return 1
+
+    if changes_mode:
+        try:
+            errors = check_changes(json.load(sys.stdin), effective_policy)
+        except (OSError, ValueError, TypeError, UnicodeError) as error:
+            errors = [str(error)]
+        if errors:
+            print("FAILED: card changes failed validation:", file=sys.stderr)
+            for error in errors:
+                print(f"  - {error}", file=sys.stderr)
+            return 1
+        print("OK: validated card changes and affected cross-card invariants.")
+        return 0
+
+    root = cards_dir()
+    errors: list[str] = []
+    seen_ids: dict[str, Path] = {}
+    seen_time_sessions: dict[str, Path] = {}
+    seen_capture_ids: dict[str, Path] = {}
+    rules = effective_policy.get("rules", {})
+    raw_doing_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
+    if not isinstance(raw_doing_limit, str) or not raw_doing_limit.isdigit():
+        doing_limit = 0
+        errors.append("policy rules.max_doing_tasks must be a positive integer")
+    else:
+        doing_limit = int(raw_doing_limit)
+        if doing_limit < 1:
+            errors.append("policy rules.max_doing_tasks must be a positive integer")
+
+    md_files: list[Path] = []
+    if not root.is_dir():
+        errors.append("cards/ must exist as a directory")
+    else:
+        for entry in sorted(root.iterdir()):
+            if entry.name.startswith('.'):
+                continue
+            if entry.is_dir():
+                errors.append(f"unexpected directory under cards/: {entry.name}/")
+            elif entry.suffix != ".md":
+                errors.append(f"unexpected file under cards/: {entry.name}")
+            else:
+                md_files.append(entry)
+
+    collected: dict[str, list] = {"topics": [], "area": []}
+    doing_count = 0
+    kind_counts = {"task": 0, "note": 0}
+    for path in md_files:
+        kind, status = check_item(
+            path, seen_ids, seen_time_sessions, seen_capture_ids, errors, effective_policy,
+            collect=collected,
+        )
+        if kind is not None:
+            kind_counts[kind] += 1
+        if kind == "task" and status == "doing":
+            doing_count += 1
+
+    if doing_limit > 0 and doing_count > doing_limit:
+        errors.append(
+            f"doing task limit exceeded: {doing_count} tasks, maximum {doing_limit}"
+        )
+
+    draft_root = data_root() / "drafts"
+    draft_files: list[Path] = []
+    if draft_root.is_symlink():
+        errors.append("drafts/ must not be a symbolic link")
+    elif draft_root.exists() and not draft_root.is_dir():
+        errors.append("drafts exists but is not a directory")
+    elif draft_root.is_dir():
+        for entry in sorted(draft_root.iterdir()):
+            if entry.is_symlink():
+                errors.append(f"symbolic link under drafts/: {entry.name}")
+            elif entry.is_dir():
+                errors.append(f"unexpected directory under drafts/: {entry.name}/")
+            elif not entry.is_file():
+                errors.append(f"unexpected file under drafts/: {entry.name}")
+            elif entry.suffix != ".md":
+                errors.append(f"unexpected file under drafts/: {entry.name}")
+            else:
+                draft_files.append(entry)
+
+        for path in draft_files:
+            try:
+                # Draft bodies are intentionally incomplete Markdown. Only
+                # validate their canonical path and frontmatter metadata.
+                draft_store.read_path(path)
+            except (OSError, ValueError, UnicodeError) as error:
+                message = str(error)
+                prefix = f"{path}: "
+                if message.startswith(prefix):
+                    message = message[len(prefix):]
+                errors.append(f"{path.relative_to(data_root())}: {message}")
+
+    if errors:
+        print(f"FAILED: {len(errors)} error(s):", file=sys.stderr)
+        for e in errors:
+            print(f"  - {e}", file=sys.stderr)
+        return 1
+
+    for warning in [*topic_case_warnings(collected["topics"]),
+                    *migration_warnings(collected["area"], repo_root() / "mt-policy.yaml")]:
+        print(f"WARNING: {warning}", file=sys.stderr)
+    print(
+        f"OK: validated {kind_counts['task']} task file(s), {kind_counts['note']} note file(s), "
+        f"and {len(draft_files)} draft file(s)."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

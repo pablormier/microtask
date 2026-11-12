@@ -1,0 +1,187 @@
+.mt-groups {
+  display: flex;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 18px 24px;
+  overflow-x: auto;
+  align-items: flex-start;
+}
+.mt-column {
+  flex: 0 0 18.5rem;
+  min-width: 18.5rem;
+  max-height: 100%;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--mt-column-surface);
+  border: 1px solid color-mix(in srgb, var(--mt-border) 60%, transparent);
+  border-radius: var(--mt-radius-lg);
+}
+.mt-column > h2 {
+  margin: 0;
+  padding: 4px 6px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--mt-text);
+  font-size: var(--mt-font-size-sm);
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+.mt-column > h2 .mt-count { background: color-mix(in srgb, var(--mt-text) 7%, transparent); }
+.mt-column-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* A long column scrolls; cards keep their content height instead of shrinking
+   (an explicit min-height, as on notes, would otherwise let them be squeezed). */
+.mt-column-cards > .mt-card { flex-shrink: 0; }
+.mt-column.is-quiet { background: color-mix(in srgb, var(--mt-column-surface) 55%, var(--mt-surface-subdued)); }
+.mt-column.is-over-limit { box-shadow: var(--mt-shadow-limit); }
+.mt-column.is-over-limit .mt-count { background: var(--mt-danger-soft); color: var(--mt-danger); }
+.mt-card {
+  /* Keep absolutely positioned children (e.g. .mt-sr-only) inside the card so
+     they never extend a column's or the page's scroll area. */
+  position: relative;
+  margin: 0;
+  padding: 11px 13px 12px;
+  cursor: pointer;
+}
+.mt-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mt-space-2);
+}
+.mt-card-header .mt-priority { flex-shrink: 0; }
+.mt-ref {
+  color: var(--mt-text-muted);
+  font-family: var(--mt-font-family-mono);
+  font-size: var(--mt-font-size-xs);
+}
+.mt-title { margin: 6px 0 4px; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); line-height: 1.35; overflow-wrap: anywhere; }
+/* Topic path on a card (plain text, like tags); filter by it from the toolbar. */
+.mt-card-topic {
+  max-width: 100%;
+  margin: 0 0 4px;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mt-next {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.mt-card > .mt-due, .mt-card > .mt-status-badge { margin: 2px 6px 4px 0; }
+.mt-restart-badge { display: inline-block; }
+.mt-restart-badge::first-letter, .mt-due-kind::first-letter { text-transform: uppercase; }
+.mt-due-kind { display: inline-block; }
+.mt-time-line {
+  margin-top: 4px;
+  color: var(--mt-text-muted);
+  font-family: var(--mt-font-family-mono);
+  font-size: var(--mt-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.mt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+/* Tags and activity share the last card row; the count sits at the trailing edge. */
+.mt-card-footer { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.mt-card-footer .mt-tags { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+.mt-comment-count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
+.mt-comment-count .mt-icon { flex-basis: 14px; width: 14px; height: 14px; stroke-width: 2; }
+
+/* Horizontal swimlane layout */
+.mt-groups.is-horizontal {
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  align-items: stretch;
+  gap: 14px;
+}
+.mt-groups.is-horizontal .mt-column {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+  max-height: none;
+  padding: 10px 14px 12px;
+}
+.mt-groups.is-horizontal .mt-column > h2 {
+  justify-content: flex-start;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.mt-groups.is-horizontal .mt-column-cards {
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+  align-items: stretch;
+  gap: 12px;
+  padding-bottom: 6px;
+}
+.mt-groups.is-horizontal .mt-column-cards .mt-card {
+  flex: 0 0 18.5rem;
+  min-width: 18.5rem;
+  max-width: 22rem;
+  min-height: 9rem;
+}
+.mt-groups.is-horizontal .mt-column-cards .mt-empty {
+  padding: 8px 4px;
+}
+
+/* No grouping: one grid of cards without a column frame. */
+.mt-groups.is-flat { display: block; overflow-x: visible; }
+.mt-groups.is-flat .mt-column {
+  min-width: 0;
+  max-height: none;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+.mt-groups.is-flat .mt-column-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  align-items: start;
+  gap: 12px;
+  overflow: visible;
+}
+
+@media (max-width: 70rem) {
+  .mt-column { flex-basis: 17rem; min-width: 17rem; }
+  .mt-groups.is-horizontal .mt-column-cards .mt-card { flex-basis: 17rem; min-width: 17rem; }
+}
+
+@media (max-width: 30rem) {
+  .mt-groups.is-horizontal .mt-column-cards .mt-card {
+    flex-basis: calc(100vw - 4rem);
+    min-width: calc(100vw - 4rem);
+  }
+}

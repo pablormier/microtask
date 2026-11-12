@@ -1,0 +1,114 @@
+:root {
+  color-scheme: light;
+  --mt-surface: #fff;
+  --mt-surface-subdued: #f6f7f9;
+  --mt-surface-raised: #fff;
+  --mt-surface-hover: #f1f3f6;
+  --mt-surface-quiet: #eef0f4;
+  --mt-surface-inset: #e6e9ee;
+  --mt-text: #1b2230;
+  --mt-text-muted: #5d6779;
+  --mt-border: #e3e6eb;
+  --mt-control-border: #cfd5de;
+  --mt-button-surface: #fff;
+  --mt-button-hover: #f4f6f9;
+  --mt-button-active: #eaedf2;
+  --mt-button-disabled: #f4f5f7;
+  --mt-text-disabled: #8a93a3;
+  --mt-border-strong: #b3bcc8;
+  --mt-accent: #2563eb;
+  --mt-accent-foreground: #fff;
+  --mt-accent-hover: #1d4ed8;
+  --mt-focus: var(--mt-accent);
+  --mt-focus-soft: #93b4f8;
+  --mt-overlay: rgba(17, 24, 39, .42);
+  --mt-success: #15803d;
+  --mt-warning: #8a5a00;
+  --mt-danger: #c0362c;
+  --mt-danger-soft: #fdecea;
+  --mt-accent-soft: #eaf1fe;
+  --mt-success-soft: #e6f6ec;
+  --mt-warning-soft: #fdf3d8;
+  --mt-warning-border: #e3a73b;
+  --mt-warning-soft-border: #f0d27a;
+  --mt-warning-surface: #fffdf2;
+  --mt-danger-border: #f2a39b;
+  --mt-danger-surface: #fff8f7;
+  --mt-control-active: #1e40af;
+  --mt-surface-done: #f3f4f6;
+  --mt-space-1: 4px;
+  --mt-space-2: 8px;
+  --mt-space-3: 12px;
+  --mt-space-4: 16px;
+  --mt-radius-sm: 6px;
+  --mt-radius-md: 8px;
+  --mt-radius-lg: 14px;
+  --mt-radius-pill: 999px;
+  --mt-font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mt-font-family-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mt-font-size-xs: max(11px, .75rem);
+  --mt-font-size-sm: max(11px, .82rem);
+  --mt-font-size-md: max(11px, .875rem);
+  --mt-font-size-lg: 1rem;
+  --mt-font-size-xl: 1.25rem;
+  --mt-control-size: 2rem;
+  --mt-control-size-compact: 1.75rem;
+  --mt-font-size-compact: var(--mt-font-size-sm);
+  --mt-shadow-control: 0 1px 2px rgba(16, 24, 40, .05);
+  --mt-shadow-control-hover: 0 1px 3px rgba(16, 24, 40, .1);
+  --mt-shadow-control-active: inset 0 1px 2px rgba(16, 24, 40, .08);
+  --mt-shadow-surface: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .06);
+  --mt-shadow-dialog: 0 24px 56px -12px rgba(16, 24, 40, .28), 0 0 0 1px rgba(16, 24, 40, .04);
+  --mt-shadow-hover-strong: 0 4px 12px -2px rgba(16, 24, 40, .1), 0 2px 4px -2px rgba(16, 24, 40, .06);
+  --mt-shadow-logo: 0 1px 2px rgba(37, 99, 235, .3);
+  --mt-shadow-limit: inset 0 0 0 1px var(--mt-danger-border);
+  --mt-column-surface: #eef0f3;
+  --mt-shadow-segment: 0 1px 2px rgba(16, 24, 40, .1), 0 0 0 1px rgba(16, 24, 40, .04);
+  --mt-priority-urgent: #dc2626;
+  --mt-priority-high: #ea8a0c;
+  --mt-priority-medium: #2563eb;
+  --mt-priority-low: #94a3b8;
+  --mt-progress-gradient: linear-gradient(90deg, var(--mt-accent), var(--mt-focus-soft));
+
+  /* Theme Pico's native forms and states through the same semantic palette. */
+  --pico-font-family: var(--mt-font-family-sans);
+  --pico-color: var(--mt-text);
+  --pico-muted-color: var(--mt-text-muted);
+  --pico-background-color: var(--mt-surface);
+  --pico-primary: var(--mt-accent);
+  --pico-primary-background: var(--mt-accent);
+  --pico-primary-border: var(--mt-accent);
+  --pico-primary-hover: var(--mt-accent-hover);
+  --pico-primary-hover-background: var(--mt-accent-hover);
+  --pico-primary-hover-border: var(--mt-accent-hover);
+  --pico-primary-focus: color-mix(in srgb, var(--mt-focus) 25%, transparent);
+  --pico-primary-inverse: var(--mt-accent-foreground);
+  --pico-form-element-background-color: var(--mt-surface);
+  --pico-form-element-border-color: var(--mt-control-border);
+  --pico-form-element-color: var(--mt-text);
+  --pico-form-element-placeholder-color: var(--mt-text-muted);
+  --pico-form-element-active-background-color: var(--mt-surface);
+  --pico-form-element-active-border-color: var(--mt-focus);
+  --pico-form-element-focus-color: var(--pico-primary-focus);
+  --pico-form-element-disabled-background-color: var(--mt-surface-hover);
+  --pico-form-element-disabled-border-color: var(--mt-border);
+  --pico-form-element-disabled-opacity: .62;
+  --pico-form-element-invalid-border-color: var(--mt-danger);
+  --pico-form-element-invalid-active-border-color: var(--mt-danger);
+  --pico-form-element-invalid-focus-color: color-mix(in srgb, var(--mt-danger) 25%, transparent);
+  --pico-form-element-valid-border-color: var(--mt-success);
+  --pico-form-element-valid-active-border-color: var(--mt-success);
+  --pico-form-element-valid-focus-color: color-mix(in srgb, var(--mt-success) 25%, transparent);
+  --pico-card-background-color: var(--mt-surface-raised);
+  --pico-border-radius: var(--mt-radius-sm);
+}
+[x-cloak] { display: none !important; }
+html:root { font-size: calc(var(--pico-font-size, 100%) * .875); background: var(--mt-surface-subdued); }
+html[data-text-size="small"] { font-size: calc(var(--pico-font-size, 100%) * .76); }
+html[data-text-size="large"] { font-size: var(--pico-font-size, 100%); }
+body { margin: 0; min-height: 100vh; background: var(--mt-surface-subdued); color: var(--mt-text); font-family: var(--mt-font-family-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+main { padding: 0; }
+.mt-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}

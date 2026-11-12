@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MicroTask</title>
+  <style>@import url("{pico_css}") layer(vendor);</style>
+  <link rel="stylesheet" href="{katex_css}">
+  <script defer src="{alpine_js}"></script>
+  <script defer src="{marked_js}"></script>
+  <script defer src="{dompurify_js}"></script>
+  <script defer src="{katex_js}"></script>
+  <script defer src="{katex_auto_render_js}"></script>
+  <style>{dashboard_css}</style>
+</head>
+<body>
+  <div class="mt-app" x-data="taskBoard()" x-cloak>
+{toolbar}
+    <main :aria-busy="loading || queryLoading">
+      <p class="mt-load-status" role="status" x-show="loading">Loading workspace…</p>
+      <div class="mt-load-error" role="alert" x-show="loadError" x-cloak>
+        <p x-text="loadError"></p>
+        <button type="button" class="mt-button" @click="loadWorkspace()" :disabled="loading">Retry loading</button>
+      </div>
+      <p class="mt-sr-only" role="status" x-show="ready && queryLoading">Updating results…</p>
+      <div class="mt-load-error" role="alert" x-show="ready && queryError" x-cloak>
+        <p x-text="queryError"></p>
+        <button type="button" class="mt-button" @click="scheduleQuery(0, true)" :disabled="queryLoading">Retry results</button>
+      </div>
+      <template x-if="ready">
+        <div>
+
+{view_focus}
+{view_cards}
+{view_deadlines}
+{view_drafts}
+{drawer}
+{capture_composer}
+        </div>
+      </template>
+    </main>
+    <div class="mt-toast-region" aria-live="polite">
+      <template x-if="toast">
+        <div class="mt-toast" :class="{ 'is-error': toast.error }" :role="toast.error ? 'alert' : 'status'" :key="toast.id">
+          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" x-show="!toast.error"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" x-show="toast.error"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></svg>
+          <span class="mt-toast-text" x-text="toast.text"></span>
+          <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact mt-toast-close" aria-label="Dismiss message" @click="dismissToast()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+        </div>
+      </template>
+    </div>
+  </div>
+  <script type="application/json" id="mt-config">{config_json}</script>
+  <script nonce="{nonce}">{app_script}</script>
+</body>
+</html>

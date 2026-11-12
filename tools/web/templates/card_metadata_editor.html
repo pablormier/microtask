@@ -1,0 +1,157 @@
+<fieldset class="mt-card-metadata-fields" :class="{ 'mt-metadata-create': createMode }" :disabled="disabled" @input="emitChange()" @change="emitChange()">
+  <div class="mt-metadata-primary">
+  <template x-if="createMode && cardKind === 'task'">
+    <label class="mt-card-metadata-field mt-card-metadata-status">
+      <span>Status</span>
+      <select class="mt-field mt-field-property" x-model="value.status" aria-label="Task status">
+        <template x-for="status in openStatuses" :key="status">
+          <option :value="status" :selected="status === value.status" x-text="statusLabels[status] || status"></option>
+        </template>
+      </select>
+    </label>
+  </template>
+      <label class="mt-card-metadata-field">
+        <span>Priority</span>
+        <select class="mt-field mt-field-property" :title="priorities[value.priority] || ''" x-model="value.priority" aria-label="Priority">
+          <template x-for="(description, priority) in priorities" :key="priority">
+              <option :value="priority" :selected="priority === value.priority" :title="description" x-text="priority.charAt(0).toUpperCase() + priority.slice(1)"></option>
+          </template>
+        </select>
+        <small class="mt-metadata-field-error" x-show="fieldErrors.priority" x-text="fieldErrors.priority"></small>
+      </label>
+  <div class="mt-card-metadata-date">
+    <label class="mt-card-metadata-field">
+      <span>Date <small>(optional)</small></span>
+      <input class="mt-field mt-field-property" type="date" x-model="dateValue" @input="syncDue()" aria-label="Date">
+      <small class="mt-metadata-field-error" x-show="fieldErrors.due" x-text="fieldErrors.due"></small>
+    </label>
+    <label class="mt-card-metadata-field" x-show="dateValue" x-cloak>
+      <span>Time <small>(optional)</small></span>
+      <input class="mt-field mt-field-property" type="time" x-model="timeValue" @input="syncDue()" :disabled="disabled || !dateValue" aria-label="Time">
+    </label>
+    <label class="mt-card-metadata-field" x-show="dateValue" x-cloak>
+      <span>Date meaning</span>
+      <select class="mt-field mt-field-property" x-model="value.due_kind" @change="syncDueKind()" :disabled="disabled || !dateValue" aria-label="Date meaning">
+        <option value="" :selected="!value.due_kind">Choose meaning</option>
+        <template x-for="(description, kind) in dueKinds" :key="kind">
+          <option :value="kind" :selected="kind === value.due_kind" :title="description" x-text="kind.charAt(0).toUpperCase() + kind.slice(1)"></option>
+        </template>
+      </select>
+      <small x-show="dateValue && !value.due_kind">Choose what this date means.</small>
+      <small class="mt-metadata-field-error" x-show="fieldErrors.due_kind" x-text="fieldErrors.due_kind"></small>
+    </label>
+  </div>
+  </div>
+  <details class="mt-metadata-more" :open="!createMode || morePropertiesOpen" @toggle="morePropertiesOpen = $el.open">
+    <summary class="mt-extra-summary" x-show="createMode"><span>More properties</span><span class="mt-extra-chevron" aria-hidden="true"></span></summary>
+    <div class="mt-metadata-secondary">
+      <label class="mt-card-metadata-field" x-show="cardKind === 'task'">
+        <span>Type</span>
+        <select class="mt-field mt-field-property" :title="types[value.type] || ''" x-model="value.type" aria-label="Task type">
+          <template x-for="(description, type) in types" :key="type">
+              <option :value="type" :selected="type === value.type" :title="description" x-text="type.charAt(0).toUpperCase() + type.slice(1)"></option>
+          </template>
+        </select>
+        <small class="mt-metadata-field-error" x-show="fieldErrors.type" x-text="fieldErrors.type"></small>
+      </label>
+  <section class="mt-property-section">
+    <h4>Organization</h4>
+    <div class="mt-property-grid">
+      <div class="mt-card-metadata-field">
+        <span :id="prefix + '-project-label'">Project <small>(optional)</small></span>
+        <div class="mt-picker" @focusout="if (!$el.contains($event.relatedTarget)) leavePicker('project')">
+          <input class="mt-field mt-field-property mt-picker-input" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
+                 :aria-labelledby="prefix + '-project-label'" :aria-controls="prefix + '-project-options'" :aria-expanded="String(pickerOpen('project'))"
+                 :aria-activedescendant="pickerOpen('project') && picker.navigated && pickerRows('project').length ? prefix + '-project-option-' + picker.active : null"
+                 :value="pickerOpen('project') ? picker.query : value.project"
+                 :placeholder="pickerOpen('project') && value.project ? value.project : 'Add project'"
+                 @click="openPicker('project')" @input.stop="setPickerQuery('project', $event.target.value)"
+                 @keydown.arrow-down.prevent="movePicker('project', 1)" @keydown.arrow-up.prevent="movePicker('project', -1)"
+                 @keydown.enter="pickerEnter('project', $event)"
+                 @keydown.escape="if (pickerOpen('project')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
+          <ul class="mt-picker-list" role="listbox" :id="prefix + '-project-options'" x-show="pickerOpen('project')" x-cloak>
+            <template x-for="(row, index) in pickerRows('project')" :key="row.kind + ':' + row.name">
+              <li class="mt-picker-option" role="option" :id="prefix + '-project-option-' + index"
+                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
+                  :aria-selected="String(row.kind === 'option' && row.name === value.project)"
+                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('project', row)">
+                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.name)"></span>
+                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
+              </li>
+            </template>
+            <li class="mt-picker-empty" x-show="!pickerRows('project').length">No projects yet. Type to create one.</li>
+          </ul>
+        </div>
+        <small class="mt-metadata-field-error" x-show="fieldErrors.project" x-text="fieldErrors.project"></small>
+      </div>
+      <div class="mt-card-metadata-field">
+        <span :id="prefix + '-topic-label'">Topic <small>(optional)</small></span>
+        <div class="mt-picker" @focusout="if (!$el.contains($event.relatedTarget)) leavePicker('topic')">
+          <input class="mt-field mt-field-property mt-picker-input" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
+                 :aria-labelledby="prefix + '-topic-label'" :aria-controls="prefix + '-topic-options'" :aria-expanded="String(pickerOpen('topic'))"
+                 :aria-activedescendant="pickerOpen('topic') && picker.navigated && pickerRows('topic').length ? prefix + '-topic-option-' + picker.active : null"
+                 :value="pickerOpen('topic') ? picker.query : value.topic" :title="value.topic || null"
+                 :placeholder="pickerOpen('topic') && value.topic ? value.topic : 'Add topic, e.g. learning/rust'"
+                 @click="openPicker('topic')" @input.stop="setPickerQuery('topic', $event.target.value)"
+                 @keydown.arrow-down.prevent="movePicker('topic', 1)" @keydown.arrow-up.prevent="movePicker('topic', -1)"
+                 @keydown.enter="pickerEnter('topic', $event)"
+                 @keydown.escape="if (pickerOpen('topic')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
+          <ul class="mt-picker-list" role="listbox" :id="prefix + '-topic-options'" x-show="pickerOpen('topic')" x-cloak>
+            <template x-for="(row, index) in pickerRows('topic')" :key="row.kind + ':' + row.name">
+              <li class="mt-picker-option" role="option" :id="prefix + '-topic-option-' + index"
+                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
+                  :style="row.depth ? { paddingLeft: (8 + row.depth * 14) + 'px' } : null"
+                  :aria-selected="String(row.kind === 'option' && row.name === value.topic)"
+                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('topic', row)">
+                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.label)"></span>
+                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
+              </li>
+            </template>
+            <li class="mt-picker-empty" x-show="!pickerRows('topic').length">No topics yet. Type a path such as learning/rust.</li>
+          </ul>
+        </div>
+        <small class="mt-metadata-field-error" x-show="fieldErrors.topic" x-text="fieldErrors.topic"></small>
+      </div>
+      <div class="mt-card-metadata-field mt-card-metadata-tags">
+        <span :id="prefix + '-tags-label'">Tags</span>
+        <div class="mt-picker" @focusout="if (!$el.contains($event.relatedTarget)) leavePicker('tags')">
+          <div class="mt-tag-input" :class="{ 'is-open': pickerOpen('tags') }" @click="if ($event.target === $el) { $refs.tagEntry.focus(); openPicker('tags'); }">
+            <template x-for="tag in value.tags" :key="tag">
+              <span class="mt-tag-chip">
+                <span x-text="tag"></span>
+                <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-tag-remove" :aria-label="'Remove tag ' + tag" @click.stop="removeTag(tag)"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg></button>
+              </span>
+            </template>
+            <input x-ref="tagEntry" class="mt-tag-entry" type="text" role="combobox" autocomplete="off" aria-autocomplete="list"
+                   :aria-labelledby="prefix + '-tags-label'" :aria-controls="prefix + '-tags-options'" :aria-expanded="String(pickerOpen('tags'))"
+                   :aria-activedescendant="pickerOpen('tags') && picker.navigated && pickerRows('tags').length ? prefix + '-tags-option-' + picker.active : null"
+                   :value="pickerOpen('tags') ? picker.query : ''" :placeholder="value.tags.length ? 'Add tag' : 'Add tags'"
+                   @click="openPicker('tags')" @input.stop="setPickerQuery('tags', $event.target.value); $event.target.value = picker.query"
+                   @keydown.arrow-down.prevent="movePicker('tags', 1)" @keydown.arrow-up.prevent="movePicker('tags', -1)"
+                   @keydown.enter="pickerEnter('tags', $event)"
+                   @keydown.backspace="if (!$event.target.value && value.tags.length) removeTag(value.tags[value.tags.length - 1])"
+                   @keydown.escape="if (pickerOpen('tags')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
+          </div>
+          <ul class="mt-picker-list" role="listbox" :id="prefix + '-tags-options'" x-show="pickerOpen('tags')" x-cloak>
+            <template x-for="(row, index) in pickerRows('tags')" :key="row.kind + ':' + row.name">
+              <li class="mt-picker-option" role="option" :id="prefix + '-tags-option-' + index"
+                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
+                  :aria-selected="String(row.kind === 'option' && false)"
+                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('tags', row)">
+                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.name)"></span>
+                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
+              </li>
+            </template>
+            <li class="mt-picker-empty" x-show="!pickerRows('tags').length">Type to add a tag.</li>
+          </ul>
+        </div>
+        <small class="mt-metadata-field-error" x-show="fieldErrors.tags" x-text="fieldErrors.tags"></small>
+      </div>
+    </div>
+  </section>
+    </div>
+  </details>
+</fieldset>

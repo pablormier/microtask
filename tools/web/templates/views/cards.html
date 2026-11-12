@@ -1,0 +1,63 @@
+<template x-if="isCardsView()">
+      <section class="mt-cards-view">
+        <div class="mt-view-controls">
+          <template x-if="mode === 'archive'">
+            <div class="mt-segmented" role="group" aria-label="Card kind">
+              <button class="mt-segment" type="button" :aria-pressed="settings.archive.kind === 'task'" @click="setKind('task')">Tasks</button>
+              <button class="mt-segment" type="button" :aria-pressed="settings.archive.kind === 'note'" @click="setKind('note')">Notes</button>
+              <button class="mt-segment" type="button" :aria-pressed="settings.archive.kind === 'all'" @click="setKind('all')">All</button>
+            </div>
+          </template>
+          <label class="mt-view-control">
+            <span class="mt-filter-heading">Group by</span>
+            <select class="mt-field mt-field-compact" @change="settings[mode].group = $event.target.value" aria-label="Group cards by">
+              <template x-for="option in groupOptions(viewKind())" :key="option.value"><option :value="option.value" :selected="option.value === settings[mode].group" x-text="option.label"></option></template>
+            </select>
+          </label>
+          <div class="mt-segmented mt-segmented-quiet" role="group" aria-label="Group layout" x-show="settings[mode].group !== 'none'">
+            <button type="button" class="mt-segment" title="Columns" aria-label="Columns" :aria-pressed="layout === 'vertical'" @click="setLayout('vertical')">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3.5" y="4" width="4.5" height="16" rx="1"/>
+                <rect x="9.75" y="4" width="4.5" height="16" rx="1"/>
+                <rect x="16" y="4" width="4.5" height="16" rx="1"/>
+              </svg>
+            </button>
+            <button type="button" class="mt-segment" title="Rows" aria-label="Rows" :aria-pressed="layout === 'horizontal'" @click="setLayout('horizontal')">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="4" y="3.5" width="16" height="4.5" rx="1"/>
+                <rect x="4" y="9.75" width="16" height="4.5" rx="1"/>
+                <rect x="4" y="16" width="16" height="4.5" rx="1"/>
+              </svg>
+            </button>
+          </div>
+          <nav class="mt-topic-crumbs" aria-label="Topic filter" x-show="filters.topic !== 'all'" x-cloak>
+            <template x-for="(crumb, index) in topicCrumbs()" :key="crumb.path">
+              <span class="mt-topic-crumb-item">
+                <span class="mt-topic-crumb-sep" aria-hidden="true" x-show="index > 0">›</span>
+                <button type="button" class="mt-button mt-button-quiet mt-topic-crumb" :aria-current="index === topicCrumbs().length - 1 ? 'location' : null"
+                        :title="'Show ' + crumb.path" @click="setTopicFilter(crumb.path)" x-text="crumb.label"></button>
+              </span>
+            </template>
+            <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-crumb-clear" aria-label="Clear topic filter" title="Clear topic filter" @click="setTopicFilter('')">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg>
+            </button>
+          </nav>
+          <p class="mt-sync-warning" role="status" x-show="syncWarning" x-text="syncWarning"></p>
+        </div>
+        <div class="mt-groups" :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
+          <template x-for="group in viewGroups()" :key="group.key">
+            <div class="mt-column" :class="group.className">
+              <h2 x-show="group.label"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>
+              <div class="mt-column-cards">
+                <template x-if="group.items.length === 0">
+                  <p class="mt-empty" x-text="group.empty"></p>
+                </template>
+                <template x-for="task in group.items" :key="task.id">
+{card}
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+</template>

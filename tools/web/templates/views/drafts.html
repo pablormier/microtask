@@ -1,0 +1,84 @@
+<template x-if="mode === 'drafts'">
+      <section class="mt-drafts-view">
+        <header class="mt-drafts-header">
+          <div>
+            <h2>Drafts</h2>
+            <p class="mt-drafts-help">Incomplete writing is saved here until you create a card or apply an edit.</p>
+          </div>
+        </header>
+        <div class="mt-drafts-actions mt-layout-group" role="group" aria-label="Draft actions">
+          <button type="button" class="mt-button mt-button-primary" @click="beginNewCapture($event)">
+            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            <span>New</span>
+          </button>
+          <label class="mt-draft-search">
+            <span class="mt-sr-only">Search drafts</span>
+            <input class="mt-field" type="search" x-model="draftSearch" aria-label="Search drafts" placeholder="Search drafts">
+          </label>
+        </div>
+        <p class="mt-draft-workspace-status" role="status" aria-live="polite"
+           :class="{ 'is-error': draftWorkspaceStatus === 'Error' }"
+           x-show="draftWorkspaceStatus" x-text="draftWorkspaceStatus"></p>
+        <template x-if="visibleDrafts().length === 0">
+          <p class="mt-empty" x-text="draftSearch.trim() ? 'No drafts match this search.' : 'No drafts yet.'"></p>
+        </template>
+        <div class="mt-draft-list" role="list" aria-label="Workspace drafts">
+          <template x-for="draft in visibleDrafts()" :key="draft.id">
+            <button type="button" class="mt-button mt-draft-row" role="listitem" @click="openWorkspaceDraft(draft)">
+              <span class="mt-draft-main">
+                <span class="mt-draft-title" x-text="draftDisplayTitle(draft)"></span>
+                <span class="mt-draft-excerpt" x-text="draftExcerpt(draft)"></span>
+              </span>
+              <span class="mt-draft-meta">
+                <span class="mt-badge mt-badge-neutral" x-text="draft.kind + (draft.mode === 'new' ? ' · new' : ' · edit')"></span>
+                <span class="mt-draft-saved" x-show="!draft._localRecovery" x-text="'Saved ' + draftSavedLabel(draft.updated)"></span>
+                <span class="mt-draft-saved mt-draft-local-label" x-show="draft._localRecovery"
+                      x-text="draft._orphanedLocal ? 'Local copy · workspace draft changed or removed' : (draft._staleLocal ? 'Local copy · workspace revision changed' : 'Local recovery copy')"></span>
+              </span>
+            </button>
+          </template>
+        </div>
+      </section>
+</template>
+
+      <template x-if="taskDraftOpen && selectedWorkspaceDraft">
+        <div class="mt-composer-backdrop mt-dialog-backdrop" @click.self="closeTaskDraft()">
+          <section class="mt-composer mt-dialog mt-task-draft-editor" role="dialog" aria-modal="true"
+                   aria-labelledby="mt-task-draft-title" x-ref="taskDraftDialog" @keydown.tab="trapTaskDraftFocus($event)"
+                   @keydown.escape.stop.prevent="closeTaskDraft()">
+            <header class="mt-composer-header">
+              <div>
+                <p class="mt-composer-eyebrow">Task edit draft</p>
+                <h2 id="mt-task-draft-title" x-text="draftDisplayTitle(selectedWorkspaceDraft)"></h2>
+              </div>
+              <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-close" aria-label="Close draft editor" @click="closeTaskDraft()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+            </header>
+            <p class="mt-composer-capture-date">The original task is checked again before changes are applied.</p>
+            <p class="mt-composer-recovery-warning" x-show="selectedWorkspaceDraft._orphanedLocal">This local copy no longer matches the workspace draft. Recover it as a separate draft or dismiss the local copy.</p>
+            <p class="mt-composer-recovery-warning" x-show="draftNeedsReconciliation(selectedWorkspaceDraft)">This edit has no verified target baseline and needs manual reconciliation before it can be applied.</p>
+            <label class="mt-task-draft-label" for="mt-task-draft-body">Task Markdown</label>
+            <textarea id="mt-task-draft-body" class="mt-field mt-composer-body mt-task-draft-body"
+                      x-model="selectedWorkspaceDraft.body" @input="persistSelectedDraft()"
+                      :disabled="draftBusy" aria-label="Task Markdown"></textarea>
+            <p class="mt-draft-workspace-status" role="status" aria-live="polite"
+               :class="{ 'is-error': draftWorkspaceStatus === 'Error' }" x-text="draftWorkspaceStatus"></p>
+            <template x-if="selectedWorkspaceDraft._orphanedLocal">
+                <footer class="mt-composer-footer">
+                  <button type="button" class="mt-button mt-button-danger mt-composer-discard" @click="dismissLocalWorkspaceDraft(selectedWorkspaceDraft)" :disabled="draftBusy">Dismiss local copy</button>
+                  <button type="button" class="mt-button mt-button-primary mt-composer-save" @click="recoverLocalWorkspaceDraft(selectedWorkspaceDraft)" :disabled="draftBusy" :aria-busy="draftBusy">Recover as separate draft</button>
+                </footer>
+            </template>
+            <template x-if="!selectedWorkspaceDraft._orphanedLocal">
+                <footer class="mt-composer-footer">
+                  <button type="button" class="mt-button mt-button-danger mt-composer-discard" @click="discardWorkspaceDraft(selectedWorkspaceDraft)" :disabled="draftBusy">Discard draft</button>
+                  <button type="button" class="mt-button mt-button-primary mt-composer-save" @click="finishWorkspaceDraft(selectedWorkspaceDraft)"
+                          :disabled="draftBusy || draftWorkspaceStatus === 'Saving…'" :aria-busy="draftBusy">
+                    <span x-text="draftBusy ? 'Applying…' : 'Apply changes'"></span>
+                  </button>
+                </footer>
+            </template>
+          </section>
+        </div>
+      </template>

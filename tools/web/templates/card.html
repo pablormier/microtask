@@ -1,0 +1,49 @@
+              <article class="mt-card mt-surface" role="button" tabindex="0"
+                       :class="cardClass(task)"
+                       @click="select(task, $event)" @keydown.enter.stop.prevent="select(task, $event)" @keydown.space.stop.prevent="select(task, $event)">
+                <div class="mt-card-header">
+                  <div class="mt-ref" x-text="task.ref"></div>
+                  <div class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" x-text="task.priority"></div>
+                </div>
+                <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-show="showCardStatus(task) && task.status" x-text="statusText(task.status)"></span>
+                <div class="mt-title" x-text="task.title"></div>
+                <template x-if="task.topic && settings[mode]?.group !== 'topic'">
+                  <div class="mt-card-topic" :title="'Topic: ' + task.topic" x-text="topicSegments(task.topic).join(' › ')"></div>
+                </template>
+                <span class="mt-badge mt-badge-warning mt-needs-review" x-show="task.needs_review">Needs review</span>
+                <span class="mt-badge mt-badge-warning" x-show="timerStale(task)" title="This timer has run longer than the warning threshold. Check the duration before saving.">Check timer</span>
+                <template x-if="task.claimed_by">
+                  <div class="mt-ref" :title="'Claimed at ' + task.claimed_at" x-text="'Working: ' + task.claimed_by"></div>
+                </template>
+                <template x-if="task.due">
+                  <time class="mt-badge mt-due" :class="dueClass(task)" :datetime="task.due" :title="task.due" x-text="'Due ' + dateLabel(task.due)"></time>
+                </template>
+                <template x-if="cardDate(task)">
+                  <time class="mt-card-date" :datetime="cardDate(task)" :title="cardDate(task)" x-text="(task.status === 'done' ? 'Completed ' : 'Updated ') + dateLabel(cardDate(task))"></time>
+                </template>
+                <template x-if="task.next_action">
+                  <div class="mt-next" x-text="task.next_action"></div>
+                </template>
+                <template x-if="!task.next_action && task.excerpt">
+                  <div class="mt-next" x-text="cleanExcerpt(task.excerpt)"></div>
+                </template>
+                <template x-if="task.kind === 'task' && hasTrackedTime(task)">
+                  <div class="mt-time-line" x-text="savedTimeLabel(task)"></div>
+                </template>
+                <template x-if="needsRestartStep(task)">
+                  <span class="mt-badge mt-badge-danger mt-badge-square mt-restart-badge">needs restart step</span>
+                </template>
+                <template x-if="(task.tags && task.tags.length) || task.comment_count">
+                  <div class="mt-card-footer">
+                    <div class="mt-tags">
+                      <template x-for="tag in (task.tags || [])" :key="tag">
+                        <span class="mt-badge mt-badge-success mt-tag" x-text="tag"></span>
+                      </template>
+                    </div>
+                    <span class="mt-comment-count" x-show="task.comment_count" :title="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12.5a7.5 7.5 0 0 1-10.9 6.7L4 20.5l1.4-4.4A7.5 7.5 0 1 1 20 12.5Z"/></svg>
+                      <span x-text="task.comment_count" aria-hidden="true"></span><span class="mt-sr-only" x-text="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'"></span>
+                    </span>
+                  </div>
+                </template>
+              </article>

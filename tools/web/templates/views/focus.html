@@ -1,0 +1,73 @@
+<template x-if="mode === 'focus'">
+<div>
+      <section class="mt-overview">
+        <article class="mt-panel mt-surface">
+          <h2>Focus</h2>
+          <template x-if="focusTask()">
+            <div class="mt-focus-card">
+              <div class="mt-card-header">
+                <div class="mt-ref" x-text="focusTask().ref"></div>
+                <div class="mt-badge mt-priority" x-show="hasPriority(focusTask().priority)" :class="priorityClass(focusTask().priority)" x-text="focusTask().priority"></div>
+              </div>
+              <span class="mt-badge mt-status-badge" :class="statusBadgeClass(focusTask().status)" x-text="statusText(focusTask().status)"></span>
+              <div class="mt-title" x-text="focusTask().title"></div>
+              <template x-if="focusTask().due">
+                <time class="mt-badge mt-due" :class="dueClass(focusTask())" :datetime="focusTask().due" :title="focusTask().due" x-text="'Due ' + dateLabel(focusTask().due)"></time>
+              </template>
+              <div class="mt-card-line"><strong>Next:</strong> <span x-text="focusTask().next_action || '-'"></span></div>
+              <div class="mt-card-line"><strong>Why:</strong> <span x-text="focusReason(focusTask())"></span></div>
+              <div class="mt-focus-time mt-time-values mt-layout-group" role="group" aria-label="Task time">
+                <span class="mt-time-session" x-show="timerRunningFor(focusTask())" x-text="timerSessionLabel(focusTask())"></span>
+                <span class="mt-time-total" x-text="savedTimeLabel(focusTask())"></span>
+              </div>
+              <div class="mt-time-buttons" x-cloak>
+                <button type="button" class="mt-button mt-button-compact mt-time-start" x-cloak x-show="showStartTimer(focusTask())" @click="startTimer(focusTask())" :disabled="!canStartTimer(focusTask())" :aria-label="focusTask() && 'Start timer for ' + focusTask().title">Start</button>
+                <button type="button" class="mt-button mt-button-compact mt-time-stop" x-cloak x-show="showStopTimer(focusTask())" @click="stopTimer(focusTask())" :disabled="!canStopTimer(focusTask())" :aria-label="focusTask() && 'Stop timer for ' + focusTask().title">Stop</button>
+              </div>
+            </div>
+          </template>
+          <template x-if="!focusTask()">
+            <p class="mt-empty">No open focus task.</p>
+          </template>
+          <template x-if="focusAlerts().length">
+            <div class="mt-focus-alerts">
+              <h2>Deadlines to check</h2>
+              <template x-for="task in focusAlerts()" :key="task.id">
+                <div class="mt-card-line">
+                  <strong x-text="task.title"></strong>
+                  <span x-text="dateLabel(task.due) + ' · ' + task.action_label"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </article>
+
+        <article class="mt-panel mt-surface">
+          <h2>Follow-ups</h2>
+          <template x-if="followupTasks().length === 0">
+            <p class="mt-empty">No waiting follow-ups.</p>
+          </template>
+          <div class="mt-followups">
+            <template x-for="task in followupTasks()" :key="task.id">
+              <div class="mt-followup-item mt-surface">
+                <div class="mt-ref" x-text="task.ref"></div>
+                <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-text="statusText(task.status)"></span>
+                <div class="mt-followup-title" x-text="task.title"></div>
+                <template x-if="task.due">
+                  <time class="mt-badge mt-due" :class="dueClass(task)" :datetime="task.due" :title="task.due" x-text="'Due ' + dateLabel(task.due)"></time>
+                </template>
+                <div class="mt-card-line"><strong>Next:</strong> <span x-text="task.next_action || '-'"></span></div>
+              </div>
+            </template>
+          </div>
+        </article>
+      </section>
+
+      <section class="mt-focus-list">
+        <template x-for="task in focusModeTasks()" :key="task.id">
+{card}
+        </template>
+      </section>
+
+</div>
+</template>

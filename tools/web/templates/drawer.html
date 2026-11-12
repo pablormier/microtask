@@ -1,0 +1,167 @@
+      <template x-if="selected">
+        <div class="mt-detail-backdrop mt-dialog-backdrop" @click.self="clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (!captureComposer.open) { clearSelection(); }">
+          <section class="mt-detail mt-dialog" role="dialog" aria-modal="true" aria-labelledby="mt-detail-title"
+                   x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)">
+            <header class="mt-detail-header">
+              <div class="mt-detail-heading">
+                <div class="mt-detail-identity"><span class="mt-ref" x-text="selected?.ref"></span><span x-text="selected?.kind === 'note' ? 'Note' : 'Task'"></span><span x-show="selected?.archived">Archived</span><span x-show="selected?.hidden">Hidden</span></div>
+                <h2 id="mt-detail-title" x-text="selected?.title"></h2>
+              </div>
+              <div class="mt-detail-navigation">
+                <button class="mt-button mt-button-quiet mt-button-compact mt-detail-back" type="button" aria-label="Back to previous card" :disabled="!canGoBackReference()" @click="backReference()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>Back</span></button>
+                <details class="mt-card-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+                  <summary class="mt-menu-trigger" aria-label="More card actions" title="More card actions"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
+                  <div class="mt-card-menu-items">
+                    <button type="button" class="mt-button mt-button-compact" @click="archiveSelected()" :disabled="busy || draftBusy || !!contentEditor.draft" :aria-busy="busy" x-text="selected?.archived ? 'Unarchive' : 'Archive'"></button>
+                    <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.draft" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
+                  </div>
+                </details>
+                <button class="mt-button mt-button-quiet mt-button-icon mt-close" type="button" aria-label="Close preview" @click="clearSelection()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+              </div>
+            </header>
+            <div class="mt-detail-workbar" x-show="selected?.kind === 'task' || selected?.needs_review">
+              <div class="mt-detail-status">
+                <template x-if="selected?.kind === 'task'">
+                  <select class="mt-field mt-field-compact mt-status-select" :data-status="moveDestination" x-model="moveDestination" @change="changeSelectedStatus()" :disabled="!canMoveSelected() || busy || draftBusy || !!contentEditor.draft" aria-label="Task status">
+                    <template x-for="status in statuses" :key="status"><option :value="status" :selected="status === moveDestination" x-text="statusText(status)"></option></template>
+                  </select>
+                </template>
+                <span class="mt-detail-owner" x-show="selected?.claimed_by" x-text="'Working: ' + selected?.claimed_by"></span>
+                <span class="mt-badge mt-badge-warning" x-show="selected?.needs_review">Needs review</span>
+                <button type="button" class="mt-button mt-button-compact" x-show="selected?.needs_review" @click="markReviewed(selected)" :disabled="busy || draftBusy || !!contentEditor.draft">Mark reviewed</button>
+              </div>
+              <div class="mt-detail-timer mt-layout-group" x-show="selected?.kind === 'task'" role="group" aria-label="Task timer">
+                <span class="mt-time-readout">
+                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M10 2h4"/></svg>
+                  <span class="mt-time-session" x-show="timerRunningFor(selected)" x-text="timerSessionLabel(selected)"></span>
+                  <span class="mt-time-total" x-text="savedTimeLabel(selected)"></span>
+                </span>
+                <button type="button" class="mt-button mt-button-compact" x-show="showStartTimer(selected)" @click="startTimer(selected)" :disabled="!canStartTimer(selected) || !!contentEditor.draft" :aria-label="'Start timer for ' + selected?.title">Start</button>
+                <button type="button" class="mt-button mt-button-compact" x-show="showStopTimer(selected)" @click="stopTimer(selected)" :disabled="!canStopTimer(selected) || !!contentEditor.draft" :aria-label="'Stop timer for ' + selected?.title">Stop</button>
+              </div>
+            </div>
+            <div class="mt-detail-layout">
+              <section class="mt-detail-content" aria-label="Card content">
+                <header class="mt-content-header">
+                  <h3>Content</h3>
+                  <button type="button" class="mt-button mt-button-compact mt-content-edit" x-show="!contentEditor.draft" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
+                </header>
+                <p class="mt-content-load-status" role="status" x-show="detailLoading">Loading card content…</p>
+                <div class="mt-content-load-error" role="alert" x-show="detailError">
+                  <p x-text="detailError"></p>
+                  <button type="button" class="mt-button mt-button-compact" @click="loadSelectedDetails(true)" :disabled="detailLoading">Retry content</button>
+                </div>
+                <template x-if="contentEditor.draft">
+                  <div class="mt-content-editor">
+                    <div class="mt-segmented" role="group" aria-label="Content editor mode">
+                      <button class="mt-segment" type="button" :aria-pressed="contentEditor.tab === 'write'" @click="contentEditor.tab = 'write'">Write</button>
+                      <button class="mt-segment" type="button" :aria-pressed="contentEditor.tab === 'preview'" @click="contentEditor.tab = 'preview'">Preview</button>
+                    </div>
+                    <textarea class="mt-field mt-content-input" x-ref="detailContentInput" x-show="contentEditor.tab === 'write'" x-model="contentEditor.text" @input="contentEditor.persist(contentContext())" :disabled="draftBusy || contentEditor.saving" aria-label="Content Markdown" @keydown.meta.enter.prevent="contentEditor.save(contentContext())" @keydown.ctrl.enter.prevent="contentEditor.save(contentContext())"></textarea>
+                    <div class="mt-preview mt-content-preview" x-show="contentEditor.tab === 'preview'" x-html="contentEditor.preview(contentContext())"></div>
+                    <p class="mt-composer-recovery-warning" role="status" x-show="contentEditor.error" x-text="contentEditor.error"></p>
+                    <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.messageError" x-text="captureComposer.message"></p>
+                    <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.recoveryWarning" x-text="captureComposer.recoveryWarning"></p>
+                    <p class="mt-composer-recovery-warning" role="status" x-show="contentEditor.draft?._orphanedLocal">This draft changed elsewhere. Your text is kept in Drafts for recovery.</p>
+                    <footer class="mt-content-footer">
+                      <span class="mt-composer-storage-status" role="status" x-text="draftWorkspaceStatus || 'Changes are kept as a draft'"></span>
+                      <template x-if="contentEditor.draft?._orphanedLocal">
+                        <div class="mt-layout-group" role="group" aria-label="Content draft recovery">
+                          <button type="button" class="mt-button mt-button-danger" @click="dismissLocalWorkspaceDraft(contentEditor.draft)" :disabled="draftBusy">Dismiss local copy</button>
+                          <button type="button" class="mt-button mt-button-primary" @click="recoverLocalWorkspaceDraft(contentEditor.draft)" :disabled="draftBusy" :aria-busy="draftBusy">Recover as separate draft</button>
+                        </div>
+                      </template>
+                      <template x-if="!contentEditor.draft?._orphanedLocal">
+                        <div class="mt-layout-group" role="group" aria-label="Content draft actions">
+                          <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="draftBusy || contentEditor.saving">Cancel</button>
+                          <button type="button" class="mt-button mt-button-primary" @click="contentEditor.save(contentContext())" :disabled="!contentEditor.canSave(contentContext()) || contentEditor.saving" :aria-busy="draftBusy || contentEditor.saving">Save content</button>
+                        </div>
+                      </template>
+                    </footer>
+                  </div>
+                </template>
+                <div class="mt-preview" x-show="!contentEditor.draft" x-ref="preview" x-html="previewHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <div class="mt-card-properties-preview" x-show="!contentEditor.draft" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <form class="mt-comment-composer" x-show="!contentEditor.draft" @submit.prevent="commentSelected()">
+                  <textarea class="mt-field" x-model="commentText" :disabled="busy" aria-label="Comment text" placeholder="Leave a comment"></textarea>
+                  <button type="submit" class="mt-button mt-button-compact" :disabled="busy || !commentText.trim()" :aria-busy="busy">Comment</button>
+                </form>
+              </section>
+              <aside class="mt-properties-panel" aria-label="Card properties">
+                <header class="mt-properties-header"><h3>Properties</h3></header>
+                <form class="mt-properties-form" @submit.prevent="propertyEditor.apply(propertyContext())">
+                  <!-- Keyed by card so the shared editor re-initializes for each card's kind and values. -->
+                  <template x-for="cardId in [selected?.id]" :key="cardId">
+                    <div x-data="cardMetadataEditor(propertyEditor.form, false, 'drawer', cardMetadataConfig(), propertyEditor.errors, selected?.kind)"
+                         x-effect="disabled = busy || draftBusy || propertyEditor.saving; syncIdentity(selected && selected?.id + ':' + propertyEditor.version, propertyEditor.form, propertyEditor.errors)"
+                         @metadata-change="propertyEditor.form = { ...propertyEditor.form, ...$event.detail }">
+                      {card_metadata_editor}
+                    </div>
+                  </template>
+                  <div class="mt-properties-text">
+                  <label class="mt-detail-property-field">Title
+                    <input class="mt-field" type="text" x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving" autocomplete="off">
+                  </label>
+                  <template x-if="selected?.kind === 'task'">
+                    <label class="mt-detail-property-field">Next action
+                      <textarea class="mt-field" x-model="propertyEditor.form.next_action" :disabled="busy || draftBusy || propertyEditor.saving" rows="3"></textarea>
+                    </label>
+                  </template>
+                  <label class="mt-detail-property-field">Processing instructions
+                    <textarea class="mt-field" x-model="propertyEditor.form.processing_instructions" :disabled="busy || draftBusy || propertyEditor.saving" rows="3" placeholder="How should this be organized or triaged?"></textarea>
+                  </label>
+                  </div>
+                  <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.conflict">This card changed while you were editing. Your changes are kept here. Reset to load the latest properties.</p>
+                  <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.error" x-text="propertyEditor.error"></p>
+                  <footer class="mt-properties-footer" x-show="propertyEditor.changed()">
+                    <span class="mt-unsaved-indicator" role="status" x-text="contentEditor.draft ? 'Save or close the content editor first' : 'Unsaved changes'"></span>
+                    <button type="button" class="mt-button" @click="propertyEditor.begin(selected, taskDefaults)" :disabled="busy || draftBusy">Reset</button>
+                    <button type="submit" class="mt-button mt-button-primary" :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="busy || propertyEditor.saving">Save changes</button>
+                  </footer>
+                </form>
+              </aside>
+            </div>
+            <footer class="mt-detail-footer">
+              <span>Created <time :datetime="selected?.created" :title="selected?.created" x-text="dateLabel(selected?.created)"></time></span>
+              <span>Updated <time :datetime="selected?.updated" :title="selected?.updated" x-text="dateLabel(selected?.updated)"></time></span>
+            </footer>
+          </section>
+          <div class="mt-card-popover"
+               x-cloak
+               x-show="hoverCard"
+               x-transition.opacity.duration.120ms
+               :style="hoverCard ? `top: ${hoverPos.top}px; left: ${hoverPos.left}px; transform: ${hoverPos.placeAbove ? 'translateY(-100%)' : 'none'};` : ''"
+               @mouseenter="keepHoverCard()"
+               @mouseleave="scheduleClearHoverCard()">
+            <template x-if="hoverCard">
+              <div class="mt-card-popover-inner">
+                <div class="mt-card-popover-header">
+                  <span class="mt-ref" x-text="hoverCard?.ref"></span>
+                  <span class="mt-badge mt-badge-neutral" x-text="hoverCard?.kind"></span>
+                  <span class="mt-badge mt-status-badge" :class="statusBadgeClass(hoverCard?.status)" x-show="hoverCard?.status" x-text="statusText(hoverCard?.status)"></span>
+                  <span class="mt-badge mt-priority" :class="priorityClass(hoverCard?.priority)" x-show="hasPriority(hoverCard?.priority)" x-text="hoverCard?.priority"></span>
+                  <span class="mt-badge mt-badge-warning mt-needs-review" x-show="hoverCard?.needs_review">Needs review</span>
+                </div>
+                <div class="mt-card-popover-title" x-text="hoverCard?.title"></div>
+                <template x-if="hoverCard?.next_action">
+                  <div class="mt-card-popover-next">
+                    <span class="mt-card-popover-label">Next:</span>
+                    <span x-text="hoverCard?.next_action"></span>
+                  </div>
+                </template>
+                <template x-if="!hoverCard?.next_action && hoverCard?.excerpt">
+                  <div class="mt-card-popover-excerpt" x-text="cleanExcerpt(hoverCard?.excerpt)"></div>
+                </template>
+                <div class="mt-card-popover-meta" x-show="hoverCard?.project || hoverCard?.topic || hoverCard?.due || (hoverCard?.tags && hoverCard?.tags.length)">
+                  <span class="mt-card-popover-meta-item" x-show="hoverCard?.project" x-text="'Project: ' + hoverCard?.project"></span>
+                  <span class="mt-card-popover-meta-item" x-show="hoverCard?.topic" x-text="'Topic: ' + hoverCard?.topic"></span>
+                  <time class="mt-badge mt-due" :class="dueClass(hoverCard)" x-show="hoverCard?.due" :datetime="hoverCard?.due" :title="hoverCard?.due" x-text="'Due ' + dateLabel(hoverCard?.due)"></time>
+                  <template x-for="tag in (hoverCard?.tags || []).slice(0, 3)" :key="tag">
+                    <span class="mt-badge mt-badge-success mt-tag" x-text="tag"></span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>

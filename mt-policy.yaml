@@ -1,0 +1,65 @@
+statuses:
+  inbox: "Inbox"
+  active: "Todo"
+  doing: "In progress"
+  waiting: "Waiting"
+  someday: "Someday" # optional; remove if unused
+  done: "Done"
+
+view_labels:
+  archive: "Archive"
+
+priorities:
+  urgent: "Time-sensitive or blocking important work"
+  high: "Important and should be done soon"
+  medium: "Normal priority after triage"
+  low: "Minor or optional"
+  none: "Unassigned; awaiting triage or reference material"
+
+types:
+  task: "Concrete action"
+  bug: "Something broken that needs fixing"
+  idea: "Possible future improvement"
+  decision: "A decision to make or record"
+  reminder: "Something to remember at a specific or approximate time"
+
+due_kinds:
+  deadline: "Hard due date; missing it matters"
+  target: "Soft or ideal planning date"
+  reminder: "Date to resurface the item, not completion pressure"
+
+suggested_topics:
+  - personal
+  - work
+  - finance
+  - health
+  - admin
+  - learning
+  - home
+  - relationships
+
+suggested_tags:
+  - reading       # read/review an article, paper, book, or link
+  - writing       # create, edit, or produce written output
+  - code          # write, review, or debug code
+  - research      # investigate/explore a topic before deciding
+  - admin         # errands, paperwork, accounts, logistics
+  - followup      # waiting on a nudge/reply from someone
+  - finance       # money: invoices, taxes, payments, budgeting
+  - health        # appointments, fitness, medical
+  - meeting       # schedule/prepare/attend a meeting or call
+  - home          # household, chores, repairs
+
+default_status: inbox
+default_priority: none
+default_type: task
+
+rules:
+  auto_sync: false
+  list_done_limit: 10
+  max_doing_tasks: 5
+  timer_warn_hours: 8 # warn about forgotten timers; never cap recorded time
+  demo_workspace: true
+  show_year_progress: true
+  show_deadline_progress: true
+  deadline_progress_start: created

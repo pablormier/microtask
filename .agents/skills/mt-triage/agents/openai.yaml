@@ -1,0 +1,3 @@
+interface:
+  display_name: "Microtask Triage"
+  short_description: "Clarify and organize microtask inbox captures"

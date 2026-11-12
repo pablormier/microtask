@@ -1,0 +1,16 @@
+name: Capture task or note
+description: Save useful text for review in microtask
+labels: ["microtask-capture"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: The importer saves this issue as a note for review. Use the body for complete source text, including useful headings, tables, code, and links. Use absolute URLs for links that should work after capture.
+  - type: textarea
+    id: content
+    attributes:
+      label: Content
+      description: Optional when the issue title contains all the text to capture.
+      placeholder: Paste the complete reference or request here.
+    validations:
+      required: false

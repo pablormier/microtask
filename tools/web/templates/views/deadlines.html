@@ -1,0 +1,67 @@
+<template x-if="mode === 'deadlines'">
+      <section class="mt-deadline-list">
+        <template x-if="showYearProgress">
+          <div class="mt-year-progress mt-surface">
+            <div class="mt-year-progress-head">
+              <span class="mt-year-progress-title">Year progress</span>
+              <div class="mt-year-progress-meta">
+                <span class="mt-year-progress-count" x-text="yearTimeLeft()"></span>
+                <span class="mt-year-progress-label" x-text="yearProgressLabel()"></span>
+              </div>
+            </div>
+            <div class="mt-progress-track">
+              <div class="mt-progress-fill" :style="'width:' + yearProgressPercent() + '%'" role="progressbar" aria-label="Year progress" :aria-valuenow="yearProgressPercent()" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+          </div>
+        </template>
+        <div class="mt-view-controls">
+          <label class="mt-view-control">
+            <span class="mt-filter-heading">Group by</span>
+            <select class="mt-field mt-field-compact" x-model="settings.deadlines.group" aria-label="Group deadlines by">
+              <option value="none">No grouping</option>
+              <option value="due_kind">Deadline type</option>
+              <option value="priority">Priority</option>
+              <option value="status">Status</option>
+              <option value="type">Type</option>
+              <option value="project">Project</option>
+              <option value="topic">Topic</option>
+            </select>
+          </label>
+        </div>
+        <template x-if="deadlineItems().length === 0">
+          <p class="mt-empty">No deadline entries.</p>
+        </template>
+        <template x-for="row in deadlineRows()" :key="row.key">
+          <div>
+            <template x-if="row.group !== undefined">
+              <h2 class="mt-deadline-group-title" x-text="row.group"></h2>
+            </template>
+            <template x-if="row.item">
+                <div class="mt-deadline-row mt-surface" :class="dueClass(row.item)" role="button" tabindex="0" @click="select(row.item, $event)" @keydown.enter.stop.prevent="select(row.item, $event)" @keydown.space.stop.prevent="select(row.item, $event)">
+                  <div class="mt-deadline-main">
+                    <span class="mt-deadline-title" x-text="row.item.title"></span>
+                    <div class="mt-deadline-meta">
+                      <span class="mt-ref" x-text="row.item.ref"></span>
+                      <span class="mt-badge mt-status-badge" :class="statusBadgeClass(row.item.status)" x-show="row.item.kind === 'task' && row.item.status" x-text="statusText(row.item.status)"></span>
+                      <span class="mt-badge mt-badge-square mt-due-kind" x-show="settings.deadlines.group !== 'due_kind'" :class="hasDeadlineDue(row.item) ? 'is-hard' : 'is-soft'" x-text="row.item.due_kind"></span>
+                    </div>
+                    <span class="mt-deadline-desc" x-show="row.item.excerpt" x-text="cleanExcerpt(row.item.excerpt)"></span>
+                  </div>
+                  <div class="mt-deadline-summary">
+                    <span class="mt-badge mt-due" :class="dueClass(row.item)" :title="timeLeft(row.item)" x-text="deadlineTimeLeft(row.item)"></span>
+                    <time class="mt-deadline-date" :datetime="row.item.due" :title="row.item.due" x-text="deadlineDateLabel(row.item)"></time>
+                  </div>
+                  <template x-if="showDeadlineProgress">
+                    <div class="mt-deadline-progress">
+                      <div class="mt-progress-track">
+                        <div class="mt-progress-fill" :style="'width:' + deadlineProgressPercent(row.item) + '%' + ';--mt-deadline-elapsed:' + deadlineProgressPercent(row.item) + '%'" role="progressbar" :aria-label="'Time elapsed toward ' + row.item.title" :aria-valuenow="deadlineProgressPercent(row.item)" aria-valuemin="0" aria-valuemax="100"></div>
+                      </div>
+                      <span class="mt-progress-label" x-text="deadlineProgressLabel(row.item)"></span>
+                    </div>
+                  </template>
+                </div>
+            </template>
+          </div>
+        </template>
+      </section>
+</template>
