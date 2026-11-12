@@ -102,6 +102,14 @@ class TopicCliTests(unittest.TestCase):
         search = json.loads(self.ok("search", "Deep", "--topic", "learning", "--all", "--json"))
         self.assertEqual([item["title"] for item in search], ["Deep"])
 
+    def test_date_options_accept_relative_ages_and_reject_bad_ones(self) -> None:
+        self.add("Fresh")
+        self.assertEqual([item["title"] for item in json.loads(self.ok("list", "--updated-since", "1w", "--json"))], ["Fresh"])
+        self.assertEqual(json.loads(self.ok("list", "--updated-before", "1w", "--json")), [])
+        failed = self.mt("list", "--updated-before", "3x")
+        self.assertEqual(failed.returncode, 2)
+        self.assertIn("or an age like 2w, 3m, 1y", failed.stderr)
+
     def test_environment_scope_files_and_selects_cards_until_an_option_overrides_it(self) -> None:
         import os
         scope = {**os.environ, "MT_PROJECT": "launch", "MT_TOPIC": "work"}

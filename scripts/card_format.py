@@ -9,7 +9,8 @@ import hashlib
 import math
 import re
 import uuid
-from datetime import datetime
+import calendar
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from vendor import yaml
@@ -210,6 +211,24 @@ def topic_within(topic: object, ancestor: str) -> bool:
         return False
     wanted = topic_key(ancestor)
     return topic_key(topic)[:len(wanted)] == wanted
+
+
+def relative_date(value: str, today: date) -> date | None:
+    """`today` minus an age like 0d, 2w, 3m, or 1y; months and years clamp the day. None otherwise."""
+    match = re.fullmatch(r"(\d+)([dwmy])", value.strip().lower())
+    if not match:
+        return None
+    count, unit = int(match[1]), match[2]
+    if unit in "dw":
+        try:
+            return today - timedelta(days=count * (7 if unit == "w" else 1))
+        except OverflowError:
+            return None
+    months = today.year * 12 + today.month - 1 - count * (12 if unit == "y" else 1)
+    year, month = divmod(months, 12)
+    if not 1 <= year <= 9999:
+        return None
+    return date(year, month + 1, min(today.day, calendar.monthrange(year, month + 1)[1]))
 
 
 def topic_tree(counts: dict[str, int], suggested: list[str] | tuple[str, ...] = ()) -> list[dict[str, object]]:

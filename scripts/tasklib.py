@@ -3531,7 +3531,7 @@ def metadata_matcher(args: argparse.Namespace, *, list_selection: bool = False):
                     raise ValueError
                 values.append(date.fromisoformat(value))
             except ValueError:
-                print(f"error: {option} must be a valid date in YYYY-MM-DD format", file=sys.stderr)
+                print(f"error: {option} must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
                 return None
         if values[0] is not None and values[1] is not None and values[0] >= values[1]:
             print(f"error: --{field}-since must be earlier than --{field}-before", file=sys.stderr)
@@ -3546,7 +3546,7 @@ def metadata_matcher(args: argparse.Namespace, *, list_selection: bool = False):
             if not is_date(due_before):
                 raise ValueError
         except ValueError:
-            print("error: --due-before must be a valid date in YYYY-MM-DD format", file=sys.stderr)
+            print("error: --due-before must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
             return None
         due_before = f"{due_before}T00:00:00"
     due_after = getattr(args, "due_after", None) or getattr(args, "due_since", None)
@@ -3555,7 +3555,7 @@ def metadata_matcher(args: argparse.Namespace, *, list_selection: bool = False):
             if not is_date(due_after):
                 raise ValueError
         except ValueError:
-            print("error: --due-after must be a valid date in YYYY-MM-DD format", file=sys.stderr)
+            print("error: --due-after must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
             return None
         due_after = f"{due_after}T00:00:00"
     due_mode = getattr(args, "due", None)
@@ -4439,14 +4439,17 @@ def add_card_selection_arguments(command: argparse.ArgumentParser) -> None:
                          help="select tasks of this type (alias: --task-type)")
     for field in ("created", "updated", "due", "completed"):
         since_flags = ("--updated-since", "--since") if field == "updated" else (f"--{field}-since",)
-        command.add_argument(*since_flags, dest=f"{field}_since", metavar="YYYY-MM-DD",
-                             help=f"include cards with {field} on or after this calendar day")
-        command.add_argument(f"--{field}-before", metavar="YYYY-MM-DD",
-                             help=f"include cards with {field} before this calendar day")
-    command.add_argument("--due-after", dest="due_since", metavar="YYYY-MM-DD",
-                         help="alias for --due-since; include cards due on or after this date")
+        command.add_argument(*since_flags, dest=f"{field}_since", metavar="DATE",
+                             help=f"include cards with {field} on or after this day ({DATE_HELP})")
+        command.add_argument(f"--{field}-before", metavar="DATE",
+                             help=f"include cards with {field} before this day ({DATE_HELP})")
+    command.add_argument("--due-after", dest="due_since", metavar="DATE",
+                         help=f"alias for --due-since; include cards due on or after this date ({DATE_HELP})")
     command.add_argument("--archived", action="store_true", help="select archived cards, including hidden ones")
     command.add_argument("--hidden", action="store_true", help="select hidden cards, including archived ones")
+
+
+DATE_HELP = "YYYY-MM-DD or an age like 2w, 3m, 1y"
 
 
 def add_metadata_filter_arguments(
@@ -4468,27 +4471,27 @@ def add_metadata_filter_arguments(
         command.add_argument("--needs-review", action="store_true", help=f"select {item_label} marked for review")
     command.add_argument(
         "--since", "--updated-since", dest="since",
-        metavar="YYYY-MM-DD",
-        help=f"include {item_label} updated on or after this date",
+        metavar="DATE",
+        help=f"include {item_label} updated on or after this date ({DATE_HELP})",
     )
     for field in ("created", "updated", "completed"):
         if field == "updated":
-            command.add_argument("--updated-before", metavar="YYYY-MM-DD",
-                                 help=f"include {item_label} updated before this date (exclusive)")
+            command.add_argument("--updated-before", metavar="DATE",
+                                 help=f"include {item_label} updated before this date, exclusive ({DATE_HELP})")
             continue
-        command.add_argument(f"--{field}-since", metavar="YYYY-MM-DD",
-                             help=f"include {item_label} {field} on or after this date")
-        command.add_argument(f"--{field}-before", metavar="YYYY-MM-DD",
-                             help=f"include {item_label} {field} before this date (exclusive)")
+        command.add_argument(f"--{field}-since", metavar="DATE",
+                             help=f"include {item_label} {field} on or after this date ({DATE_HELP})")
+        command.add_argument(f"--{field}-before", metavar="DATE",
+                             help=f"include {item_label} {field} before this date, exclusive ({DATE_HELP})")
     command.add_argument(
         "--due-before",
-        metavar="YYYY-MM-DD",
-        help=f"include {item_label} due before this calendar day (exclusive)",
+        metavar="DATE",
+        help=f"include {item_label} due before this day, exclusive ({DATE_HELP})",
     )
     command.add_argument(
         "--due-after", "--due-since", dest="due_after",
-        metavar="YYYY-MM-DD",
-        help=f"include {item_label} due on or after this date",
+        metavar="DATE",
+        help=f"include {item_label} due on or after this date ({DATE_HELP})",
     )
     command.add_argument(
         "--due",
@@ -5462,7 +5465,8 @@ def command_web(args: argparse.Namespace) -> int:
         return 130
 
 
-WEB_FILTERS = ("project", "topic", "tag")
+WEB_FILTERS = ("project", "topic", "tag", "updated")
+WEB_UPDATED_CHOICES = ("2w", "1m", "3m", "1y", "older-3m", "older-1y")
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
@@ -5473,6 +5477,7 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--project", help="open the board filtered to this project")
     parser.add_argument("--topic", metavar="PATH", help="open the board filtered to this topic and everything under it")
     parser.add_argument("--tag", help="open the board filtered to this tag")
+    parser.add_argument("--updated", choices=WEB_UPDATED_CHOICES, help="open the board filtered by last update")
 
 
 class MtArgumentParser(argparse.ArgumentParser):
@@ -6102,6 +6107,12 @@ def main() -> int:
         return 2
     root_parser = parser()
     args = root_parser.parse_args(arguments)
+    # Resolve ages like 2w once, so saved bulk-edit plans hold absolute dates.
+    for name in ("since", "created_since", "created_before", "updated_since", "updated_before",
+                 "completed_since", "completed_before", "due_since", "due_before", "due_after"):
+        resolved = card_format.relative_date(getattr(args, name, None) or "", date.today())
+        if resolved:
+            setattr(args, name, resolved.isoformat())
     scope = apply_env_scope(args)
     if args.command == "run":
         if args.argv and args.argv[0] == "--":

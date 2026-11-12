@@ -844,6 +844,11 @@ def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, di
     return HTTPStatus.NOT_FOUND, {"error": "not found"}
 
 
+def board_filters(args: argparse.Namespace) -> dict:
+    """The board filters given on the command line (--project, --topic, ...)."""
+    return {name: getattr(args, name) for name in tasklib.WEB_FILTERS}
+
+
 def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
     """Return the dashboard address, opening on the given board filters."""
     query = urlencode({key: value for key, value in (filters or {}).items() if value})
@@ -879,8 +884,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    filters = {name: getattr(args, name) for name in tasklib.WEB_FILTERS}
-    return serve_dashboard(args.host, args.port, no_open=args.no_open, filters=filters)
+    return serve_dashboard(args.host, args.port, no_open=args.no_open, filters=board_filters(args))
 
 
 if __name__ == "__main__":

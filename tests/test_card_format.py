@@ -13,6 +13,17 @@ import validators
 
 
 class CardFormatTests(unittest.TestCase):
+    def test_relative_dates_subtract_calendar_spans(self) -> None:
+        from datetime import date
+        today = date(2026, 3, 31)
+        for value, expected in (("0d", today), ("10D", date(2026, 3, 21)), ("2w", date(2026, 3, 17)),
+                                ("1m", date(2026, 2, 28)), ("3M", date(2025, 12, 31)), ("1y", date(2025, 3, 31))):
+            self.assertEqual(cards.relative_date(value, today), expected, value)
+        self.assertEqual(cards.relative_date("1y", date(2024, 2, 29)), date(2023, 2, 28))
+        self.assertEqual(cards.relative_date("1m", date(2024, 3, 31)), date(2024, 2, 29))
+        for bad in ("", "3", "d", "3x", "-1d", "1.5w", "2026-03-01", "1 w"):
+            self.assertIsNone(cards.relative_date(bad, today), bad)
+
     def test_task_checkbox_toggle_touches_only_the_marker(self):
         body = ("- [ ] one\r\n  * [X] two\r\n1. [x] three\n> - [ ] quoted\n"
                 "- plain [ ] text\n- [ ]no space\n```\n- [ ] fenced\n```\n+ [ ] last")

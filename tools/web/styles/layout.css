@@ -164,12 +164,14 @@
 .mt-filter-controls .mt-field-topic { flex: 0 0 150px; width: 150px; }
 .mt-filter-controls .mt-field-tag { flex: 0 0 100px; width: 100px; }
 .mt-filter-controls .mt-field-due { flex: 0 0 130px; width: 130px; }
+.mt-filter-controls .mt-field-updated { flex: 0 0 200px; width: 200px; }
 .mt-filter-controls .mt-field-status select,
 .mt-filter-controls .mt-field-priority select,
 .mt-filter-controls .mt-field-type select,
 .mt-filter-controls .mt-field-project select,
 .mt-filter-controls .mt-field-topic input,
 .mt-filter-controls .mt-field-due select,
+.mt-filter-controls .mt-field-updated select,
 .mt-filter-controls .mt-field-tag input { width: 100%; min-width: 0; }
 .mt-demo-banner {
   flex: 1 1 12rem;

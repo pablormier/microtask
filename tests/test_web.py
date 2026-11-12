@@ -1010,10 +1010,9 @@ view_labels:
         spec = importlib.util.spec_from_file_location("taskweb_url_test", SOURCE_ROOT / "tools/taskweb.py")
         taskweb = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(taskweb)
-        args = taskweb.parse_args(["--project", "Big project", "--topic", "work/infra"])
-        filters = {"project": args.project, "topic": args.topic, "tag": args.tag}
-        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, filters),
-                         "http://127.0.0.1:8123/?project=Big+project&topic=work%2Finfra")
+        args = taskweb.parse_args(["--project", "Big project", "--topic", "work/infra", "--updated", "older-1y"])
+        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(args)),
+                         "http://127.0.0.1:8123/?project=Big+project&topic=work%2Finfra&updated=older-1y")
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:

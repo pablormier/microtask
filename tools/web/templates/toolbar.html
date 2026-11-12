@@ -140,6 +140,18 @@
                 <option value="none">No due</option>
               </select>
             </label>
+            <label class="mt-field-updated">
+              <span class="mt-sr-only">Updated</span>
+              <select class="mt-field mt-field-compact" x-model="filters.updated" aria-label="Filter by last update">
+                <option value="all">Any update</option>
+                <option value="2w">Updated last 2 weeks</option>
+                <option value="1m">Updated last month</option>
+                <option value="3m">Updated last 3 months</option>
+                <option value="1y">Updated last year</option>
+                <option value="older-3m">Not updated in 3 months</option>
+                <option value="older-1y">Not updated in a year</option>
+              </select>
+            </label>
           </div>
         </section>
       </div>

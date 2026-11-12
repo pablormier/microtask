@@ -65,6 +65,17 @@ class WebCollectionQueryTests(unittest.TestCase):
         self.cards.append(self.card("offset", due="2026-03-28T12:30:00+01:00"))
         self.assertIn("offset", self.results(due="overdue")["cards"])
 
+    def test_updated_filter_keeps_cards_within_or_older_than_a_span(self):
+        self.assertEqual(self.results(updated="all")["cards"], self.results()["cards"])
+        self.cards += [self.card("recent", updated="2026-03-20T09:00:00"), self.card("stale", updated="2025-12-01")]
+        cards = lambda span: set(self.results(updated=span)["cards"])
+        self.assertEqual(cards("2w"), {"recent", "done-a", "note"})
+        self.assertEqual(cards("3m"), {"recent", "done-a", "note"})
+        self.assertEqual(cards("1y"), {"recent", "done-a", "note", "stale"})
+        self.assertEqual(cards("older-3m"), {"today", "past", "done-b", "stale"})
+        self.assertEqual(cards("older-1y"), {"today", "past", "done-b"})
+        self.assertEqual(cards("bogus"), cards("all"))
+
     def test_visibility_and_focus_scopes_and_deadlines_preserve_current_behavior(self):
         result = self.results()
         self.assertNotIn("hidden", result["cards"])

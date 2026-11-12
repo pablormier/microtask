@@ -199,10 +199,10 @@ const VIEW_DEFAULTS = {
 const VIEW_SETTINGS_KEY = "mt-view-settings";
 // Board filters live in the page address so a reload or bookmark keeps them.
 const FILTER_PARAMS = { search: "q", status: "status", priority: "priority", type: "type",
-  project: "project", topic: "topic", tag: "tag", due: "due" };
+  project: "project", topic: "topic", tag: "tag", due: "due", updated: "updated" };
 
 function defaultFilters() {
-  return { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all" };
+  return { search: "", status: "all", priority: "all", type: "all", project: "all", topic: "all", tag: "", due: "all", updated: "all" };
 }
 
 function cardGroupOptions(kind) {
@@ -451,7 +451,7 @@ function taskBoard() {
       const f = this.filters;
       return [
         f.search.trim(), f.status !== "all", f.priority !== "all", f.type !== "all",
-        f.project !== "all", f.topic !== "all", f.tag.trim(), f.due !== "all", this.showHidden,
+        f.project !== "all", f.topic !== "all", f.tag.trim(), f.due !== "all", f.updated !== "all", this.showHidden,
         this.needsReviewOnly
       ].filter(Boolean).length;
     },

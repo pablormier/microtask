@@ -4,7 +4,7 @@ from datetime import datetime, time
 import card_format  # on sys.path via tools/taskweb.py, which inserts scripts/
 
 
-FILTER_FIELDS = ("search", "status", "priority", "type", "project", "topic", "tag", "due")
+FILTER_FIELDS = ("search", "status", "priority", "type", "project", "topic", "tag", "due", "updated")
 
 
 def normalize_query(values=None):
@@ -65,6 +65,13 @@ def matches(item, query, now, *, status=True):
                 return False
             if due_filter == "next7" and (days is None or not 0 <= days <= 7):
                 return False
+    updated_filter = query["updated"]
+    cutoff = card_format.relative_date(updated_filter.removeprefix("older-"), now.date())
+    if cutoff:
+        # ISO dates compare as text; a card without `updated` counts as old.
+        recent = str(item.get("updated") or "")[:10] >= cutoff.isoformat()
+        if recent == updated_filter.startswith("older-"):
+            return False
     search = query["search"].strip().lower()
     if search:
         text = "\n".join(str(item.get(key) or "") for key in
