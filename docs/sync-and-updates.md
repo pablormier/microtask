@@ -55,6 +55,20 @@ optional. To connect a repository later:
 mt run git remote add origin git@github.com:YOU/tasks.git
 ```
 
+Your cards are personal, so origin must be a private repository. Do not fork
+microtask for this: GitHub keeps forks of public repositories public. Create a
+new empty private repository instead.
+
+`mt sync` and the installer check origin before pushing:
+
+- If origin is the microtask app repository (the `upstream` remote or
+  `github.com/pablormier/microtask`), they always refuse.
+- If origin is on GitHub and the [GitHub CLI](https://cli.github.com) (`gh`) is
+  installed and signed in, they ask GitHub for its visibility and refuse a
+  public repository. Without `gh` this check is skipped, so confirm the
+  visibility yourself. To publish cards on purpose, set
+  `rules.allow_public_origin: true` in `mt-policy.yaml`.
+
 ## Update
 
 ```sh

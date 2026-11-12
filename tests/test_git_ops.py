@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -101,6 +102,57 @@ class GitOperationsTests(unittest.TestCase):
                 status = git_ops.workspace_status(Path(temporary))
             self.assertEqual(status.state, "error")
             self.assertIn("cannot execute Git", status.detail)
+
+
+class OriginPublicationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name) / "workspace"
+        self.root.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        self.bin = Path(self.temporary.name) / "bin"
+        self.bin.mkdir()
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def set_remote(self, name: str, url: str) -> None:
+        subprocess.run(["git", "remote", "add", name, url], cwd=self.root, check=True)
+
+    def fake_gh(self, output: str, returncode: int = 0) -> dict[str, str]:
+        gh = self.bin / "gh"
+        gh.write_text(f"#!/bin/sh\ncat <<'JSON'\n{output}\nJSON\nexit {returncode}\n")
+        gh.chmod(0o755)
+        return {"PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    def test_origin_matching_upstream_or_canonical_app_is_refused(self) -> None:
+        self.set_remote("upstream", "https://github.com/example/microtask.git")
+        self.set_remote("origin", "git@github.com:Example/microtask")
+        self.assertIn("application repository", git_ops.origin_publication_problem(self.root, allow_public=True))
+
+        subprocess.run(["git", "remote", "remove", "upstream"], cwd=self.root, check=True)
+        subprocess.run(["git", "remote", "set-url", "origin", "ssh://git@github.com/pablormier/microtask/"],
+                       cwd=self.root, check=True)
+        self.assertIn("application repository", git_ops.origin_publication_problem(self.root))
+
+    def test_public_github_origin_is_refused_only_when_gh_reports_it(self) -> None:
+        self.set_remote("origin", "git@github.com:me/tasks.git")
+        with patch.dict(os.environ, {"PATH": str(self.bin)}):
+            self.assertIsNone(git_ops.origin_publication_problem(self.root))
+        with patch.dict(os.environ, self.fake_gh('{"visibility":"PUBLIC","isFork":true}')):
+            problem = git_ops.origin_publication_problem(self.root)
+            self.assertIn("public GitHub repository", problem)
+            self.assertIn("fork", problem)
+            self.assertIsNone(git_ops.origin_publication_problem(self.root, allow_public=True))
+        with patch.dict(os.environ, self.fake_gh('{"visibility":"PRIVATE","isFork":false}')):
+            self.assertIsNone(git_ops.origin_publication_problem(self.root))
+        with patch.dict(os.environ, self.fake_gh("not signed in", returncode=1)):
+            self.assertIsNone(git_ops.origin_publication_problem(self.root))
+
+    def test_local_origin_skips_github_check(self) -> None:
+        self.set_remote("origin", str(Path(self.temporary.name) / "origin.git"))
+        with patch.dict(os.environ, self.fake_gh('{"visibility":"PUBLIC","isFork":false}')):
+            self.assertIsNone(git_ops.origin_publication_problem(self.root))
 
 
 if __name__ == "__main__":

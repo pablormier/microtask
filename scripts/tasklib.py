@@ -492,6 +492,7 @@ def policy() -> dict:
         deterministic_rule_keys = {
             "auto_sync", "list_done_limit", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
             "show_year_progress", "show_deadline_progress", "deadline_progress_start",
+            "allow_public_origin",
         }
         view["rules"] = {key: value for key, value in rules.items() if key in deterministic_rule_keys}
     if view_marker() is not None:
@@ -1539,6 +1540,12 @@ def _command_sync_serialized(args: argparse.Namespace) -> int:
             return 1
         if git_text("remote", "get-url", "origin").returncode != 0:
             print("error: sync requires an 'origin' remote", file=sys.stderr)
+            return 1
+        problem = git_ops.origin_publication_problem(
+            REPO_ROOT, allow_public=policy().get("rules", {}).get("allow_public_origin") is True
+        )
+        if problem:
+            print(f"error: refusing to sync: {problem}", file=sys.stderr)
             return 1
         branch = git_text("rev-parse", "--abbrev-ref", "HEAD")
         if branch.returncode != 0 or branch.stdout.strip() == "HEAD":
@@ -5891,7 +5898,15 @@ def parser() -> argparse.ArgumentParser:
     delete.add_argument("--by", metavar="USERNAME",
                         help="username; defaults to MT_USERNAME, default_username, or the system username")
 
-    sync = sub.add_parser("sync", help="sync task changes with origin")
+    sync = sub.add_parser(
+        "sync",
+        help="sync task changes with origin",
+        description=(
+            "Commit card, draft, and policy changes, merge origin, and push. Refuses when origin is the "
+            "microtask application repository, or, when the GitHub CLI (gh) is available, a public "
+            "GitHub repository unless rules.allow_public_origin is true."
+        ),
+    )
     sync.add_argument("-m", "--message", help="override the generated commit message")
     sync.set_defaults(func=command_sync)
 

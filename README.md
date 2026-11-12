@@ -47,7 +47,8 @@ mt done @4e91a7c2
 A new workspace starts with example cards so every command has something to
 work on. They disappear as soon as you create your first card.
 
-To sync across machines, pass a private repository when installing
+To sync across machines, create an empty private repository (not a fork,
+which GitHub keeps public) and pass it when installing
 (`… | bash -s -- ~/todo git@github.com:YOU/tasks.git`). On another machine:
 
 ```sh

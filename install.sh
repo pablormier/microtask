@@ -15,6 +15,40 @@ is_workspace() {
   [[ -x "$1/mt" && -f "$1/scripts/tasklib.py" ]]
 }
 
+# Print "owner/repo" (lowercase) for a GitHub URL; print nothing otherwise.
+github_slug() {
+  local url="${1%/}"
+  url="${url%.git}"
+  if [[ "$url" =~ github\.com(:[0-9]+)?[:/]+([^/]+)/([^/]+)$ ]]; then
+    printf '%s/%s\n' "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" | tr '[:upper:]' '[:lower:]'
+  fi
+}
+
+# Refuse an origin that is the microtask app repository itself.
+check_origin_is_not_app() {
+  local origin="$1" origin_slug app_slug
+  origin_slug="$(github_slug "$origin")"
+  app_slug="$(github_slug "$repository")"
+  if [[ "${origin%/}" == "${repository%/}" || ( -n "$origin_slug" && "$origin_slug" == "$app_slug" ) ]]; then
+    echo "error: $origin is the microtask application repository; pass a private repository you own" >&2
+    exit 1
+  fi
+}
+
+# Refuse a public GitHub origin before the first push. Runs only when the
+# GitHub CLI is installed and can read the repository; otherwise it is skipped.
+check_origin_is_not_public() {
+  local slug visibility
+  slug="$(github_slug "$1")"
+  [[ -n "$slug" ]] && command -v gh >/dev/null 2>&1 || return 0
+  visibility="$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null </dev/null || true)"
+  if [[ "$visibility" == "PUBLIC" ]]; then
+    echo "error: $slug is a public GitHub repository; pushing the workspace there would publish your cards" >&2
+    echo "Make it private, or install without it and connect it later with rules.allow_public_origin: true." >&2
+    exit 1
+  fi
+}
+
 # Per-machine setup for an existing workspace checkout. Uses only Bash
 # builtins besides git so it also works in minimal environments.
 setup_workspace() {
@@ -108,6 +142,8 @@ if command -v git >/dev/null 2>&1; then
     read -r -p "Private repository URL for 'origin' (leave blank to skip): " origin_url < /dev/tty || true
   fi
 
+  [[ -z "$origin_url" ]] || check_origin_is_not_app "$origin_url"
+
   origin_heads=""
   if [[ -n "$origin_url" ]] && ! origin_heads="$(git ls-remote --heads "$origin_url")"; then
     echo "error: cannot read $origin_url; check the URL and your Git access" >&2
@@ -118,6 +154,7 @@ if command -v git >/dev/null 2>&1; then
     # The private repository already holds a workspace: use it.
     git clone --origin origin "$origin_url" "$destination"
   else
+    [[ -z "$origin_url" ]] || check_origin_is_not_public "$origin_url"
     git clone --origin upstream "$repository" "$destination"
     if [[ -n "$origin_url" ]]; then
       git -C "$destination" remote add origin "$origin_url"

@@ -157,7 +157,8 @@ class InstallTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             remote = self.make_workspace_remote(root)
-            env = self.setup_env(root, remote)
+            upstream = root / "upstream.git"
+            env = self.setup_env(root, upstream)
             installer = root / "install.sh"
             shutil.copy2(SOURCE_ROOT / "install.sh", installer)
             workspace = root / "todo"
@@ -167,8 +168,46 @@ class InstallTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(self.git("-C", str(workspace), "remote", "get-url", "origin"), str(remote))
-            self.assertEqual(self.git("-C", str(workspace), "remote", "get-url", "upstream"), str(remote))
+            self.assertEqual(self.git("-C", str(workspace), "remote", "get-url", "upstream"), str(upstream))
             self.assertNotIn("push", result.stderr)
+
+    def test_refuses_app_repository_as_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            remote = self.make_workspace_remote(root)
+            env = self.setup_env(root, remote)
+            workspace = root / "todo"
+
+            result = subprocess.run([str(SOURCE_ROOT / "install.sh"), str(workspace), str(remote) + "/"],
+                                    env=env, text=True, capture_output=True, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("application repository", result.stderr)
+            self.assertFalse(workspace.exists())
+
+    def test_refuses_public_github_origin_when_gh_reports_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            upstream = self.make_workspace_remote(root)
+            empty = root / "empty.git"
+            self.git("init", "--quiet", "--bare", str(empty))
+            env = self.setup_env(root, upstream)
+            (root / "gitconfig").write_text(f'[url "{empty}"]\n\tinsteadOf = https://github.com/me/tasks.git\n')
+            binary = root / "bin"
+            binary.mkdir()
+            (binary / "gh").write_text("#!/bin/sh\necho PUBLIC\n")
+            (binary / "gh").chmod(0o755)
+            env["PATH"] = f"{binary}{os.pathsep}{env['PATH']}"
+            workspace = root / "todo"
+
+            result = subprocess.run([str(SOURCE_ROOT / "install.sh"), str(workspace),
+                                     "https://github.com/me/tasks.git"],
+                                    env=env, text=True, capture_output=True, check=False)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("public GitHub repository", result.stderr)
+            self.assertFalse(workspace.exists())
+            self.assertEqual(self.git("--git-dir", str(empty), "for-each-ref"), "")
 
     def test_unreadable_origin_stops_before_creating_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

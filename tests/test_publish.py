@@ -316,6 +316,20 @@ class SyncTests(unittest.TestCase):
     def test_sync_stops_before_conflicting_claims_in_same_status(self) -> None:
         self.assert_lifecycle_conflict("doing", "doing")
 
+    def test_sync_refuses_origin_that_is_the_app_repository(self) -> None:
+        self.git(self.root, "remote", "add", "upstream", str(self.origin))
+        task = self.add_task()
+        before = self.git(self.root, "rev-parse", "HEAD").stdout
+
+        result = self.run_mt("sync")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("refusing to sync", result.stderr)
+        self.assertEqual(self.git(self.root, "rev-parse", "HEAD").stdout, before)
+        self.assertEqual(
+            self.git(self.root, "ls-tree", "--name-only", "origin/main", "--", f"cards/{task.name}").stdout, ""
+        )
+
     def test_sync_requires_non_task_changes_to_be_clean(self) -> None:
         self.add_task()
         readme = self.root / "README.md"
