@@ -38,6 +38,7 @@
                 </span>
                 <button type="button" class="mt-button mt-button-compact" x-show="showStartTimer(selected)" @click="startTimer(selected)" :disabled="!canStartTimer(selected) || !!contentEditor.draft" :aria-label="'Start timer for ' + selected?.title">Start</button>
                 <button type="button" class="mt-button mt-button-compact" x-show="showStopTimer(selected)" @click="stopTimer(selected)" :disabled="!canStopTimer(selected) || !!contentEditor.draft" :aria-label="'Stop timer for ' + selected?.title">Stop</button>
+                {timer_menu}
               </div>
             </div>
             <div class="mt-detail-layout">

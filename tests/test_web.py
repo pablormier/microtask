@@ -1150,6 +1150,30 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             )
             self.assertEqual(status, 400, last_stopped_payload)
 
+            status, _ = self.post_json(url + "api/time-start", token, {"ref": doing["ref"]})
+            self.assertEqual(status, 200)
+            time.sleep(1.05)
+            status, both_ends = self.post_json(
+                url + "api/time-stop", token, {"ref": doing["ref"], "at": "10:00", "duration": "1s"}
+            )
+            self.assertEqual(status, 400, both_ends)
+            status, trimmed = self.post_json(
+                url + "api/time-stop", token, {"ref": doing["ref"], "duration": "1s"}
+            )
+            self.assertEqual(status, 200, trimmed)
+            self.assertEqual(trimmed["meta"]["time_running"], {})
+            trimmed_doing = self.get_card(url, doing)
+            self.assertEqual(trimmed_doing["time_seconds"], 1)
+
+            status, _ = self.post_json(url + "api/time-start", token, {"ref": doing["ref"]})
+            self.assertEqual(status, 200)
+            status, cancelled = self.post_json(url + "api/time-cancel", token, {"ref": doing["ref"]})
+            self.assertEqual(status, 200, cancelled)
+            self.assertEqual(cancelled["meta"]["time_running"], {})
+            self.assertEqual(len(self.get_card(url, doing)["time_entries"]), 1)
+            status, _ = self.post_json(url + "api/time-cancel", token, {"ref": doing["ref"]})
+            self.assertEqual(status, 400)
+
             status, error_payload = self.post_json(url + "api/move", "bad-token", {"ref": active["ref"], "status": "waiting"})
             self.assertEqual(status, 403)
             self.assertEqual(error_payload["error"], "invalid token")

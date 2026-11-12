@@ -69,11 +69,19 @@ def load_template() -> str:
     index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
     card = (WEB_DIR / "templates" / "card.html").read_text(encoding="utf-8")
     toolbar = (WEB_DIR / "templates" / "toolbar.html").read_text(encoding="utf-8")
-    view_focus = (WEB_DIR / "templates" / "views" / "focus.html").read_text(encoding="utf-8").replace("{card}", card)
+    timer_menu = (WEB_DIR / "templates" / "timer_menu.html").read_text(encoding="utf-8")
+    view_focus = (
+        (WEB_DIR / "templates" / "views" / "focus.html").read_text(encoding="utf-8")
+        .replace("{card}", card)
+        .replace("{timer_menu}", timer_menu.replace("{timer_task}", "focusTask()").replace("{timer_blocked}", ""))
+    )
     view_cards = (WEB_DIR / "templates" / "views" / "cards.html").read_text(encoding="utf-8").replace("{card}", card)
     view_deadlines = (WEB_DIR / "templates" / "views" / "deadlines.html").read_text(encoding="utf-8")
     view_drafts = (WEB_DIR / "templates" / "views" / "drafts.html").read_text(encoding="utf-8")
-    drawer = (WEB_DIR / "templates" / "drawer.html").read_text(encoding="utf-8")
+    drawer = (
+        (WEB_DIR / "templates" / "drawer.html").read_text(encoding="utf-8")
+        .replace("{timer_menu}", timer_menu.replace("{timer_task}", "selected").replace("{timer_blocked}", " || !!contentEditor.draft"))
+    )
     capture_composer = (WEB_DIR / "templates" / "capture_composer.html").read_text(encoding="utf-8")
     card_metadata_editor = (WEB_DIR / "templates" / "card_metadata_editor.html").read_text(encoding="utf-8")
 
@@ -728,11 +736,20 @@ def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, di
     if path == "/api/time-stop":
         if item["kind"] != "task":
             return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
-        return run_mt_command(
-            ["time", "stop", item["ref"]],
-            token,
-            "Timer stopped and saved",
-        )
+        command = ["time", "stop", item["ref"]]
+        ends = {key: body.get(key) for key in ("at", "duration") if body.get(key) not in (None, "")}
+        if len(ends) > 1:
+            return HTTPStatus.BAD_REQUEST, {"error": "give either at or duration, not both"}
+        for key, value in ends.items():
+            if not isinstance(value, str) or not value.strip():
+                return HTTPStatus.BAD_REQUEST, {"error": f"{key} must be text"}
+            command.append(f"--{key}={value.strip()}")
+        return run_mt_command(command, token, "Timer stopped and saved")
+
+    if path == "/api/time-cancel":
+        if item["kind"] != "task":
+            return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
+        return run_mt_command(["time", "cancel", item["ref"]], token, "Timer discarded; no time recorded")
 
     if path == "/api/done":
         if item["kind"] != "task" or item["status"] == "done":

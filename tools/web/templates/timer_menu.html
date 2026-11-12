@@ -1,0 +1,12 @@
+<details class="mt-card-menu mt-timer-menu" x-show="showStopTimer({timer_task})" @toggle="if ($el.open) { timerDuration = ''; placeTimerMenu($el) }" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+                  <summary class="mt-menu-trigger" aria-label="More timer actions" title="More timer actions"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
+                  <div class="mt-card-menu-items mt-timer-menu-items">
+                    <form class="mt-timer-trim" @submit.prevent="stopTimerWithDuration({timer_task}).then(saved => { if (saved) $el.closest('details').open = false })">
+                      <label class="mt-timer-trim-label">Stop and save only
+                        <input class="mt-field mt-field-compact" type="text" x-model="timerDuration" placeholder="1h30m" autocomplete="off" spellcheck="false">
+                      </label>
+                      <button type="submit" class="mt-button mt-button-compact" :disabled="!canStopTimer({timer_task}) || !timerDuration.trim(){timer_blocked}">Save</button>
+                    </form>
+                    <button type="button" class="mt-button mt-button-compact mt-timer-discard" @click="cancelTimer({timer_task}).then(done => { if (done) $el.closest('details').open = false })" :disabled="!canStopTimer({timer_task}){timer_blocked}">Discard timer</button>
+                  </div>
+                </details>

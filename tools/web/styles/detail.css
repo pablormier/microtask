@@ -763,3 +763,11 @@ textarea.mt-content-input { min-height: 22rem; margin: 0; font-family: var(--mt-
   color: var(--mt-danger);
 }
 .mt-content-load-error p { margin: 0 0 var(--mt-space-3); }
+/* Timer menu: trim a forgotten timer to a duration, or discard it. */
+.mt-timer-menu .mt-card-menu-items { min-width: 220px; }
+.mt-timer-menu .mt-card-menu-items.mt-menu-start { right: auto; left: 0; }
+.mt-timer-trim { display: flex; align-items: flex-end; gap: 6px; margin: 0; padding: 4px 6px 6px; border-bottom: 1px solid var(--mt-border); }
+.mt-timer-trim-label { display: grid; flex: 1; gap: 4px; margin: 0; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
+.mt-timer-trim-label .mt-field { margin: 0; }
+.mt-timer-trim .mt-button { flex: none; }
+.mt-card-menu-items > button.mt-timer-discard { color: var(--mt-danger, var(--mt-text)); }

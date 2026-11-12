@@ -23,6 +23,7 @@
               <div class="mt-time-buttons" x-cloak>
                 <button type="button" class="mt-button mt-button-compact mt-time-start" x-cloak x-show="showStartTimer(focusTask())" @click="startTimer(focusTask())" :disabled="!canStartTimer(focusTask())" :aria-label="focusTask() && 'Start timer for ' + focusTask().title">Start</button>
                 <button type="button" class="mt-button mt-button-compact mt-time-stop" x-cloak x-show="showStopTimer(focusTask())" @click="stopTimer(focusTask())" :disabled="!canStopTimer(focusTask())" :aria-label="focusTask() && 'Stop timer for ' + focusTask().title">Stop</button>
+                {timer_menu}
               </div>
             </div>
           </template>

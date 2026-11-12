@@ -250,6 +250,7 @@ function taskBoard() {
     focusContext: { candidates: [], alerts: [], followup_ids: [] },
     runningTimers: {},
     timerWarnHours: 8,
+    timerDuration: "",
 
     apiToken: MT_CONFIG.api_token || "",
     workspaceKey: MT_CONFIG.workspace_key || "",
@@ -1589,7 +1590,7 @@ function taskBoard() {
         this.actionError = false;
         return payload;
       } catch (error) {
-        if (path === "/api/time-start" || path === "/api/time-stop") {
+        if (path === "/api/time-start" || path === "/api/time-stop" || path === "/api/time-cancel") {
           try {
             await this.refreshItems();
           } catch (_) {}
@@ -1638,6 +1639,31 @@ function taskBoard() {
     stopTimer(task) {
       if (!this.canStopTimer(task)) return;
       this.apiPost("/api/time-stop", { ref: task.ref });
+    },
+
+    async stopTimerWithDuration(task) {
+      const duration = String(this.timerDuration || "").trim();
+      if (!this.canStopTimer(task) || !duration) return false;
+      const payload = await this.apiPost("/api/time-stop", { ref: task.ref, duration });
+      if (payload) this.timerDuration = "";
+      return Boolean(payload);
+    },
+
+    // The timer menu opens leftward from its trigger. When the timer row wraps
+    // on a narrow screen, the trigger sits near the left edge, so open rightward.
+    placeTimerMenu(details) {
+      const menu = details && details.querySelector(".mt-card-menu-items");
+      if (!menu) return;
+      menu.classList.remove("mt-menu-start");
+      if (menu.getBoundingClientRect().left < 8) menu.classList.add("mt-menu-start");
+    },
+
+    async cancelTimer(task) {
+      if (!this.canStopTimer(task)) return false;
+      const confirmed = typeof window === "undefined" || typeof window.confirm !== "function"
+        || window.confirm("Discard this timer? The running session will not be recorded.");
+      if (!confirmed) return false;
+      return Boolean(await this.apiPost("/api/time-cancel", { ref: task.ref }));
     },
 
     // ---------------------------------------------------------------------------
