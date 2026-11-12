@@ -30,6 +30,15 @@ class WebCollectionQueryTests(unittest.TestCase):
     def results(self, **query):
         return collection_results(self.cards, query, now=self.now)
 
+    def test_done_since_leaves_old_done_tasks_out_of_cards_but_not_the_archive(self):
+        self.cards.append(self.card("done-new", status="done", completed="2026-03-20T09:00:00"))
+        self.cards.append(self.card("done-undated", status="done"))
+        result = collection_results(self.cards, {}, now=self.now, done_since="2026-03-14")
+        self.assertEqual(result["cards"][-3:], ["done-new", "done-undated", "note"])
+        self.assertNotIn("done-a", result["cards"])
+        self.assertNotIn("done-b", result["cards"])
+        self.assertTrue({"done-a", "done-b", "done-new", "done-undated"} <= set(result["archive"]))
+
     def test_search_covers_body_refs_ids_next_actions_and_tags_case_insensitively(self):
         for field in ("title", "ref", "id", "next_action", "body"):
             with self.subTest(field=field):

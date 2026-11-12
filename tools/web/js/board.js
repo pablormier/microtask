@@ -245,7 +245,6 @@ function taskBoard() {
     workspaceTags: [],
     workspaceUsage: {},
     maxDoingTasks: 1,
-    doneLimit: 10,
     focusContext: { candidates: [], alerts: [], followup_ids: [] },
     runningTimers: {},
     timerWarnHours: 8,
@@ -838,7 +837,7 @@ function taskBoard() {
     // Ordered {key, label, items, countLabel, className, empty} groups. Groups with
     // no value come last as "Ungrouped"; a card with several tags is in each tag's
     // group. With workflow, status groups are the policy statuses, empty ones too,
-    // with the Done cap and the WIP label.
+    // with the WIP label.
     groupCards(items, field, { workflow = false } = {}) {
       if (field === "none") {
         return [{ key: "", label: "", items, countLabel: "", className: {}, empty: "No cards." }];
@@ -861,12 +860,11 @@ function taskBoard() {
       if (buckets.has("")) keys.push("");
       return keys.map(key => {
         const all = buckets.get(key);
-        const capped = columns && key === "done" && this.doneLimit > 0 && all.length > this.doneLimit;
         return {
           key,
           label: key === "" ? "Ungrouped" : this.groupLabel(field, key, workflow),
-          items: capped ? all.slice(0, this.doneLimit) : all,
-          countLabel: capped ? this.doneLimit + " of " + all.length : String(all.length),
+          items: all,
+          countLabel: String(all.length),
           className: columns ? this.columnClass(key) : {},
           empty: columns ? "No tasks." : "No cards."
         };
@@ -1528,7 +1526,6 @@ function taskBoard() {
       this.workspaceTags = meta.workspace_tags || [];
       this.workspaceUsage = meta.workspace_usage || {};
       this.maxDoingTasks = meta.max_doing_tasks || 1;
-      this.doneLimit = meta.done_limit || 10;
       this.focusContext = meta.focus || { candidates: [], alerts: [], followup_ids: [] };
       this.runningTimers = meta.time_running || {};
       this.timerWarnHours = meta.timer_warn_hours || 8;

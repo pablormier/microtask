@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import argparse
+from datetime import date, timedelta
 import importlib.util
 import os
 import re
@@ -381,6 +382,32 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                                "--tag", "reading", "--json")
         self.assertEqual([item["title"] for item in json.loads(composed.stdout)], ["Boundary completion"])
 
+    def test_list_leaves_out_old_done_tasks_unless_asked(self) -> None:
+        today = date.today()
+        old, recent = (today - timedelta(days=40)).isoformat(), (today - timedelta(days=3)).isoformat()
+        self.write_task("2026-06-20-090000-old", "Old done", status="done", updated=old + "T09:00:00",
+                        completed=old + "T09:00:00")
+        self.write_task("2026-06-21-090000-recent", "Recent done", status="done", updated=recent + "T09:00:00",
+                        completed=recent + "T09:00:00")
+
+        def titles(*args: str) -> set[str]:
+            return {item["title"] for item in json.loads(self.run_mt("list", *args, "--json").stdout)}
+
+        self.assertEqual(titles(), {"Recent done"})
+        self.assertEqual(titles("--status", "done"), {"Old done", "Recent done"})
+        self.assertEqual(titles("--all"), {"Old done", "Recent done"})
+        self.assertEqual(titles("--completed-since", "1y"), {"Old done", "Recent done"})
+        (self.root / "mt-policy.local.yaml").write_text("rules:\n  done_window: 2m\n", encoding="utf-8")
+        self.assertEqual(titles(), {"Old done", "Recent done"})
+
+    def test_done_window_defaults_to_two_weeks_and_rejects_bad_values(self) -> None:
+        policy = json.loads(self.run_mt("policy", "--json").stdout)
+        self.assertEqual(policy["rules"]["done_window"], "2w")
+        (self.root / "mt-policy.local.yaml").write_text("rules:\n  done_window: soon\n", encoding="utf-8")
+        result = self.run_mt("policy", "--json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rules.done_window must be an age", result.stderr)
+
     def test_due_filters_compose_and_sort_dates(self) -> None:
         self.write_task("2026-06-20-090000-past", "Past deadline", due="2026-06-20", tags="[deadline]")
         self.write_task("2026-06-21-090000-boundary", "Boundary deadline", due="2026-06-22", tags="[deadline]")
@@ -557,7 +584,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
 
         statuses = self.run_mt("list", "--status", "active", "--status", "done", "--json")
         self.assertEqual({item["title"] for item in json.loads(statuses.stdout)}, {"Active bug", "Done bug"})
-        task_type = self.run_mt("list", "--task-type", "BUG", "--json")
+        task_type = self.run_mt("list", "--task-type", "BUG", "--all", "--json")
         self.assertEqual({item["title"] for item in json.loads(task_type.stdout)}, {"Active bug", "Done bug"})
         self.assertEqual([item["title"] for item in json.loads(
             self.run_mt("list", "--task-type", "buggy", "--json").stdout)], [])
@@ -611,7 +638,6 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         policy = module.load_policy()
         self.assertEqual(policy["statuses"]["someday"], "Maybe later")
         self.assertEqual(policy["rules"]["max_doing_tasks"], "2")
-        self.assertEqual(policy["rules"]["list_done_limit"], "10")
 
     def test_policy_json_hides_unknown_legacy_settings(self) -> None:
         (self.root / "mt-policy.local.yaml").write_text(

@@ -246,6 +246,12 @@ def completion_sort_value(task: "Card") -> str:
     return str(task.frontmatter.get("completed") or task.frontmatter.get("updated") or "")
 
 
+def done_cutoff(today: date | None = None) -> str:
+    """ISO date before which done tasks count as old (rules.done_window back from today)."""
+    window = policy().get("rules", {}).get("done_window", "2w")
+    return card_format.relative_date(window, today or date.today()).isoformat()
+
+
 def is_archived(item: "Card") -> bool:
     return item.frontmatter.get("archived") is True
 
@@ -356,6 +362,11 @@ def time_log_entries(markdown: str | None) -> list[dict[str, object]]:
     if not markdown:
         return []
     properties, _body = card_format.parse_document(markdown)
+    return time_entries_from(properties)
+
+
+def time_entries_from(properties: dict[str, object]) -> list[dict[str, object]]:
+    """Validated time entries from already parsed card properties."""
     entries = properties.get("time_entries", [])
     if not isinstance(entries, list):
         raise ValueError("time_entries must be a list")
@@ -490,7 +501,7 @@ def policy() -> dict:
     rules = raw.get("rules")
     if isinstance(rules, dict):
         deterministic_rule_keys = {
-            "auto_sync", "list_done_limit", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
+            "auto_sync", "done_window", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
             "show_year_progress", "show_deadline_progress", "deadline_progress_start",
             "allow_public_origin",
         }
@@ -883,7 +894,8 @@ def create_editor_recovery_copy(
 
 
 def saved_time_seconds(task: Card) -> int:
-    return sum(int(entry["elapsed_seconds"]) for entry in time_log_entries(task.raw))
+    # The card's properties are already parsed and validated; reparsing task.raw doubled load time.
+    return sum(int(entry["elapsed_seconds"]) for entry in time_entries_from(task.frontmatter))
 
 
 def focus_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, str]:
@@ -3712,6 +3724,11 @@ def command_list(args: argparse.Namespace) -> int:
     if selection is None:
         return 2
     all_items, selected = selection
+    if not (args.all or args.archived or args.statuses or args.completed_since or args.completed_before):
+        cutoff = done_cutoff()
+        selected = [item for item in selected if not (
+            item.is_task and item.frontmatter.get("status") == "done"
+            and "" < completion_sort_value(item)[:10] < cutoff)]
     reference_index = ReferenceIndex(all_items)
     priorities = list(policy().get("priorities", {}).keys())
     rank = {name: index for index, name in enumerate(priorities)}
@@ -5819,7 +5836,9 @@ def parser() -> argparse.ArgumentParser:
         "List visible, unarchived tasks and notes by default. Selection filters combine; "
         "repeated --status values are alternatives. --status and --type select tasks; "
         "--needs-review selects any card marked for review. --all includes hidden and archived cards. "
-        "--archived and --hidden select that state, including cards with both flags."
+        "--archived and --hidden select that state, including cards with both flags. "
+        "Done tasks older than rules.done_window (default 2w) are left out unless --all, --archived, "
+        "--status, --completed-since, or --completed-before is given."
     )
     add_card_selection_arguments(listing)
     listing.add_argument("--sort", choices=("updated", "created", "due", "completed", "priority", "title"),

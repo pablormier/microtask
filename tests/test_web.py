@@ -647,7 +647,6 @@ view_labels:
         self.assertEqual(meta["priority_order"], ["urgent", "high", "medium", "low", "none"])
         self.assertEqual(meta["due_kinds"], ["deadline", "target", "reminder"])
         self.assertEqual(meta["max_doing_tasks"], 5)
-        self.assertEqual(meta["done_limit"], 10)
         self.assertEqual(meta["focus"]["mode"], "auto")
         self.assertTrue(meta["focus"]["candidates"])
         self.assertIn("alerts", meta["focus"])
@@ -1388,13 +1387,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         for i in range(1, 13):
             self.assertIn(f"Completed item {i:02d}", titles)
 
-        # The done limit from policy is wired into the dashboard metadata.
-        meta = json.loads(self.payload_json("meta"))
-        self.assertEqual(meta["done_limit"], 10)
-        self.assertIn("this.doneLimit = meta.done_limit", rendered)
-
-        # Status groups cap done tasks; the Archive collection holds all done and archived cards.
-        self.assertIn("this.doneLimit", rendered)
+        # The Archive collection holds all done and archived cards.
         self.assertIn('this.mode === "archive" ? "archive" : "cards"', rendered)
         archive = json.loads(self.payload_json("collections"))["archive"]
         self.assertEqual(len([i for i in archive if i in {item["id"] for item in done}]), len(done))

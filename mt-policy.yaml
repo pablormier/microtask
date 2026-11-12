@@ -51,7 +51,7 @@ default_type: task
 rules:
   auto_sync: false
   allow_public_origin: false # mt sync refuses a public GitHub origin (checked when gh is installed)
-  list_done_limit: 10
+  done_window: 2w # done tasks older than this leave the board and mt list
   max_doing_tasks: 5
   timer_warn_hours: 8 # warn about forgotten timers; never cap recorded time
   demo_workspace: true

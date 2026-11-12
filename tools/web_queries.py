@@ -103,12 +103,13 @@ def recent_rank(item):
     return (item.get("completed") or item.get("updated") or "", item.get("path") or item["id"])
 
 
-def collection_results(items, values=None, *, now=None):
+def collection_results(items, values=None, *, now=None, done_since=None):
     """Return ordered IDs per collection.
 
     `cards` holds live cards: tasks by rank (done last, by recency), then notes by
     recency. `archive` holds archived cards and done tasks by recency. The client
-    filters either by kind.
+    filters either by kind. `cards` leaves out done tasks completed (or, without
+    that, updated) before the ISO date `done_since`; undated done tasks stay.
     """
     query = normalize_query(values)
     now = now or datetime.now()
@@ -117,7 +118,9 @@ def collection_results(items, values=None, *, now=None):
     tasks = [item for item in live if item["kind"] == "task" and matches(item, query, now)]
     notes = [item for item in live if item["kind"] == "note" and matches(item, query, now, status=False)]
     ordered = sorted((item for item in tasks if item.get("status") != "done"), key=task_rank)
-    ordered += sorted((item for item in tasks if item.get("status") == "done"), key=recent_rank, reverse=True)
+    ordered += sorted((item for item in tasks if item.get("status") == "done"
+                       and not (done_since and "" < recent_rank(item)[0][:10] < done_since)),
+                      key=recent_rank, reverse=True)
     notes.sort(key=lambda item: (item.get("updated") or item.get("created") or "",
                                  item.get("path") or item["id"]), reverse=True)
     archived = [item for item in visible

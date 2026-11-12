@@ -221,8 +221,6 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
     rules = cfg.get("rules", {})
     raw_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
     max_doing = int(str(raw_limit)) if raw_limit is not None and str(raw_limit).isdigit() else 1
-    raw_done_limit = rules.get("list_done_limit") if isinstance(rules, dict) else None
-    done_limit = int(str(raw_done_limit)) if raw_done_limit is not None and str(raw_done_limit).isdigit() and int(str(raw_done_limit)) > 0 else 10
     timers = tasklib.read_time_timers()
     timers = {
         task_id: {**timer, "saved": tasklib.timer_session_saved(task_id, timer)}
@@ -259,7 +257,6 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
         "workspace_tags": sorted(workspace_tags),
         "workspace_usage": usage,
         "max_doing_tasks": max_doing,
-        "done_limit": done_limit,
         "show_year_progress": bool(rules.get("show_year_progress", True)),
         "show_deadline_progress": bool(rules.get("show_deadline_progress", True)),
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
@@ -296,7 +293,7 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None) -> dict
     payload["query"] = normalize_query(query)
     # Search full text on the server without including it in collection responses.
     query_items = [{**summary, "body": item.body} for summary, item in zip(payload["tasks"], ordered)]
-    payload["collections"] = collection_results(query_items, query)
+    payload["collections"] = collection_results(query_items, query, done_since=tasklib.done_cutoff())
     payload["meta"]["draft_count"] = len(draft_store.list_drafts(tasklib.REPO_ROOT))
     return payload
 

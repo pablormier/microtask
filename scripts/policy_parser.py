@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Parse the small YAML subset used by mt-policy.yaml."""
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 import re
+
+import card_format
 
 
 CORE_STATUSES = ("inbox", "active", "doing", "waiting", "done")
@@ -162,6 +165,10 @@ def load_policy() -> dict:
     if not valid_warn_hours:
         raise ValueError("policy rules.timer_warn_hours must be a positive number")
     policy.setdefault("rules", {}).setdefault("timer_warn_hours", 8)
+    done_window = policy["rules"].get("done_window", "2w")
+    if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
+        raise ValueError("policy rules.done_window must be an age like 2w, 30d, or 1m")
+    policy["rules"].setdefault("done_window", "2w")
     return policy
 
 

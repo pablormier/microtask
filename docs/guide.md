@@ -69,7 +69,10 @@ mt read @4e91a7c2
 `list` and `search` share filters (status, kind, type, project, topic, tags,
 dates), sorting, limits, and `--json`; `--full` prints whole cards
 as `mt read --json` does. Archived and hidden cards are left out
-unless you pass `--all`, `--archived`, or `--hidden`. Date filters take
+unless you pass `--all`, `--archived`, or `--hidden`. `list` also leaves out
+done tasks completed longer ago than `rules.done_window` (default `2w`); see
+them with `--status done`, `--completed-since`, or `--all`, or in the
+dashboard's Archive tab. Date filters take
 `YYYY-MM-DD` or an age such as `2w`, `3m`, or `1y` (days, weeks, months, years
 back from today); `since` includes the date and `before` excludes it.
 

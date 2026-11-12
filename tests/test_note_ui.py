@@ -284,14 +284,14 @@ const setup = app => {
   app.statuses = ['inbox', 'active', 'doing', 'done'];
   app.priorityOrder = ['urgent', 'high', 'none'];
   app.dueKinds = ['deadline', 'target'];
-  app.maxDoingTasks = 1; app.doneLimit = 2;
+  app.maxDoingTasks = 1;
   return app;
 };
 const card = (id, extra = {}) => ({id, kind: 'task', status: 'active', priority: 'none', project: null, tags: [], title: id, ...extra});
 const summary = groups => groups.map(g => [g.key, g.items.map(i => i.id)]);
 """
 
-    def test_status_groups_keep_policy_order_empty_groups_wip_label_and_done_cap(self) -> None:
+    def test_status_groups_keep_policy_order_empty_groups_wip_label(self) -> None:
         result = self.run_node(self.GROUP_SETUP + r"""
 const app = setup(taskBoard());
 app.tasks = [card('a'), card('d1', {status: 'doing'}), card('x1', {status: 'done'}), card('x2', {status: 'done'}),
@@ -306,8 +306,8 @@ console.log(JSON.stringify({keys: groups.map(g => g.key), labels: groups.map(g =
         self.assertEqual(result["keys"], ["inbox", "active", "doing", "done", ""])
         self.assertEqual(result["labels"][2], "doing (1/1 max)")
         self.assertEqual(result["labels"][4], "Ungrouped")
-        self.assertEqual(result["counts"], ["0", "1", "1", "2 of 3", "1"])
-        self.assertEqual(result["done"], ["x1", "x2"])
+        self.assertEqual(result["counts"], ["0", "1", "1", "3", "1"])
+        self.assertEqual(result["done"], ["x1", "x2", "x3"])
         self.assertEqual(result["empty"], "No tasks.")
         self.assertTrue(result["over"])
         self.assertTrue(result["quiet"])
