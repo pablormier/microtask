@@ -125,3 +125,8 @@ changed in your workspace, and you can undo any of it.
 - `mt help` and `mt COMMAND --help`: every command and option
 
 Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md) and the [test guide](tests/README.md).
+
+## License
+
+microtask is released under the [MIT License](LICENSE). It bundles PyYAML under
+its own MIT license ([scripts/vendor/PyYAML-LICENSE](scripts/vendor/PyYAML-LICENSE)).
