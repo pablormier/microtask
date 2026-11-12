@@ -256,6 +256,28 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.git(self.workspace, "status", "--porcelain").stdout, "")
         self.assertIn("Nothing was pushed", result.stdout)
 
+    def test_rewritten_upstream_history_explains_how_to_join_it(self) -> None:
+        self.git(self.upstream, "checkout", "--orphan", "rewritten")
+        self.git(self.upstream, "commit", "-m", "Rewritten history")
+        self.git(self.upstream, "branch", "-M", "rewritten", "main")
+        (self.upstream / "README.md").write_text("# After rewrite\n", encoding="utf-8")
+        self.git(self.upstream, "commit", "-am", "Change after rewrite")
+        before = self.git(self.workspace, "rev-parse", "HEAD").stdout
+
+        for arguments in (("--check",), ()):
+            result = self.run_update(*arguments)
+            self.assertNotEqual(result.returncode, 0, arguments)
+            self.assertIn("share no history", result.stderr)
+            self.assertIn("--allow-unrelated-histories", result.stderr)
+            self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").stdout, before)
+
+        self.git(self.workspace, "merge", "-s", "ours", "--allow-unrelated-histories",
+                 "-m", "Adopt rewritten microtask history", "upstream/main")
+        result = self.run_update()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.workspace / "README.md").read_text(), "# After rewrite\n")
+
     def test_update_refuses_dirty_workspace(self) -> None:
         (self.workspace / "README.md").write_text("dirty\n", encoding="utf-8")
 

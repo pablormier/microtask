@@ -194,6 +194,15 @@ def main(argv: list[str] | None = None) -> int:
                     clean_workspace()
                     checked_git("fetch", "upstream")
                     target = checked_git("rev-parse", "--verify", f"{UPSTREAM}^{{commit}}").strip()
+                    if git("merge-base", "HEAD", target).returncode == 1:
+                        raise UpdateError(
+                            "this workspace and upstream/main share no history, usually because the "
+                            "microtask history was rewritten. Check that upstream is microtask with "
+                            "'mt run git remote get-url upstream', then join the histories once without "
+                            "changing any files and run 'mt update' again:\n"
+                            "  mt run git merge -s ours --allow-unrelated-histories "
+                            "-m \"Adopt rewritten microtask history\" upstream/main"
+                        )
                     paths = tree_paths("HEAD") | tree_paths(target)
                     change_list = changes(target, paths)
                     upstream_commits = int(checked_git("rev-list", "--count", f"HEAD..{target}").strip())
