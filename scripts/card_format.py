@@ -442,6 +442,44 @@ def fenced_line_numbers(markdown: str) -> set[int]:
     return result
 
 
+TASK_CHECKBOX_RE = re.compile(r"^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)")
+
+
+def task_checkbox_spans(body: str) -> list[tuple[int, int, str]]:
+    """Return (start, end, state) for each GFM task marker outside fenced code.
+
+    start..end covers the bracketed marker, for example "[ ]".
+    """
+    fenced = fenced_line_numbers(body)
+    spans: list[tuple[int, int, str]] = []
+    offset = 0
+    for number, line in enumerate(body.splitlines(keepends=True)):
+        match = None if number in fenced else TASK_CHECKBOX_RE.match(line)
+        if match:
+            start = offset + match.end(1)
+            spans.append((start, start + 3, match.group(2)))
+        offset += len(line)
+    return spans
+
+
+def toggle_task_checkbox(body: str, index: int, count: int, checked: bool) -> str:
+    """Flip one task checkbox to `checked`.
+
+    The caller rendered the box in the opposite state. A different count or a
+    box already in the requested state means the caller's view and the body
+    disagree, so the edit is refused rather than applied to the wrong line.
+    """
+    spans = task_checkbox_spans(body)
+    if len(spans) != count:
+        raise ValueError("checklist changed; reload the card")
+    if not 0 <= index < len(spans):
+        raise ValueError("checkbox index out of range")
+    start, end, state = spans[index]
+    if (state != " ") == checked:
+        raise ValueError("checklist changed; reload the card")
+    return body[:start] + ("[x]" if checked else "[ ]") + body[end:]
+
+
 EDITABLE_FIELDS = {
     "task": frozenset(EDITABLE_METADATA | {"status", "type"}),
     "note": frozenset(EDITABLE_METADATA - {"next_action"}),

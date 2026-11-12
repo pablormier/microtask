@@ -1076,6 +1076,33 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
+    def test_checkbox_endpoint_toggles_one_item_and_guards_stale_state(self) -> None:
+        subprocess.run([str(self.root / "mt"), "edit", self.tasks[0].stem, "--body", "--file", "-",
+                        "--expected-hash", hashlib.sha256(self.tasks[0].read_text().encode()).hexdigest(),
+                        "--json"],
+                       input="Plan:\n\n- [ ] first\n- [x] second\n", text=True, cwd=self.root,
+                       capture_output=True, check=True)
+        process, url = self.start_interactive_web()
+        try:
+            initial = self.get_json(url + "api/items")
+            token = initial["meta"]["api_token"]
+            task = next(item for item in initial["tasks"] if item["id"] == self.tasks[0].stem)
+            request = {"ref": task["ref"], "expected_hash": task["content_hash"], "index": 0, "count": 2, "checked": True}
+            status, rejected = self.post_json(url + "api/checkbox", token, {**request, "count": 3})
+            self.assertEqual(status, 409, rejected)
+            self.assertIn("checklist changed", rejected["error"])
+            status, saved = self.post_json(url + "api/checkbox", token, request)
+            self.assertEqual(status, 200, saved)
+            self.assertEqual(saved["message"], "Checklist updated")
+            self.assertIn("- [x] first\n- [x] second\n", self.tasks[0].read_text())
+            status, stale = self.post_json(url + "api/checkbox", token, {**request, "index": 1, "checked": False})
+            self.assertEqual(status, 409, stale)
+            self.assertIn("- [x] second", self.tasks[0].read_text())
+            status, invalid = self.post_json(url + "api/checkbox", token, {**request, "checked": "yes"})
+            self.assertEqual(status, 400, invalid)
+        finally:
+            self.stop_interactive_web(process)
+
     def test_server_queries_and_mutations_keep_full_cards_and_global_choices(self) -> None:
         self.tasks[0].write_text(self.tasks[0].read_text().replace("project: null", "project: Alpha"))
         self.tasks[1].write_text(self.tasks[1].read_text().replace("project: null", "project: Beta"))

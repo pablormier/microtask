@@ -1350,6 +1350,26 @@ isolated:other.drafts.length===0,blocked,ready:template.captureComposer.canSave(
         self.assertEqual(result, {'title':'Standup','body':'  Source text.\r\n\r\n','kind':'note',
                                   'isolated':True,'blocked':True,'ready':True})
 
+    def test_only_body_preview_checkboxes_are_enabled_with_indexes(self) -> None:
+        result = self.run_node(r"""
+const mk=()=>{const el={attrs:{},classes:[],removeAttribute(n){delete this.attrs[n];},
+  setAttribute(n,v){this.attrs[n]=v;},classList:{add:c=>el.classes.push(c)}};el.attrs.disabled='';return el;};
+const boxes=[mk(),mk()];
+const body={querySelectorAll:sel=>sel.includes('checkbox')?boxes:[]};
+const count=enableTaskCheckboxes(body);
+const panel=mk();const panelRoot={innerHTML:''};
+global.marked={Renderer:function(){this.link=t=>String(t);this.image=t=>String(t);},parse:()=>'<ul></ul>'};
+global.DOMPurify={sanitize:s=>s};window.marked=marked;window.DOMPurify=DOMPurify;
+renderPropertyPanels({kind:'task',body:'',next_action:'- [ ] a',comments:[]},panelRoot);
+console.log(JSON.stringify({count,attrs:boxes.map(b=>b.attrs),classes:boxes.map(b=>b.classes),
+  panelDisabled:'disabled' in panel.attrs,noop:enableTaskCheckboxes({innerHTML:''})}));
+""")
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(result['attrs'], [{'data-mt-task-index': '0'}, {'data-mt-task-index': '1'}])
+        self.assertEqual(result['classes'], [['mt-task-checkbox']] * 2)
+        self.assertTrue(result['panelDisabled'])
+        self.assertEqual(result['noop'], 0)
+
     def test_body_and_activity_render_independently_for_both_kinds(self) -> None:
         result = self.run_node(r"""
 const parsed=[];

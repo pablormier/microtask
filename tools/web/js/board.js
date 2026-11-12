@@ -1211,16 +1211,21 @@ function taskBoard() {
       }
     },
 
-    async finishContentDraft(draft) {
+    // Run a body-only save, then rebase pending property edits onto the new
+    // content hash, but only when the server preserved their baseline.
+    async saveBodyKeepingProperties(save) {
       const baseline = this.propertyEditor.baseline;
-      const result = await this.finishWorkspaceDraft(draft);
+      const result = await save();
       if (result && this.selected && this.propertyEditor.comparable(
         this.propertyEditor.values(this.selected, this.taskDefaults)) === baseline) {
-        // Rebase pending properties only when the server preserved their baseline.
         this.propertyEditor.baselineHash = this.selected.content_hash;
         this.propertyEditor.conflict = false;
       }
       return result;
+    },
+
+    finishContentDraft(draft) {
+      return this.saveBodyKeepingProperties(() => this.finishWorkspaceDraft(draft));
     },
 
     async discardWorkspaceDraft(draft, confirmed = false) {
@@ -1674,10 +1679,30 @@ function taskBoard() {
       if (!this.selected || typeof this.selected.body !== "string" || typeof document.createElement !== "function") return;
       const preview = document.createElement("div");
       renderPreview(this.selected, preview);
+      enableTaskCheckboxes(preview);
       this.previewHtml = preview.innerHTML;
       const properties = document.createElement("div");
       renderPropertyPanels(this.selected, properties);
       this.propertiesHtml = properties.innerHTML;
+    },
+
+    async toggleTaskCheckbox(event) {
+      const box = event.target.closest && event.target.closest("input.mt-task-checkbox");
+      if (!box || !event.currentTarget.contains(box)) return;
+      // The browser toggles the box on click; keep it as rendered until the server confirms.
+      event.preventDefault();
+      if (!this.selected || this.busy || this.draftBusy || this.contentEditor.draft) return;
+      const index = Number(box.getAttribute("data-mt-task-index"));
+      const count = event.currentTarget.querySelectorAll("input.mt-task-checkbox").length;
+      return this.saveBodyKeepingProperties(() => this.apiPost("/api/checkbox", {
+        ref: this.selected.ref,
+        expected_hash: this.selected.content_hash,
+        index,
+        count,
+        // The checked attribute is the rendered state; box.checked is already flipped by the click.
+        // The server refuses if its marker is not in the opposite state.
+        checked: !box.hasAttribute("checked"),
+      }));
     },
 
     openReference(event) {

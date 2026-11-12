@@ -81,7 +81,7 @@
                     </footer>
                   </div>
                 </template>
-                <div class="mt-preview" x-show="!contentEditor.draft" x-ref="preview" x-html="previewHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <div class="mt-preview" x-show="!contentEditor.draft" x-ref="preview" x-html="previewHtml" @click="openReference($event); toggleTaskCheckbox($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <div class="mt-card-properties-preview" x-show="!contentEditor.draft" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <form class="mt-comment-composer" x-show="!contentEditor.draft" @submit.prevent="commentSelected()">
                   <textarea class="mt-field" x-model="commentText" :disabled="busy" aria-label="Comment text" placeholder="Leave a comment"></textarea>

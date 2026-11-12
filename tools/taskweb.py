@@ -531,6 +531,30 @@ def handle_review(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]
     )
 
 
+def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    """Toggle one task-list checkbox in the card body, guarded by the loaded content hash."""
+    expected_hash = body.get("expected_hash")
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    index, count, checked = body.get("index"), body.get("count"), body.get("checked")
+    for name, value in (("index", index), ("count", count)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return HTTPStatus.BAD_REQUEST, {"error": f"{name} must be a non-negative integer"}
+    if not isinstance(checked, bool):
+        return HTTPStatus.BAD_REQUEST, {"error": "checked must be true or false"}
+    if expected_hash != item.get("content_hash"):
+        return HTTPStatus.CONFLICT, {"error": "card changed since it was loaded; refresh and retry", "conflict": True}
+    card = tasklib.items_by_ref(item["ref"])[0]
+    try:
+        new_body = tasklib.card_format.toggle_task_checkbox(card.body, index, count, checked)
+    except ValueError as error:
+        return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
+    return run_mt_receipt_command(
+        ["edit", item["ref"], "--body", "--file", "-", "--expected-hash", expected_hash, "--json"],
+        token, "Checklist updated", input_text=new_body,
+    )
+
+
 def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
     expected_revision = body.get("expected_revision")
@@ -708,6 +732,9 @@ def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, di
              "--patch", json.dumps(patch, ensure_ascii=False), "--json"],
             token, "Properties saved",
         )
+
+    if path == "/api/checkbox":
+        return handle_checkbox(item, body, token)
 
     if path == "/api/review":
         return handle_review(item, body, token)

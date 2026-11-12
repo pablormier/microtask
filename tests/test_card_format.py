@@ -13,6 +13,28 @@ import validators
 
 
 class CardFormatTests(unittest.TestCase):
+    def test_task_checkbox_toggle_touches_only_the_marker(self):
+        body = ("- [ ] one\r\n  * [X] two\r\n1. [x] three\n> - [ ] quoted\n"
+                "- plain [ ] text\n- [ ]no space\n```\n- [ ] fenced\n```\n+ [ ] last")
+        self.assertEqual([s[2] for s in cards.task_checkbox_spans(body)], [" ", "X", "x", " ", " "])
+        toggled = cards.toggle_task_checkbox(body, 1, 5, False)
+        self.assertEqual(toggled, body.replace("[X] two", "[ ] two"))
+        self.assertEqual(cards.toggle_task_checkbox(body, 0, 5, True)[:12], "- [x] one\r\n ")
+        self.assertIn("> - [x] quoted", cards.toggle_task_checkbox(body, 3, 5, True))
+        self.assertIn("+ [x] last", cards.toggle_task_checkbox(body, 4, 5, True))
+        self.assertIn("- [ ] fenced", cards.toggle_task_checkbox(body, 0, 5, True))
+        with self.assertRaises(ValueError):
+            cards.toggle_task_checkbox(body, 0, 4, True)
+        with self.assertRaises(ValueError):
+            cards.toggle_task_checkbox(body, 5, 5, True)
+        with self.assertRaises(ValueError):
+            cards.toggle_task_checkbox(body, -1, 5, True)
+        # A box already in the requested state means the caller saw a different box.
+        with self.assertRaises(ValueError):
+            cards.toggle_task_checkbox(body, 1, 5, True)
+        with self.assertRaises(ValueError):
+            cards.toggle_task_checkbox(body, 0, 5, False)
+
     def properties(self, kind="task"):
         properties, _ = cards.parse_document(tasklib.render_new_card(kind, "example", "Example", body_text=""))
         return properties

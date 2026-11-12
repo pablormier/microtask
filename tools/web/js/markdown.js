@@ -119,6 +119,18 @@ function renderPreview(task, el) {
   el.innerHTML = renderMarkdown(task, source);
 }
 
+// Dashboard body preview only: make task-list checkboxes clickable, numbered in document order.
+function enableTaskCheckboxes(el) {
+  if (!el || typeof el.querySelectorAll !== "function") return 0;
+  const boxes = Array.from(el.querySelectorAll('li input[type="checkbox"]'));
+  boxes.forEach((box, index) => {
+    box.removeAttribute("disabled");
+    box.classList.add("mt-task-checkbox");
+    box.setAttribute("data-mt-task-index", String(index));
+  });
+  return boxes.length;
+}
+
 function renderPropertyPanels(task, el) {
   if (!window.marked || !window.DOMPurify) return;
   const sections = [];

@@ -160,6 +160,10 @@ textarea.mt-content-input { min-height: 22rem; margin: 0; font-family: var(--mt-
 .mt-preview ul { list-style: disc; padding-left: 1.35rem; }
 .mt-preview ol { list-style: decimal; padding-left: 1.35rem; }
 .mt-preview li { display: list-item; padding: 0; }
+.mt-preview li:has(> .mt-task-checkbox), .mt-preview li:has(> p > .mt-task-checkbox:first-child) { list-style: none; }
+.mt-preview li > .mt-task-checkbox { margin-left: -1.35rem; }
+.mt-task-checkbox { cursor: pointer; }
+.mt-task-checkbox:disabled { cursor: default; }
 .mt-preview a { display: inline; }
 .mt-preview table { display: block; overflow-x: auto; }
 .mt-preview img { max-width: 100%; }
