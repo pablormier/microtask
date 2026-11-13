@@ -434,7 +434,7 @@ Review remote task.
             patch.object(tasklib, "REPO_ROOT", self.root),
             patch.object(tasklib, "_DEMO_STATE", False),
             patch.object(tasklib, "git_text", gated_git_text),
-            patch.object(tasklib, "run_validator", lambda: original_validator(self.root)),
+            patch.object(tasklib, "run_validator", original_validator),
         ):
             first = threading.Thread(
                 target=lambda: results.append(tasklib.command_sync(argparse.Namespace(message=None)))
@@ -484,7 +484,7 @@ Review remote task.
             patch.object(tasklib, "REPO_ROOT", self.root),
             patch.object(tasklib, "_DEMO_STATE", False),
             patch.object(tasklib, "git_text", gated_git_text),
-            patch.object(tasklib, "run_validator", lambda: original_validator(self.root)),
+            patch.object(tasklib, "run_validator", original_validator),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):

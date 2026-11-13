@@ -131,6 +131,11 @@ point Claude Code and Gemini CLI to it. For other agents, ask them to read
 creating them, claims a task before working on it, and does not complete or
 delete anything without your OK.
 
+To let agents in another project track their work here, run
+`mt skills install --project NAME` in that project. See
+[Workspaces and views](docs/guide.md#workspaces-and-views) for keeping a
+project's cards in a workspace of their own.
+
 With Git (the installer's default), `git diff` shows exactly what an agent
 changed in your workspace, and you can undo any of it.
 

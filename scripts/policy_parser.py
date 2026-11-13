@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Parse the small YAML subset used by mt-policy.yaml."""
+from __future__ import annotations
+
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
+import os
 import re
 
 import card_format
 
 
+APP_ROOT = Path(__file__).resolve().parent.parent
 CORE_STATUSES = ("inbox", "active", "doing", "waiting", "done")
 _STATUS_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -131,10 +135,20 @@ def parse_policy_yaml(content: str) -> dict:
                         current_dict[k] = parse_scalar(v)
     return data
 
-def load_policy() -> dict:
-    here = Path(__file__).resolve().parent
-    policy_path = here.parent / "mt-policy.yaml"
-    local_policy_path = here.parent / "mt-policy.local.yaml"
+def workspace_root() -> Path:
+    """Folder holding the cards and policy: MT_WORKSPACE when set, else the application's own."""
+    value = os.environ.get("MT_WORKSPACE")
+    # A view is a disposable copy and only ever works on its own cards.
+    if not value or (APP_ROOT / "mt-view.json").is_file():
+        return APP_ROOT
+    path = Path(value)
+    return path.resolve() if path.is_absolute() else path
+
+
+def load_policy(root: Path | None = None) -> dict:
+    root = root or workspace_root()
+    policy_path = root / "mt-policy.yaml"
+    local_policy_path = root / "mt-policy.local.yaml"
     policy = parse_policy_yaml(policy_path.read_text(encoding="utf-8"))
     validate_status_policy(policy)
     if local_policy_path.exists():

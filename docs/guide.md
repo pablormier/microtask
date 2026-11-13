@@ -198,35 +198,56 @@ mt repo add work "$HOME/work-tasks"   # short alias, stored on this machine
 mt -R work list                       # -R goes before the command
 ```
 
-For agents working in another project to track their work in your workspace,
-add a section to that project's `AGENTS.md`. `--project` files their cards
-under that project and limits what they see to it:
+A project's cards can live in one of three places:
+
+- **Your workspace**, filed under the project with `--project myapp`. Nothing
+  to set up, and you see them next to your own cards.
+- **A data-only workspace**: its own cards, settings, and Git repository, run
+  by the `mt` you already have. Use it to keep a project's cards apart from
+  yours, or to share them with other people.
+- **A full workspace**: a second copy of microtask with its own cards. Use it
+  when the project needs its own microtask version.
+
+Create the second or third kind outside the project. Plain `mt` keeps running
+your personal workspace:
 
 ```sh
-mt agent-setup --project myapp >> ~/code/myapp/AGENTS.md
-```
-
-The section tells agents to run `mt` and to read the rules and skills with
-`mt run cat`, so it contains no paths from your machine and is safe to commit.
-It needs `mt` installed on each machine where the agents run.
-
-To give a project its own workspace, for example one where agents developing
-a package plan their work and someone else supervises it, create a second
-workspace outside the project. Plain `mt` keeps running your personal one:
-
-```sh
-mt init ~/work/pkg-tasks                                  # downloads microtask
-mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git # and shares it with mt sync
-mt init ~/work/pkg-tasks --local                          # offline copy of your mt
+mt init ~/work/pkg-tasks --data                                   # data-only, offline, with Git
+mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # and shares it with mt sync
+mt init ~/work/pkg-tasks                                          # full copy, downloads microtask
+mt init ~/work/pkg-tasks --local                                  # full copy of your mt, offline
 mt repo add pkg ~/work/pkg-tasks
-mt -R pkg agent-setup >> ~/code/my-package/AGENTS.md
+mt -R pkg add "First task"
 ```
 
-The default downloads the latest microtask, ready for `mt update`. `--local`
-works without internet: it copies the app and your settings from the `mt` you
-run, never your cards, drafts, or local state, and has no Git until you add it.
-For a workspace that is not the `mt` on PATH, the section uses `mt -R pkg`, so
-run `mt repo add pkg PATH` on each machine where the agents run.
+A data-only workspace is any folder with `cards/` and `mt-policy.yaml` and no
+`mt` of its own. Your own `mt update` keeps it current, since it has no
+application to update; `mt -R pkg update` is refused. Each machine that uses
+it needs `mt` and its own `mt repo add`. A full copy from the internet is
+ready for `mt update` itself;
+`--local` copies the app and your settings from the `mt` you run, never your
+cards, drafts, or local state, and has no Git until you add it.
+
+### Agents in another project
+
+For agents working in a project to track their work, install microtask's
+skills there. Run it from the project folder, selecting the workspace the same
+way as any other command:
+
+```sh
+cd ~/code/myapp
+mt skills install --project myapp     # your workspace, limited to the project
+mt -R pkg skills install              # a data-only or full workspace
+```
+
+This copies every skill into `.agents/skills/` and `.claude/skills/`, with each
+command already pointing at the workspace: `MT_PROJECT=myapp mt` or
+`mt -R pkg`. A workspace with an alias gives skills free of paths from your
+machine, safe to commit; each machine where the agents run then needs `mt` and
+the same `mt repo add`. Without an alias the skills use the workspace's path,
+so keep them out of Git. Run `install` again after `mt update` to refresh them,
+and `mt skills uninstall` to remove them. Skills of your own in those folders
+are never changed.
 
 A **view** is a disposable, editable copy of part of a workspace, for focused
 work or experiments. Edits stay in the copy and are never written back, so to

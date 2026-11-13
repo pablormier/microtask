@@ -154,37 +154,6 @@ class RepositorySelectorTests(unittest.TestCase):
         self.assertIn("Selected workspace item", target_text)
         self.assertNotIn("Launcher workspace item", target_text)
 
-    def test_agent_setup_prints_path_free_instructions_for_the_selected_workspace(self) -> None:
-        unnamed = self.run_mt("-R", str(self.target), "agent-setup")
-        self.assertEqual(unnamed.returncode, 1)
-        self.assertIn("mt repo add NAME", unnamed.stderr)
-        self.assertEqual(unnamed.stdout, "")
-
-        self.assertEqual(self.run_mt("repo", "add", "pkg", str(self.target)).returncode, 0)
-        aliased = self.run_mt("-R", "pkg", "agent-setup", "--project", "my package")
-        self.assertEqual(aliased.returncode, 0, aliased.stderr)
-        self.assertIn("`MT_PROJECT='my package' mt -R pkg COMMAND`", aliased.stdout)
-        self.assertIn("`mt repo add pkg PATH`", aliased.stdout)
-        self.assertIn("`mt -R pkg run cat AGENTS.md`", aliased.stdout)
-        self.assertIn("`Scope:`", aliased.stdout)
-
-        bin_dir = self.home / "bin"
-        bin_dir.mkdir()
-        (bin_dir / "mt").symlink_to(self.launcher / "mt")
-        env = {**self.env, "PATH": f"{bin_dir}{os.pathsep}{self.env['PATH']}"}
-        on_path = self.run_mt("agent-setup", env=env)
-        self.assertEqual(on_path.returncode, 0, on_path.stderr)
-        self.assertIn("`mt COMMAND`", on_path.stdout)
-        self.assertIn("`mt run cat .agents/skills/microtask/SKILL.md`", on_path.stdout)
-        self.assertNotIn("-R", on_path.stdout)
-        self.assertNotIn("MT_PROJECT", on_path.stdout)
-
-        for result in (aliased, on_path):
-            self.assertNotIn(str(self.home), result.stdout)
-        # The rules the instructions point at resolve inside the selected workspace.
-        rules = self.run_mt("-R", "pkg", "run", "cat", "AGENTS.md")
-        self.assertEqual(rules.stdout, (self.target / "AGENTS.md").read_text())
-
     def test_init_local_copies_the_application_but_never_workspace_data(self) -> None:
         source = self.launcher
         (source / "cards" / "2026-01-01-120000-private.md").write_text("SECRET-7f3a card\n")

@@ -41,8 +41,8 @@ import validators
 import drafts as draft_store
 
 def repo_root() -> Path:
-    here = Path(__file__).resolve().parent
-    return here.parent
+    """The workspace being validated; the application when it holds its own cards."""
+    return tasklib.REPO_ROOT
 
 
 _DATA_ROOT: Path | None = None

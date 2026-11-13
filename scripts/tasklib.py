@@ -36,7 +36,10 @@ import git_ops
 from card_format import CLAIM_FIELDS, parse_frontmatter, parse_yaml
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+# The application (code, examples, skills) and the workspace (cards, drafts, policy, .mt/)
+# are the same folder unless MT_WORKSPACE names a data-only workspace.
+APP_ROOT = policy_parser.APP_ROOT
+REPO_ROOT = policy_parser.workspace_root()
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 SHORT_REF_RE = re.compile(r"^@[0-9a-f]{3,8}$", re.IGNORECASE)
@@ -161,10 +164,20 @@ def write_repo_aliases(aliases: dict[str, str]) -> None:
     atomic_write(path, (json.dumps(aliases, indent=2, sort_keys=True) + "\n").encode("utf-8"))
 
 
+def is_data_workspace(path: Path) -> bool:
+    """A data-only workspace holds cards and policy but no application; the mt that selects it runs it."""
+    return (path / "cards").is_dir() and (path / "mt-policy.yaml").is_file() and not (path / "mt").exists()
+
+
 def validate_repo_workspace(path: Path) -> str | None:
-    required = (path / "mt", path / "scripts" / "tasklib.py", path / "mt-policy.yaml")
     if not path.is_dir():
         return f"repository workspace does not exist: {path}"
+    if not (path / "mt").exists():
+        if is_data_workspace(path):
+            return None
+        return (f"not a microtask workspace; a data-only workspace needs cards/ and mt-policy.yaml, "
+                f"a full one the mt application: {path}")
+    required = (path / "scripts" / "tasklib.py", path / "mt-policy.yaml")
     missing = next((candidate for candidate in required if not candidate.is_file()), None)
     if missing is not None:
         return f"not a microtask workspace; missing {missing.relative_to(path)}: {path}"
@@ -287,7 +300,8 @@ def pin_demo_state() -> None:
     """Pin the demo decision once per process so mid-command mutations stay consistent."""
     global _DEMO_STATE
     enabled = policy().get("rules", {}).get("demo_workspace", True)
-    _DEMO_STATE = bool(enabled and (REPO_ROOT / "examples").is_dir() and workspace_is_empty()
+    _DEMO_STATE = bool(enabled and REPO_ROOT == APP_ROOT and (APP_ROOT / "examples").is_dir()
+                       and workspace_is_empty()
                        and not (REPO_ROOT / ".mt" / "time-running").exists())
 
 
@@ -314,7 +328,7 @@ def maybe_seed_demo() -> None:
         return
     if (demo_root() / "cards").is_dir():
         return
-    examples = REPO_ROOT / "examples"
+    examples = APP_ROOT / "examples"
     for source in sorted(examples.rglob("*.md")):
         relative = source.relative_to(examples)
         destination = demo_root() / relative
@@ -492,7 +506,7 @@ class Card:
 
 
 def policy() -> dict:
-    raw = policy_parser.load_policy()
+    raw = policy_parser.load_policy(REPO_ROOT)
     deterministic_keys = {
         "statuses", "priorities", "types", "due_kinds", "suggested_topics", "suggested_tags",
         "default_status", "default_priority", "default_type", "default_username", "rules", "view_labels",
@@ -1251,15 +1265,39 @@ def item_compact_json_record(item: Card) -> dict[str, object]:
     return record
 
 
-def run_validator(repo_root: Path = REPO_ROOT) -> bool:
-    command = [str(repo_root / "scripts" / "validate")]
-    if repo_root == REPO_ROOT and demo_active():
+def workspace_env() -> dict[str, str]:
+    """Environment for this application's own children, so they stay on this workspace."""
+    return {**os.environ, "MT_WORKSPACE": str(REPO_ROOT)}
+
+
+def foreign_env() -> dict[str, str]:
+    """Environment for another application copy, which must use its own workspace."""
+    return {key: value for key, value in os.environ.items() if key != "MT_WORKSPACE"}
+
+
+def workspace_error() -> str | None:
+    """Explain why MT_WORKSPACE cannot be used, or None when it is unset or valid."""
+    value = os.environ.get("MT_WORKSPACE")
+    if not value:
+        return None
+    if not Path(value).is_absolute():
+        return f"MT_WORKSPACE must be an absolute path: {value}"
+    if REPO_ROOT == APP_ROOT or is_data_workspace(REPO_ROOT):
+        return None
+    return (f"MT_WORKSPACE must name a data-only workspace (cards/ and mt-policy.yaml, no mt); "
+            f"select a full workspace with -R instead: {value}")
+
+
+def run_validator() -> bool:
+    command = [str(APP_ROOT / "scripts" / "validate")]
+    if demo_active():
         command.extend(["--data-root", str(demo_root())])
     result = subprocess.run(
         command,
         check=False,
         capture_output=True,
         text=True,
+        env=workspace_env(),
     )
     if result.returncode != 0:
         if result.stdout:
@@ -1283,8 +1321,8 @@ def validate_data_root(data_root: Path, *, changes: dict[str, bytes] | None = No
         validate_item_changes(changes, deletions=deletions, source_root=data_root, previous=previous)
         return
     result = subprocess.run(
-        [str(REPO_ROOT / "scripts" / "validate"), "--data-root", str(data_root)],
-        cwd=REPO_ROOT, check=False, capture_output=True, text=True,
+        [str(APP_ROOT / "scripts" / "validate"), "--data-root", str(data_root)],
+        cwd=REPO_ROOT, check=False, capture_output=True, text=True, env=workspace_env(),
     )
     if result.returncode:
         detail = (result.stdout + result.stderr).strip()
@@ -1355,9 +1393,9 @@ def apply_item_transaction(
         raise
 
 
-def item_file_snapshot(repo_root: Path = REPO_ROOT) -> dict[str, bytes]:
+def item_file_snapshot() -> dict[str, bytes]:
     root = cards_root()
-    base = demo_root() if demo_active() else repo_root
+    base = demo_root() if demo_active() else REPO_ROOT
     return {
         str(path.relative_to(base)): path.read_bytes()
         for path in sorted(root.glob("*.md"))
@@ -1762,8 +1800,9 @@ def validate_item_changes(changes: dict[str, bytes], *, deletions: set[str] | No
     if previous is not None:
         request["previous"] = {path: raw.decode("utf-8") if raw is not None else None for path, raw in previous.items()}
     result = subprocess.run(
-        [str(REPO_ROOT / "scripts" / "validate"), "--data-root", str(base), "--changes"],
+        [str(APP_ROOT / "scripts" / "validate"), "--data-root", str(base), "--changes"],
         cwd=REPO_ROOT, input=json.dumps(request, ensure_ascii=False), capture_output=True, text=True, check=False,
+        env=workspace_env(),
     )
     if result.returncode:
         raise ValueError((result.stdout + result.stderr).strip() or "candidate validation failed")
@@ -3064,7 +3103,7 @@ def command_show(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError):
         resolved = None
     if resolved is not None and resolved.is_file() and resolved.suffix == ".md":
-        command = [sys.executable, str(REPO_ROOT / "tools" / "mdviz.py"), str(resolved)]
+        command = [sys.executable, str(APP_ROOT / "tools" / "mdviz.py"), str(resolved)]
         if args.out:
             command.extend(["--out", str(args.out)])
         if args.no_open:
@@ -3073,7 +3112,7 @@ def command_show(args: argparse.Namespace) -> int:
     task, result = resolve_unique(query, match_mode=args.match_mode)
     if task is None:
         return result
-    command = [sys.executable, str(REPO_ROOT / "tools" / "mdviz.py"), str(task.path)]
+    command = [sys.executable, str(APP_ROOT / "tools" / "mdviz.py"), str(task.path)]
     if args.out:
         command.extend(["--out", str(args.out)])
     if args.no_open:
@@ -4608,7 +4647,7 @@ def portable_invocation() -> tuple[str, str | None]:
     Raises ValueError when neither reaches it.
     """
     on_path = shutil.which("mt")
-    if on_path and Path(on_path).resolve() == (REPO_ROOT / "mt").resolve():
+    if on_path and REPO_ROOT == APP_ROOT and Path(on_path).resolve() == (APP_ROOT / "mt").resolve():
         return "mt", None
     here = REPO_ROOT.resolve()
     for name, path in sorted(load_repo_aliases().items()):
@@ -4617,36 +4656,150 @@ def portable_invocation() -> tuple[str, str | None]:
     raise ValueError(f"give this workspace a name first: mt repo add NAME {shlex.quote(str(here))}")
 
 
-def command_agent_setup(args: argparse.Namespace) -> int:
+SKILL_TARGETS = (".agents/skills", ".claude/skills")
+SKILL_MARKER = "installed-by: microtask"
+SKILL_WORKSPACE_BLOCK = re.compile(r"<!-- mt:workspace -->\n.*?<!-- /mt:workspace -->", re.DOTALL)
+# An mt command in a skill: mt or ./mt followed by a subcommand, not the bare name in prose.
+SKILL_COMMAND = re.compile(r"(?<![\w/.-])(?:\./)?mt(?= [A-Za-z-])")
+
+
+def skill_sources() -> list[Path]:
+    """Every skill this application ships: each folder in .agents/skills with a SKILL.md."""
+    root = APP_ROOT / ".agents" / "skills"
+    return sorted(path for path in root.iterdir() if (path / "SKILL.md").is_file()) if root.is_dir() else []
+
+
+def installed_by_microtask(folder: Path) -> bool:
+    try:
+        text = (folder / "SKILL.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    match = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
+    return bool(match and re.search(rf"^\s+{re.escape(SKILL_MARKER)}\s*$", match.group(1), re.MULTILINE))
+
+
+def render_skill_file(text: str, invocation: str, alias: str | None, *, scoped: bool, skill_md: bool) -> str:
+    """Point a skill's commands at this workspace and mark the copy as installed by microtask."""
+    text = SKILL_COMMAND.sub(lambda _: invocation, text)
+    check = ("Each command prints `Workspace:` and `Scope:` lines on stderr; stop and ask if either is "
+             "missing or wrong." if scoped else
+             "Each command prints a `Workspace:` line on stderr; stop and ask if it is missing or wrong.")
+    missing = (f"If `mt` is not found, or the alias `{alias}` is unknown, ask the user to install microtask "
+               f"or run `mt repo add {alias} PATH`." if alias else
+               "If `mt` is not found, ask the user to install microtask.")
+    block = f"Run every command as `{invocation} COMMAND`. {check} {missing}"
+    text = SKILL_WORKSPACE_BLOCK.sub(lambda _: block, text)
+    if skill_md:
+        match = re.match(r"---\n(.*?\n)?---\n", text, re.DOTALL)
+        if match is None:
+            raise ValueError("SKILL.md needs YAML frontmatter between --- lines")
+        if re.search(r"^metadata:", match.group(1) or "", re.MULTILINE):
+            raise ValueError("SKILL.md already has metadata, where microtask marks its installed copies")
+        at = match.end() - 4
+        text = text[:at] + f"metadata:\n  {SKILL_MARKER}\n" + text[at:]
+    return text
+
+
+def skills_invocation(project: str | None, topic: str | None) -> tuple[str, str | None, bool]:
+    """The command installed skills run, its alias, and whether it names a folder on this machine."""
     try:
         mt, alias = portable_invocation()
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
+        local = False
+    except ValueError:
+        mt, alias, local = f"mt -R {shlex.quote(str(REPO_ROOT))}", None, True
+    scope = [f"MT_PROJECT={shlex.quote(project)}"] if project else []
+    scope += [f"MT_TOPIC={shlex.quote(topic)}"] if topic else []
+    return " ".join([*scope, mt]), alias, local
+
+
+def command_skills_install(args: argparse.Namespace) -> int:
+    project_dir = Path(args.dir).expanduser().resolve()
+    sources = skill_sources()
+    if not sources:
+        print(f"error: no skills found in {APP_ROOT / '.agents' / 'skills'}", file=sys.stderr)
         return 1
-    scope = [f"MT_PROJECT={shlex.quote(args.project)}"] if args.project else []
-    scope += [f"MT_TOPIC={shlex.quote(args.topic)}"] if args.topic else []
-    run = " ".join([*scope, mt, "COMMAND"])
-    intro = f"Plan and track this project's work as microtask cards. Run every command as `{run}`."
-    if alias:
-        intro += f" If the `{alias}` alias is unknown, ask the user to run `mt repo add {alias} PATH` on this machine."
-    check = ("Each command prints `Workspace:` and `Scope:` lines on stderr"
-             if scope else "Each command prints a `Workspace:` line on stderr")
-    lines = [
-        "## Task tracking with microtask",
-        "",
-        intro,
-        "",
-        f"{check}. Stop and ask if they are missing or look wrong." if scope
-        else f"{check}. Stop and ask if it is missing or looks wrong.",
-        "",
-        f"Before your first command, read the rules with `{mt} run cat AGENTS.md`, then the main skill "
-        f"with `{mt} run cat .agents/skills/microtask/SKILL.md`. The other skills are in the same folder "
-        f"(`{mt} run ls .agents/skills`). Where they say `./mt`, use `{mt}`.",
-        "",
-        "Claim work under your own name with `--by NAME` or `MT_USERNAME=NAME`, so other agents "
-        "and the people supervising you can tell who is doing what.",
-    ]
-    print("\n".join(lines))
+    names = {source.name for source in sources}
+    conflicts = [project_dir / target / name for target in SKILL_TARGETS for name in sorted(names)
+                 if (project_dir / target / name).exists()
+                 and not installed_by_microtask(project_dir / target / name)]
+    if conflicts:
+        print("error: these skills already exist and were not installed by microtask; rename or remove them:",
+              file=sys.stderr)
+        for path in conflicts:
+            print(f"  {path}", file=sys.stderr)
+        return 1
+    invocation, alias, local = skills_invocation(args.project, args.topic)
+    # Render everything first, so a broken skill stops the install before any file changes.
+    rendered: dict[str, list[tuple[Path, bytes | None]]] = {}
+    for source in sources:
+        files: list[tuple[Path, bytes | None]] = []
+        for path in sorted(source.rglob("*")):
+            if path.name == ".DS_Store" or "__pycache__" in path.parts:
+                continue
+            content = None
+            if path.is_file():
+                content = path.read_bytes()
+                if path.suffix == ".md":
+                    try:
+                        content = render_skill_file(content.decode("utf-8"), invocation, alias,
+                                                    scoped=bool(args.project or args.topic),
+                                                    skill_md=path == source / "SKILL.md").encode("utf-8")
+                    except (UnicodeError, ValueError) as error:
+                        print(f"error: {path}: {error}", file=sys.stderr)
+                        return 1
+            files.append((path.relative_to(source), content))
+        rendered[source.name] = files
+    for target in SKILL_TARGETS:
+        base = project_dir / target
+        base.mkdir(parents=True, exist_ok=True)
+        for stale in sorted(base.iterdir()):
+            if stale.name not in names and installed_by_microtask(stale):
+                shutil.rmtree(stale)
+        for name, files in sorted(rendered.items()):
+            staging = Path(tempfile.mkdtemp(prefix=f".{name}.", dir=base))
+            try:
+                for relative, content in files:
+                    destination = staging / relative
+                    if content is None:
+                        destination.mkdir(exist_ok=True)
+                    else:
+                        destination.write_bytes(content)
+                staging.chmod(0o755)
+                current = base / name
+                if current.exists():
+                    shutil.rmtree(current)
+                os.rename(staging, current)
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+    print(f"Installed {len(sources)} skills in {', '.join(str(project_dir / target) for target in SKILL_TARGETS)}:")
+    print(f"  {', '.join(sorted(names))}")
+    print(f"They run `{invocation} COMMAND`. Run this again after mt update to refresh them.")
+    if local:
+        print("warning: the skills name a folder on this machine, so do not commit them. To share them, give "
+              f"the workspace an alias with mt repo add NAME {shlex.quote(str(REPO_ROOT))} and install again "
+              "with mt -R NAME skills install.", file=sys.stderr)
+    if REPO_ROOT == APP_ROOT and not (args.project or args.topic):
+        print("note: agents will see every card in this workspace; add --project or --topic to limit them.",
+              file=sys.stderr)
+    return 0
+
+
+def command_skills_uninstall(args: argparse.Namespace) -> int:
+    project_dir = Path(args.dir).expanduser().resolve()
+    removed = 0
+    for target in SKILL_TARGETS:
+        base = project_dir / target
+        if not base.is_dir():
+            continue
+        for folder in sorted(base.iterdir()):
+            if installed_by_microtask(folder):
+                shutil.rmtree(folder)
+                removed += 1
+        for empty in (base, base.parent):
+            if empty.is_dir() and not any(empty.iterdir()):
+                empty.rmdir()
+    print(f"Removed {removed} microtask skill folder(s) from {project_dir}." if removed
+          else f"No microtask skills installed in {project_dir}.")
     return 0
 
 
@@ -4691,6 +4844,8 @@ def command_info(args: argparse.Namespace) -> int:
     print(paint(top, "36"))
     box_line("WORKSPACE", "1;36")
     box_line(str(REPO_ROOT), "1", location=True)
+    if REPO_ROOT != APP_ROOT:
+        box_line(f"Application: {APP_ROOT}", "2", location=True)
     box_line()
     total = task_count + notes_count
     box_line(f"{total} card{'s' if total != 1 else ''}   ·   "
@@ -4932,11 +5087,13 @@ def copy_application(target: Path, *, local_policy: bool = False, examples: bool
     files = APPLICATION_FILES + (("mt-policy.local.yaml",) if local_policy else ())
     folders = APPLICATION_FOLDERS + (("examples",) if examples else ())
     for name in files:
-        if (REPO_ROOT / name).is_file():
-            shutil.copy2(REPO_ROOT / name, target / name)
+        # Settings come from the workspace in use; everything else is the application.
+        root = REPO_ROOT if name.startswith("mt-policy") else APP_ROOT
+        if (root / name).is_file():
+            shutil.copy2(root / name, target / name)
     for name in folders:
-        if (REPO_ROOT / name).is_dir():
-            shutil.copytree(REPO_ROOT / name, target / name,
+        if (APP_ROOT / name).is_dir():
+            shutil.copytree(APP_ROOT / name, target / name,
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.swp", ".env"))
     (target / "cards").mkdir()
 
@@ -4960,8 +5117,8 @@ def create_view(args: argparse.Namespace) -> int:
     work_root = Path(tempfile.mkdtemp(prefix="run-", dir=work_parent))
     try:
         selection = subprocess.run(
-            [str(REPO_ROOT / "mt"), *selector_args],
-            cwd=REPO_ROOT,
+            [str(APP_ROOT / "mt"), *selector_args],
+            cwd=REPO_ROOT, env=workspace_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -5004,7 +5161,7 @@ def create_view(args: argparse.Namespace) -> int:
             json.dumps(marker, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        validation_env = os.environ.copy()
+        validation_env = foreign_env()
         validation_env["PYTHONDONTWRITEBYTECODE"] = "1"
         validation = subprocess.run(
             [str(work_root / "scripts" / "validate")],
@@ -5121,6 +5278,8 @@ def apply_env_scope(args: argparse.Namespace) -> list[str]:
 
 def show_workspace(*, command: str | None = None) -> None:
     print(f"Workspace: {REPO_ROOT}", file=sys.stderr)
+    if REPO_ROOT != APP_ROOT:
+        print(f"Application: {APP_ROOT}", file=sys.stderr)
     if demo_active() and command not in {"add", "note"}:
         print(
             "Demo mode: bundled example tasks and notes — every command works on them. "
@@ -5132,7 +5291,8 @@ def show_workspace(*, command: str | None = None) -> None:
 def command_run(args: argparse.Namespace) -> int:
     os.chdir(REPO_ROOT)
     try:
-        os.execvp(args.argv[0], args.argv)
+        # The command is not this mt, so any mt it starts picks its own workspace.
+        os.execvpe(args.argv[0], args.argv, foreign_env())
     except FileNotFoundError:
         print(f"error: command not found: {args.argv[0]}", file=sys.stderr)
         return 127
@@ -5142,28 +5302,29 @@ def command_run(args: argparse.Namespace) -> int:
 
 
 def command_update(args: argparse.Namespace) -> int:
-    command = [sys.executable, str(REPO_ROOT / "scripts" / "update.py")]
+    command = [sys.executable, str(APP_ROOT / "scripts" / "update.py")]
     if args.check:
         command.append("--check")
     if args.as_json:
         command.append("--json")
     if args.force:
         command.append("--force")
-    return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+    return subprocess.run(command, cwd=APP_ROOT, check=False, env=foreign_env()).returncode
 
 
 def command_import_github(args: argparse.Namespace) -> int:
     show_workspace()
-    command = [sys.executable, str(REPO_ROOT / "scripts" / "import-github.py")]
+    command = [sys.executable, str(APP_ROOT / "scripts" / "import-github.py")]
     if args.repo:
         command.extend(["--repo", args.repo])
     if getattr(args, "as_json", False):
         command.append("--json")
-    return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+    return subprocess.run(command, cwd=REPO_ROOT, check=False, env=workspace_env()).returncode
 
 
 def command_validate(args: argparse.Namespace) -> int:
-    return subprocess.run([str(REPO_ROOT / "scripts" / "validate")], check=False).returncode
+    return subprocess.run([str(APP_ROOT / "scripts" / "validate")], check=False,
+                          env=workspace_env()).returncode
 
 
 def command_draft_list(args: argparse.Namespace) -> int:
@@ -5466,13 +5627,70 @@ def command_draft_save(args: argparse.Namespace) -> int:
     return 0
 
 
+def init_data_workspace(destination: Path, origin: str | None) -> int:
+    """Create a workspace holding only cards and settings, run by this mt."""
+    if destination.exists():
+        if is_data_workspace(destination):
+            print(f"{destination} is already a data-only workspace; nothing changed.")
+            return 0
+        print(f"error: {destination} already exists", file=sys.stderr)
+        return 1
+    if not destination.parent.is_dir():
+        print(f"error: parent folder does not exist: {destination.parent}", file=sys.stderr)
+        return 1
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+    try:
+        (staging / "cards").mkdir()
+        (staging / "cards" / ".gitkeep").touch()
+        shutil.copy2(REPO_ROOT / "mt-policy.yaml", staging / "mt-policy.yaml")
+        (staging / ".gitignore").write_text(".mt/\nmt-policy.local.yaml\n.DS_Store\n", encoding="utf-8")
+        staging.chmod(0o755)
+        os.rename(staging, destination)
+    except OSError as error:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"error: could not create {destination}: {error}", file=sys.stderr)
+        return 1
+    print(f"Created a data-only workspace in {destination} with your settings (mt-policy.yaml) and no cards.")
+    print(f"It has no application of its own; this mt ({APP_ROOT}) runs it.")
+    if shutil.which("git") is None:
+        print("Git is not installed, so it has no history or sync; run 'git init' there later.")
+    else:
+        def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(["git", "-C", str(destination), *arguments],
+                                  capture_output=True, text=True, check=False)
+        steps = [("init", "-q"), ("symbolic-ref", "HEAD", "refs/heads/main")]
+        steps += [("remote", "add", "origin", origin)] if origin else []
+        steps += [("add", "-A"), ("commit", "-q", "-m", "Create microtask workspace")]
+        for step in steps:
+            result = git(*step)
+            if result.returncode:
+                detail = (result.stderr or result.stdout).strip()
+                print(f"warning: git {step[0]} failed, so the workspace is not committed yet: {detail}",
+                      file=sys.stderr)
+                break
+        else:
+            if not origin:
+                print("No 'origin' remote yet; 'mt sync' needs one:")
+                print(f"  git -C {shlex.quote(str(destination))} remote add origin YOUR-PRIVATE-REPOSITORY-URL")
+    print("\nGive it a short name, then use it from any folder:\n")
+    print(f"  mt repo add NAME {shlex.quote(str(destination))}")
+    print('  mt -R NAME add "First task"')
+    return 0
+
+
 def command_init(args: argparse.Namespace) -> int:
     destination = Path(args.directory).expanduser().resolve()
+    if args.data:
+        if args.local:
+            print("error: --data creates a workspace without an application, so --local does not apply",
+                  file=sys.stderr)
+            return 2
+        return init_data_workspace(destination, args.origin)
     if not args.local:
-        command = ["bash", str(REPO_ROOT / "install.sh"), "--no-path", str(destination)]
+        command = ["bash", str(APP_ROOT / "install.sh"), "--no-path", str(destination)]
         if args.origin:
             command.append(args.origin)
-        return subprocess.run(command, check=False).returncode
+        return subprocess.run(command, check=False, env=foreign_env()).returncode
     if args.origin:
         print("error: --local copies files without Git, so it cannot connect ORIGIN-URL; "
               "see 'mt init --help'", file=sys.stderr)
@@ -5496,16 +5714,16 @@ def command_init(args: argparse.Namespace) -> int:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"error: could not create {destination}: {error}", file=sys.stderr)
         return 1
-    print(f"Copied microtask from {REPO_ROOT} without network access, with your settings "
+    print(f"Copied microtask from {APP_ROOT} without network access, with your settings "
           "(mt-policy.yaml) and no cards. It has no Git yet; see 'mt init --help' to add sync and updates.",
           flush=True)
     # The installer checks the copy and prints the same next steps as the online path.
     return subprocess.run(["bash", str(destination / "install.sh"), "--no-path", str(destination)],
-                          check=False).returncode
+                          check=False, env=foreign_env()).returncode
 
 
 def command_web(args: argparse.Namespace) -> int:
-    command = [sys.executable, str(REPO_ROOT / "tools" / "taskweb.py")]
+    command = [sys.executable, str(APP_ROOT / "tools" / "taskweb.py")]
     if args.no_open:
         command.append("--no-open")
     if args.host:
@@ -5517,7 +5735,7 @@ def command_web(args: argparse.Namespace) -> int:
         for value in [values] if isinstance(values, str) else values or []:
             command.extend([f"--{option}", value])
     try:
-        return subprocess.run(command, cwd=REPO_ROOT, check=False).returncode
+        return subprocess.run(command, cwd=REPO_ROOT, check=False, env=workspace_env()).returncode
     except KeyboardInterrupt:
         return 130
 
@@ -5588,7 +5806,8 @@ def parser() -> argparse.ArgumentParser:
         "--repo",
         dest="workspace_repo",
         metavar="PATH_OR_NAME",
-        help="use another microtask workspace; must precede the command",
+        help="use another microtask workspace; must precede the command. A full workspace runs its "
+             "own mt; a data-only folder (cards/ and mt-policy.yaml, no mt) is run by this one",
     )
     sub = root.add_subparsers(dest="command", required=True)
 
@@ -5603,27 +5822,40 @@ def parser() -> argparse.ArgumentParser:
                     "mt update, and for mt sync when ORIGIN-URL is given). --local works offline: it copies "
                     "this workspace's application files and settings, never its cards, drafts, or local state. "
                     "A --local copy has no Git; to add sync and updates later, run git init there, commit, "
-                    "and run its ./install.sh --no-path. An existing workspace is left unchanged; any other "
-                    "existing path is refused.",
+                    "and run its ./install.sh --no-path. --data creates a data-only workspace instead: cards, "
+                    "your settings, and a Git repository (with ORIGIN-URL as origin), but no application; this "
+                    "mt runs it through -R, so one mt update covers it. An existing workspace is left "
+                    "unchanged; any other existing path is refused.",
     )
     init.add_argument("directory", metavar="DIRECTORY", help="folder to create")
     init.add_argument("origin", nargs="?", metavar="ORIGIN-URL",
                       help="private repository for mt sync (not with --local)")
     init.add_argument("--local", action="store_true",
                       help="copy this workspace's application instead of downloading it; works offline")
+    init.add_argument("--data", action="store_true",
+                      help="create a data-only workspace: cards and your settings, no application. This mt "
+                           "runs it with -R; mt update here keeps it current. Works offline")
     init.set_defaults(func=command_init)
 
-    agent_setup = sub.add_parser(
-        "agent-setup", help="print instructions for agents in another project to use this workspace",
-        description="Print a Markdown block for another project's AGENTS.md or CLAUDE.md. It tells agents "
-                    "working there how to run this workspace's mt and read its rules and skills, without "
-                    "absolute paths, so the block is safe to commit. It uses plain mt when this workspace is "
-                    "the mt on PATH, otherwise mt -R ALIAS; give the workspace an alias first with "
-                    "mt repo add NAME PATH. Example: mt agent-setup --project myapp >> AGENTS.md",
+    skills = sub.add_parser(
+        "skills", help="install microtask's agent skills into a project",
+        description="Copy every skill this mt ships into a project's .agents/skills and .claude/skills, with "
+                    "their commands pointed at the selected workspace: plain mt for the mt on PATH, mt -R ALIAS "
+                    "for a workspace with an alias, otherwise its path. Folders already there that microtask "
+                    "did not install are never changed. Examples: mt skills install --project myapp, "
+                    "mt -R pkg skills install, mt skills uninstall",
     )
-    agent_setup.add_argument("--project", help="ask agents to scope every command to this project (MT_PROJECT)")
-    agent_setup.add_argument("--topic", metavar="PATH", help="ask agents to scope every command to this topic (MT_TOPIC)")
-    agent_setup.set_defaults(func=command_agent_setup)
+    skills_sub = skills.add_subparsers(dest="skills_command", required=True)
+    skills_install = skills_sub.add_parser(
+        "install", help="install or refresh the skills; removes ones microtask no longer ships")
+    skills_install.add_argument("--project", help="scope every command the skills run to this project (MT_PROJECT)")
+    skills_install.add_argument("--topic", metavar="PATH",
+                                help="scope every command the skills run to this topic (MT_TOPIC)")
+    skills_install.add_argument("--dir", default=".", help="project folder (default: current folder)")
+    skills_install.set_defaults(func=command_skills_install)
+    skills_uninstall = skills_sub.add_parser("uninstall", help="remove the skills microtask installed")
+    skills_uninstall.add_argument("--dir", default=".", help="project folder (default: current folder)")
+    skills_uninstall.set_defaults(func=command_skills_uninstall)
 
     run = sub.add_parser(
         "run",
@@ -5649,7 +5881,7 @@ def parser() -> argparse.ArgumentParser:
     repo_sub = repo.add_subparsers(dest="repo_command", required=True)
     repo_add = repo_sub.add_parser("add", help="register a repository alias")
     repo_add.add_argument("name", help="alias name")
-    repo_add.add_argument("path", help="microtask workspace path")
+    repo_add.add_argument("path", help="microtask workspace path: a full workspace or a data-only folder")
     repo_add.set_defaults(func=command_repo_add)
     repo_list = repo_sub.add_parser("list", help="list repository aliases")
     repo_list.set_defaults(func=command_repo_list)
@@ -6161,8 +6393,16 @@ def main() -> int:
         if repo_selector is not None:
             selected_root = resolve_repo_selector(repo_selector)
             if selected_root != REPO_ROOT.resolve():
-                executable = selected_root / "mt"
-                os.execv(str(executable), [str(executable), *arguments])
+                if is_data_workspace(selected_root):
+                    # Restart this application on the selected data, so every root is set at import.
+                    executable = APP_ROOT / "mt"
+                    env = {**os.environ, "MT_WORKSPACE": str(selected_root)}
+                else:
+                    executable, env = selected_root / "mt", foreign_env()
+                os.execve(str(executable), [str(executable), *arguments], env)
+        error = workspace_error()
+        if error:
+            raise ValueError(error)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

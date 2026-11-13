@@ -103,7 +103,7 @@ setup_workspace() {
     printf 'Your shell config and the mt on PATH are unchanged. Run this workspace as:\n\n'
     printf '  %s/mt list\n\n' "$dir"
     printf 'or give it a short name for mt -R:\n\n  mt repo add NAME %s\n\n' "$dir"
-    printf 'To let agents in another project use it, see: %s/mt agent-setup --help\n' "$dir"
+    printf 'To let agents in another project use it, see: %s/mt skills install --help\n' "$dir"
     return 0
   fi
 

@@ -11,8 +11,8 @@ import secrets
 import sys
 import tempfile
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+APP_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP_ROOT / "scripts"))
 
 import tasklib  # noqa: E402
 
@@ -152,7 +152,7 @@ def build_html(source: Path, text: str) -> str:
         nonce=nonce, base_uri=html.escape(base_uri, quote=True), title=html.escape(title),
         heading="<h1>" + html.escape(title) + "</h1>" if is_card else "",
         metadata=render_metadata(properties, is_card=is_card), card_json=safe_json(card),
-        renderer_js="\n".join((REPO_ROOT / "tools/web/js" / name).read_text(encoding="utf-8")
+        renderer_js="\n".join((APP_ROOT / "tools/web/js" / name).read_text(encoding="utf-8")
                               for name in ("markdown.js", "card_helpers.js")),
         marked_js=MARKED_CDN, dompurify_js=DOMPURIFY_CDN,
         katex_css=KATEX_CSS_CDN, katex_js=KATEX_JS_CDN,

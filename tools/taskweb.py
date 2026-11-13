@@ -16,8 +16,8 @@ import sys
 import uuid
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+APP_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(APP_ROOT / "scripts"))
 
 import tasklib  # noqa: E402
 import drafts as draft_store  # noqa: E402
@@ -478,8 +478,8 @@ def item_by_ref(ref: object) -> dict | None:
 
 def run_mt_command(command: list[str], token: str, message: str) -> tuple[HTTPStatus, dict]:
     result = subprocess.run(
-        [str(REPO_ROOT / "mt"), *command],
-        cwd=REPO_ROOT,
+        [str(APP_ROOT / "mt"), *command],
+        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
         check=False,
         capture_output=True,
         text=True,
@@ -516,8 +516,8 @@ def run_mt_receipt_command(
     input_text: str | None = None,
 ) -> tuple[HTTPStatus, dict]:
     result = subprocess.run(
-        [str(REPO_ROOT / "mt"), *command],
-        cwd=REPO_ROOT,
+        [str(APP_ROOT / "mt"), *command],
+        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
         check=False,
         capture_output=True,
         input=input_text.encode("utf-8") if input_text is not None else None,
@@ -720,9 +720,9 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     result = subprocess.run(
-        [str(REPO_ROOT / "mt"), "draft", "save", str(draft_id),
+        [str(APP_ROOT / "mt"), "draft", "save", str(draft_id),
          "--expected-revision", str(revision), "--expected-hash", expected_hash, "--json"],
-        cwd=REPO_ROOT, check=False, capture_output=True, text=True,
+        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(), check=False, capture_output=True, text=True,
     )
     try:
         receipt = json.loads(result.stdout.strip())

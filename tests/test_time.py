@@ -398,6 +398,8 @@ class TimeTrackingTests(unittest.TestCase):
             }
         }
         with mock.patch.object(tasklib, "REPO_ROOT", self.root), mock.patch.object(
+            tasklib, "APP_ROOT", self.root
+        ), mock.patch.object(
             tasklib, "_DEMO_STATE", None
         ), mock.patch.object(tasklib, "policy", return_value=effective_policy), mock.patch.object(
             tasklib, "run_validator", side_effect=validate_while_locked

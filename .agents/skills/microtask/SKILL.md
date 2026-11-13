@@ -6,8 +6,13 @@ description: Operate microtask's deterministic CLI to capture, find, edit, organ
 # Operate microtask
 
 You decide what cards should say; the `mt` CLI writes, validates, and locks
-them. Change cards only through `mt`. Use `./mt` inside the workspace, or
-`mt -R PATH_OR_NAME COMMAND` for another one; ask if the workspace is unclear.
+them. Change cards only through `mt`.
+
+<!-- mt:workspace -->
+Use `./mt COMMAND` inside the workspace, or `mt -R PATH_OR_NAME COMMAND` for
+another one; ask if the workspace is unclear.
+<!-- /mt:workspace -->
+
 For syntax, use `mt COMMAND --help` and `mt policy --json` rather than reading
 source. If help does not cover something, report the gap instead of working
 around the CLI.
