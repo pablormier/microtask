@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, time
+from datetime import date, datetime, time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
@@ -13,20 +13,22 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 import uuid
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
 
+import card_query  # noqa: E402
 import tasklib  # noqa: E402
 import drafts as draft_store  # noqa: E402
 
 try:
-    from .web_queries import FILTER_LISTS, collection_results, normalize_query
+    from .web_queries import collection_results
 except ImportError:  # Direct script entry point or file-based test loader.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from web_queries import FILTER_LISTS, collection_results, normalize_query
+    from web_queries import collection_results
 
 
 PICO_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
@@ -278,7 +280,16 @@ def included_ids(value: object) -> list[str]:
     return [item for item in values if isinstance(item, str) and item][:MAX_INCLUDED_IDS]
 
 
-def dashboard_payload(*, api_token: str = "", query: dict | None = None, include: object = None) -> dict:
+def request_query(values: object) -> card_query.Query:
+    """The validated query a request's parameters describe; raises QueryError with a message for the client."""
+    if values is not None and not isinstance(values, dict):
+        raise card_query.QueryError("query must be an object")
+    query = card_query.query_from_mapping(values or {})
+    card_query.validate(query, statuses=tasklib.statuses(), priorities=list(tasklib.policy().get("priorities", {})))
+    return query
+
+
+def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
@@ -288,6 +299,7 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None, include
     tasklib.pin_demo_state()
     tasklib.maybe_seed_demo()
     cfg = tasklib.policy()
+    query = query or card_query.DEFAULT
     statuses = list(cfg.get("statuses", {}))
     tasks = tasklib.discover(cache=CARD_CACHE)
     ordered = sorted(
@@ -297,14 +309,14 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None, include
         else len(statuses),
     )
     meta = dashboard_meta(api_token=api_token, items=tasks, cfg=cfg)
-    meta["focus"] = tasklib.focus_context([
-        task for task in tasks if task.kind == "task"
-        and not tasklib.is_archived(task) and not tasklib.is_hidden(task)
-    ])
+    now = datetime.now()
+    meta["focus"] = tasklib.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
     summaries = [task_to_dict(task, detail=False, cfg=cfg) for task in ordered]
-    # Search full text on the server without including it in collection responses.
-    query_items = [{**summary, "body": item.body} for summary, item in zip(summaries, ordered)]
-    collections = collection_results(query_items, query, done_since=tasklib.done_cutoff())
+    rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    collections = collection_results(
+        ordered, query, now=now, open_statuses=tasklib.open_statuses(),
+        done_cutoff=card_query.default_done_cutoff(query, tasklib.done_window(), date.today()),
+        display_rank=lambda card: tasklib.task_display_sort_key(card, rank))
     drafts = draft_store.list_drafts(tasklib.REPO_ROOT)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
@@ -315,8 +327,8 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None, include
     for key in ("candidates", "alerts"):
         meta["focus"][key] = [entry for entry in meta["focus"][key] if entry["id"] in shown]
     meta["focus"]["followup_ids"] = [identity for identity in meta["focus"]["followup_ids"] if identity in shown]
-    meta["doing_count"] = sum(1 for item in summaries if item["kind"] == "task"
-                              and item["status"] == "doing" and not item["archived"])
+    meta["doing_count"] = len(card_query.select(
+        tasks, card_query.Query(status=("doing",), hidden="include"), now=now))
     # Changes when any card is added, removed, renamed or converted, so an open card can refresh its references.
     meta["reference_revision"] = hashlib.sha256(json.dumps(sorted(
         [str(item["id"]), item["ref"], item["title"], item["kind"]] for item in summaries
@@ -325,7 +337,7 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None, include
         "tasks": [item for item in summaries if item["id"] in wanted or item["path"] in draft_targets],
         "statuses": statuses,
         "meta": meta,
-        "query": normalize_query(query),
+        "query": card_query.query_to_mapping(query),
         # Echoed so a client can tell a card that is gone from one this request never asked for.
         "include": included,
         "collections": collections,
@@ -370,10 +382,78 @@ def bootstrap_config(token: str) -> dict:
 
 
 
+def command_env() -> dict[str, str]:
+    """Run dashboard writes without auto-sync, so the reply does not wait on the network."""
+    return {**tasklib.workspace_env(), "MT_DEFER_SYNC": "1"}
+
+
+class BackgroundSync:
+    """Run auto-sync after dashboard writes, one sync at a time.
+
+    Writes that arrive during a sync are folded into one more sync. The last
+    failure is kept so the board can show it on its next refresh.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.thread: threading.Thread | None = None
+        self.again = False
+        self.warning = ""
+
+    def request(self) -> None:
+        if not tasklib.policy().get("rules", {}).get("auto_sync", False):
+            return
+        with self.lock:
+            if self.thread is not None:
+                self.again = True
+                return
+            self.thread = threading.Thread(target=self.run, daemon=True)
+            self.thread.start()
+
+    def run(self) -> None:
+        while True:
+            warning = sync_once()
+            with self.lock:
+                self.warning = warning
+                if not self.again:
+                    self.thread = None
+                    return
+                self.again = False
+
+    def wait(self, timeout: float | None = None) -> None:
+        with self.lock:
+            thread = self.thread
+        if thread is not None:
+            thread.join(timeout)
+
+
+def sync_once() -> str:
+    """Sync the workspace and return a warning, or an empty string on success."""
+    status = tasklib.git_ops.workspace_status(tasklib.REPO_ROOT)
+    if status.state in {"missing", "uninitialized"}:
+        return tasklib.auto_sync_unavailable_message(status)
+    result = subprocess.run(
+        [str(APP_ROOT / "mt"), "sync"],
+        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return ""
+    # Drop the CLI's workspace banner; the board already shows which workspace it is.
+    errors = [line for line in result.stderr.splitlines()
+              if not line.startswith(("Workspace: ", "Application: "))]
+    return "\n".join([*errors, result.stdout]).strip() or "automatic sync failed"
+
+
+# Draft autosaves change only drafts/, which sync does not need to publish on every keystroke.
+UNSYNCED_ACTIONS = {"/api/draft-save", "/api/draft-discard"}
+
+
 class TaskWebServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], token: str):
         super().__init__(address, TaskWebHandler)
         self.token = token
+        self.sync = BackgroundSync()
 
 
 class TaskWebHandler(BaseHTTPRequestHandler):
@@ -424,9 +504,14 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if url.path == "/api/items":
             try:
                 params = parse_qs(url.query)
-                payload = dashboard_payload(api_token=self.server.token, include=params.pop("include", None), query={
-                    key: values if key in FILTER_LISTS else values[-1] for key, values in params.items()
-                })
+                include = params.pop("include", None)
+                payload = dashboard_payload(api_token=self.server.token, include=include, query=request_query(params))
+                payload["sync_warning"] = self.server.sync.warning
+                # An address with older spellings: the client adopts the canonical `query`.
+                payload["query_aliased"] = card_query.uses_aliases(params)
+            except card_query.QueryError as error:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+                return
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
                 return
@@ -457,12 +542,18 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "request body must be an object"})
             return
+        try:
+            query = request_query(body.get("query"))
+        except card_query.QueryError as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
         status, payload = handle_api_action(self.path, body, self.server.token)
         if status == HTTPStatus.OK:
-            query = body.get("query") if isinstance(body.get("query"), dict) else None
+            if self.path not in UNSYNCED_ACTIONS:
+                self.server.sync.request()
             # Actions return receipts; build the queried collection once, after success.
             payload = {**dashboard_payload(api_token=self.server.token, query=query, include=body.get("include")),
-                       **payload}
+                       "sync_warning": self.server.sync.warning, **payload}
         self.send_json(status, payload)
 
 
@@ -479,7 +570,7 @@ def item_by_ref(ref: object) -> dict | None:
 def run_mt_command(command: list[str], token: str, message: str) -> tuple[HTTPStatus, dict]:
     result = subprocess.run(
         [str(APP_ROOT / "mt"), *command],
-        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
+        cwd=tasklib.REPO_ROOT, env=command_env(),
         check=False,
         capture_output=True,
         text=True,
@@ -517,7 +608,7 @@ def run_mt_receipt_command(
 ) -> tuple[HTTPStatus, dict]:
     result = subprocess.run(
         [str(APP_ROOT / "mt"), *command],
-        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
+        cwd=tasklib.REPO_ROOT, env=command_env(),
         check=False,
         capture_output=True,
         input=input_text.encode("utf-8") if input_text is not None else None,
@@ -539,9 +630,6 @@ def run_mt_receipt_command(
         payload = {}
         payload["message"] = message
         payload["saved_ref"] = receipt.get("ref")
-        sync_error = receipt.get("sync_error")
-        if isinstance(sync_error, str) and sync_error.strip():
-            payload["sync_warning"] = sync_error.strip()
         return HTTPStatus.OK, payload
 
     error = (stderr or stdout or "command failed").strip()
@@ -722,7 +810,7 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     result = subprocess.run(
         [str(APP_ROOT / "mt"), "draft", "save", str(draft_id),
          "--expected-revision", str(revision), "--expected-hash", expected_hash, "--json"],
-        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(), check=False, capture_output=True, text=True,
+        cwd=tasklib.REPO_ROOT, env=command_env(), check=False, capture_output=True, text=True,
     )
     try:
         receipt = json.loads(result.stdout.strip())
@@ -737,8 +825,6 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     payload = {}
     payload["message"] = "Draft applied"
     payload["saved_ref"] = receipt.get("ref")
-    if isinstance(receipt.get("sync_error"), str):
-        payload["sync_warning"] = receipt["sync_error"]
     return HTTPStatus.OK, payload
 
 
@@ -879,13 +965,16 @@ def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, di
 
 
 def board_filters(args: argparse.Namespace) -> dict:
-    """The board filters given on the command line (--project, --topic, ...)."""
-    return {name: getattr(args, name) for name in tasklib.WEB_FILTERS}
+    """The board filters given on the command line (--project, --topic, ...), in canonical form."""
+    query = card_query.query_from_args(args)
+    card_query.validate(query, statuses=tasklib.statuses(), priorities=list(tasklib.policy().get("priorities", {})))
+    return card_query.query_to_mapping(query)
 
 
 def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
     """Return the dashboard address, opening on the given board filters."""
-    query = urlencode({key: value for key, value in (filters or {}).items() if value}, doseq=True)
+    query = urlencode({key: "true" if value is True else value for key, value in (filters or {}).items()},
+                      doseq=True)
     return f"http://{host}:{port}/" + (f"?{query}" if query else "")
 
 
@@ -907,6 +996,8 @@ def serve_dashboard(host: str, port: int, *, no_open: bool, filters: dict | None
         return 0
     finally:
         server.server_close()
+        # Let a sync that already started finish publishing the last change.
+        server.sync.wait(timeout=60)
     return 0
 
 

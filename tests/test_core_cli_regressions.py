@@ -156,7 +156,6 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                    ("add",), ("note", "--capture"), ("add", "Example", "--invalid-option"),
                    ("ai",), ("batch", "prepare"), ("artifact", "publish"),
                    ("storage", "allocate-run"), ("sync", "protocol", "prepare"),
-                   ("view", "Existing task"),
                    ("edit", "Existing task", "--json"))
         for initialized in (False, True):
             if initialized:
@@ -494,9 +493,11 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         all_notes = self.run_mt("list", "--kind", "note", "--all", "--json")
         self.assertEqual(len(json.loads(all_notes.stdout)), 15)
         archived = self.run_mt("list", "--kind", "note", "--archived", "--json")
-        self.assertEqual(len(json.loads(archived.stdout)), 2)
+        self.assertEqual(len(json.loads(archived.stdout)), 2)  # only archived includes hidden ones
         hidden = self.run_mt("list", "--kind", "note", "--hidden", "--json")
         self.assertEqual(len(json.loads(hidden.stdout)), 2)
+        archived_either = self.run_mt("list", "--kind", "note", "--archived", "--hidden", "include", "--json")
+        self.assertEqual(len(json.loads(archived_either.stdout)), 2)
         intersection = self.run_mt("list", "--kind", "note", "--archived", "--hidden", "--json")
         self.assertEqual(len(json.loads(intersection.stdout)), 1)
         self.assertEqual(len(json.loads(self.run_mt("list", "--kind", "note", "--limit", "4", "--json").stdout)), 4)
@@ -563,7 +564,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn("not allowed with argument", result.stderr)
         retired = (("--head", "2"), ("--last", "2"), ("--top",),
-                   ("--verbose",), ("--include-hidden",), ("--include-archived",), ("active",))
+                   ("--verbose",), ("active",))
         for arguments in retired:
             with self.subTest(arguments=arguments):
                 result = self.run_mt("list", *arguments)
@@ -696,6 +697,8 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         combined = self.run_mt("list", "--status", "active", "--archived", "--hidden")
         self.assertIn("Archived task (archived, hidden)", combined.stdout)
         self.assertEqual(len(json.loads(self.run_mt("list", "--status", "active", "--hidden", "--json").stdout)), 1)
+        self.assertEqual(len(json.loads(self.run_mt(
+            "list", "--status", "active", "--hidden", "--archived", "include", "--json").stdout)), 1)
 
     def test_hidden_tasks_and_notes_are_filtered_but_remain_addressable(self) -> None:
         visible = self.write_task("2026-06-20-090000-visible", "Visibility real work")
@@ -753,6 +756,8 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(self.run_mt("edit", note.stem, "--set", "archived=true").returncode, 0)
         self.assertEqual(len(json.loads(self.run_mt("list", "--hidden", "--json").stdout)), 2)
         self.assertEqual(len(json.loads(
+            self.run_mt("list", "--hidden", "--archived", "include", "--json").stdout)), 2)
+        self.assertEqual(len(json.loads(
             self.run_mt("list", "--hidden", "--archived", "--json").stdout)), 1)
 
         before = note.read_bytes()
@@ -788,11 +793,11 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(phrase.returncode, 0, phrase.stderr)
         self.assertIn("Dentist appointment", phrase.stdout)
         self.assertNotIn("Dentistry plan", phrase.stdout)
-        all_terms = self.run_mt("search", "dentist", "plan", "--match", "all")
+        all_terms = self.run_mt("search", "dentist", "plan", "--and")
         self.assertEqual(all_terms.returncode, 0, all_terms.stderr)
         self.assertIn("Dentistry plan", all_terms.stdout)
         self.assertNotIn("Dentist appointment", all_terms.stdout)
-        any_terms = self.run_mt("search", "appointment", "dentist", "--match", "any")
+        any_terms = self.run_mt("search", "appointment", "dentist", "--or")
         self.assertIn("Dentistry plan", any_terms.stdout)
         self.assertIn("Dentist appointment", any_terms.stdout)
         self.assertLess(any_terms.stdout.index("Dentist appointment"), any_terms.stdout.index("Dentistry plan"))
@@ -824,7 +829,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         records = {item["title"]: item for item in json.loads(listed.stdout)}
         cases = (
             (("dentist",), ["Dentist appointment", "Dentistry plan"]),
-            (("dentist", "plan", "--match", "all"), ["Dentistry plan"]),
+            (("dentist", "plan", "--and"), ["Dentistry plan"]),
             (("dentist", "--kind", "task"), ["Dentist appointment"]),
             (("dentist", "--kind", "note"), ["Dentistry plan"]),
             (("no-such-search-result",), []),
@@ -861,9 +866,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual([item["title"] for item in json.loads(tail.stdout)], ["Needle title source"])
         human = self.run_mt("search", "needle", "--sort", "title", "--order", "asc", "--limit", "1")
         self.assertEqual(len(human.stdout.splitlines()), 1)
-        for arguments in (("--and", "needle"), ("--or", "needle"), ("--fuzzy", "needle"),
-                          ("needle", "--due", "today"),
-                          ("needle", "--include-hidden"), ("needle", "--include-archived")):
+        for arguments in (("--limit", "0", "needle"), ("needle", "--match", "all"), ("needle", "--due", "soon")):
             with self.subTest(arguments=arguments):
                 self.assertEqual(self.run_mt("search", *arguments).returncode, 2)
         type_alias = self.run_mt("search", "needle", "--type", "note", "--json")
@@ -1027,10 +1030,10 @@ class BulkEditTests(unittest.TestCase):
         other_status = self.write_task("2026-06-21-090000-inbox", "Other status batch card", status="inbox", tags="[batch]")
         other_tag = self.write_task("2026-06-22-090000-unmatched", "Other tag card")
         before = {path: path.read_bytes() for path in (selected, other_status, other_tag)}
-        plan = self.preview("active", "--tag", "batch", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--tag", "batch", "--set", "priority=high")
         self.assertEqual(plan["version"], 1)
         self.assertEqual((plan["selected"], plan["changed"], plan["unchanged"]), (1, 1, 0))
-        self.assertEqual(plan["selection"]["statuses"], ["active"])
+        self.assertEqual(plan["query"], {"status": ["active"], "tag": ["batch"]})
         self.assertEqual(len(plan["items"]), 1)
         self.assertEqual(plan["items"][0]["title"], "Selected batch card")
         self.assertIs(plan["items"][0]["changed"], True)
@@ -1055,17 +1058,17 @@ class BulkEditTests(unittest.TestCase):
         self.assertEqual(hidden_result.returncode, 0, hidden_result.stderr)
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
-        default = self.preview("active", "--set", "priority=high")
+        default = self.preview("--status", "active", "--set", "priority=high")
         self.assertEqual([item["title"] for item in default["items"]], ["Visible bulk card"])
-        including_hidden = self.preview("active", "--include-hidden", "--set", "priority=high")
+        including_hidden = self.preview("--status", "active", "--include-hidden", "--set", "priority=high")
         self.assertEqual({item["title"] for item in including_hidden["items"]},
                          {"Visible bulk card", "Hidden bulk card"})
-        including_both = self.preview("active", "--include-hidden", "--include-archived", "--set", "priority=high")
+        including_both = self.preview("--status", "active", "--include-hidden", "--include-archived", "--set", "priority=high")
         self.assertEqual({item["title"] for item in including_both["items"]},
                          {"Visible bulk card", "Hidden bulk card", "Archived bulk card"})
-        hidden_only = self.preview("active", "--hidden", "--set", "priority=high")
+        hidden_only = self.preview("--status", "active", "--hidden", "--set", "priority=high")
         self.assertEqual([item["title"] for item in hidden_only["items"]], ["Hidden bulk card"])
-        archived_only = self.preview("active", "--archived", "--set", "priority=high")
+        archived_only = self.preview("--status", "active", "--archived", "--set", "priority=high")
         self.assertEqual([item["title"] for item in archived_only["items"]], ["Archived bulk card"])
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
@@ -1074,7 +1077,7 @@ class BulkEditTests(unittest.TestCase):
         task.write_text(task.read_text(encoding="utf-8").replace("priority: medium", "priority: high", 1),
                         encoding="utf-8")
         before = task.read_bytes()
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         self.assertEqual(len(plan["items"]), 1)
         self.assertIs(plan["items"][0]["changed"], False)
         self.assertEqual(plan["items"][0]["before"], plan["items"][0]["after"])
@@ -1114,13 +1117,13 @@ class BulkEditTests(unittest.TestCase):
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
     def test_bulk_preview_rejects_empty_selection(self) -> None:
-        result = self.run_mt("bulk-edit", "active", "--tag", "no-such-bulk-tag", "--set", "priority=high", "--json")
+        result = self.run_mt("bulk-edit", "--status", "active", "--tag", "no-such-bulk-tag", "--set", "priority=high", "--json")
         self.assertEqual(result.returncode, 2)
         self.assertIn("no cards match", result.stderr)
 
     def test_bulk_apply_rejects_membership_change_after_preview(self) -> None:
         first = self.write_task("2026-06-20-090000-membership-first", "First membership card")
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         plan_path = self.save_plan(plan)
         second = self.write_task("2026-06-21-090000-membership-second", "New membership card")
         self.assertEqual(self.run_mt("validate").returncode, 0)
@@ -1134,7 +1137,7 @@ class BulkEditTests(unittest.TestCase):
     def test_bulk_apply_stale_second_card_leaves_first_unchanged(self) -> None:
         first = self.write_task("2026-06-20-090000-stale-first", "First stale card")
         second = self.write_task("2026-06-21-090000-stale-second", "Second stale card")
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         self.assertEqual(plan["selected"], 2)
         plan_path = self.save_plan(plan)
         changed = self.run_mt("edit", second.stem, "--set", "priority=low")
@@ -1151,7 +1154,7 @@ class BulkEditTests(unittest.TestCase):
 
     def test_bulk_plan_summary_counts_are_validated_before_apply(self) -> None:
         task = self.write_task("2026-06-20-090000-counts", "Counts card")
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         plan["changed"] = 0
         result = self.run_mt("bulk-edit", "--apply", str(self.save_plan(plan)))
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -1161,7 +1164,7 @@ class BulkEditTests(unittest.TestCase):
 
     def test_bulk_apply_rejects_stale_card_hash_without_partial_changes(self) -> None:
         task = self.write_task("2026-06-20-090000-stale", "Stale batch card")
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         plan_path = self.save_plan(plan)
         changed = self.run_mt("edit", task.stem, "--set", "priority=low")
         self.assertEqual(changed.returncode, 0, changed.stderr)
@@ -1175,7 +1178,7 @@ class BulkEditTests(unittest.TestCase):
     def test_bulk_transaction_rolls_back_all_cards_when_post_write_validation_fails(self) -> None:
         first = self.write_task("2026-06-20-090000-first", "First rollback card")
         second = self.write_task("2026-06-21-090000-second", "Second rollback card")
-        plan = self.preview("active", "--set", "priority=high")
+        plan = self.preview("--status", "active", "--set", "priority=high")
         self.assertEqual(len(plan["items"]), 2)
         plan_path = self.save_plan(plan)
         before = {first: first.read_bytes(), second: second.read_bytes()}

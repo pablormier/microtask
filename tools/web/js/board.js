@@ -172,14 +172,16 @@ const VIEW_DEFAULTS = {
   deadlines: { group: "due_kind" }
 };
 const VIEW_SETTINGS_KEY = "mt-view-settings";
-// Board filters live in the page address so a reload or bookmark keeps them.
-const FILTER_PARAMS = { search: "q", status: "status", priority: "priority", type: "type",
-  project: "project", topic: "topic", tag: "tag", due: "due", updated: "updated" };
+// Board filters live in the page address so a reload or bookmark keeps them. The address and
+// the requests use the server's query field names (scripts/card_query.py); the page does not
+// select cards itself, it only builds the query and shows the collections the server returns.
+const PAGE_PARAMS = ["layout"];
+const FILTER_LISTS = ["status", "priority", "type", "project", "topic", "tag", "due"];
 
 // Every facet but Updated holds a list of values: a card matches any of them, and all
-// facets must match. Updated holds one value, or "all".
+// facets must match. Updated holds the key of one UPDATED_RANGES option, or "".
 function defaultFilters() {
-  return { search: "", status: [], priority: [], type: [], project: [], topic: [], tag: [], due: [], updated: "all" };
+  return { text: "", status: [], priority: [], type: [], project: [], topic: [], tag: [], due: [], updated: "" };
 }
 
 // Filter chips in toolbar order, as [key, label].
@@ -187,10 +189,16 @@ const FILTER_FACETS = [["status", "Status"], ["priority", "Priority"], ["type", 
   ["topic", "Topic"], ["tag", "Tags"], ["due", "Due"], ["updated", "Updated"]];
 const SEARCHABLE_FILTERS = ["project", "topic", "tag"];
 const FILTER_OPTIONS = {
-  due: [["overdue", "Overdue"], ["today", "Today"], ["next7", "Next 7 days"], ["none", "No due"]],
+  due: [["overdue", "Overdue"], ["today", "Today"], ["week", "Next 7 days"], ["any", "Has due"], ["none", "No due"]],
   updated: [["2w", "Last 2 weeks"], ["1m", "Last month"], ["3m", "Last 3 months"], ["1y", "Last year"],
     ["older-3m", "Older than 3 months"], ["older-1y", "Older than a year"]]
 };
+// The query each Updated option sends; the server turns an age into a date.
+const UPDATED_RANGES = {
+  "2w": { updated_since: "2w" }, "1m": { updated_since: "1m" }, "3m": { updated_since: "3m" },
+  "1y": { updated_since: "1y" }, "older-3m": { updated_before: "3m" }, "older-1y": { updated_before: "1y" }
+};
+const ARCHIVE_COLLECTIONS = { task: "archive_tasks", note: "archive_notes", all: "archive" };
 
 // Add one parameter per value, so lists repeat the name instead of joining.
 function appendParams(params, name, value) {
@@ -270,6 +278,8 @@ function taskBoard() {
     types: [],
     projects: [],
     filters: defaultFilters(),
+    // Query parameters from the page address that no control shows, such as created_since from `mt web`.
+    extraQuery: {},
     needsReviewOnly: false,
     detailLoading: false,
     detailError: "",
@@ -333,7 +343,7 @@ function taskBoard() {
         if (this.selected) this.renderSelectedPreview();
       }, { once: true });
       if (typeof this.$watch === "function") {
-        for (const field of ["filters", "showHidden", "needsReviewOnly"]) {
+        for (const field of ["filters", "extraQuery", "showHidden", "needsReviewOnly"]) {
           this.$watch(field, () => {
             this.writeFilterLocation();
             this.scheduleQuery();
@@ -444,12 +454,12 @@ function taskBoard() {
     // Selected values of a facet; empty when it is unset ("", or Updated's "all").
     filterValues(key) {
       const value = this.filters[key];
-      return (Array.isArray(value) ? value : [value]).map(item => String(item).trim()).filter(item => item && item !== "all");
+      return (Array.isArray(value) ? value : [value]).map(item => String(item).trim()).filter(Boolean);
     },
 
     activeFilterCount() {
-      return Object.keys(FILTER_PARAMS).filter(key => this.filterValues(key).length).length
-        + (this.showHidden ? 1 : 0) + (this.needsReviewOnly ? 1 : 0);
+      return Object.keys(this.filters).filter(key => this.filterValues(key).length).length
+        + Object.keys(this.extraQuery).length + (this.showHidden ? 1 : 0) + (this.needsReviewOnly ? 1 : 0);
     },
 
     filterHas(key, name) {
@@ -543,28 +553,41 @@ function taskBoard() {
     readFilterLocation() {
       let params;
       try { params = new URLSearchParams(location.search); } catch (_) { return; }
+      this.applyFilterParams(params);
+    },
+
+    // Set the filter controls from query parameters in the server's field names.
+    applyFilterParams(params) {
       const filters = defaultFilters();
-      for (const [field, name] of Object.entries(FILTER_PARAMS)) {
-        const values = params.getAll(name).map(value => (field === "topic" ? topicSegments(value).join("/") : value).trim()).filter(Boolean);
-        if (Array.isArray(filters[field])) filters[field] = values;
-        else if (values.length) filters[field] = values[0];
+      const extra = {};
+      this.showHidden = false;
+      this.needsReviewOnly = false;
+      for (const name of new Set(params.keys())) {
+        if (PAGE_PARAMS.includes(name)) continue;
+        const values = params.getAll(name).map(value => (name === "topic" ? topicSegments(value).join("/") : value).trim()).filter(Boolean);
+        if (name === "text") filters.text = values[values.length - 1] || "";
+        else if (FILTER_LISTS.includes(name)) filters[name] = values;
+        else if (name === "needs_review" && values[values.length - 1] === "true") this.needsReviewOnly = true;
+        else if (name === "hidden" && values[values.length - 1] === "include") this.showHidden = true;
+        else if (values.length) extra[name] = values;
+      }
+      // One Updated option when the address holds exactly its range; any other date range stays as is.
+      const range = Object.keys(extra).filter(name => name.startsWith("updated_")).sort().join();
+      const option = Object.entries(UPDATED_RANGES).find(([, query]) => range === Object.keys(query).join() &&
+        Object.entries(query).every(([name, value]) => extra[name].join() === value));
+      if (option) {
+        filters.updated = option[0];
+        for (const name of Object.keys(UPDATED_RANGES[option[0]])) delete extra[name];
       }
       this.filters = filters;
-      this.showHidden = params.get("hidden") === "1";
-      this.needsReviewOnly = params.get("review") === "1";
+      this.extraQuery = extra;
     },
 
     writeFilterLocation() {
       let params;
       try { params = new URLSearchParams(location.search); } catch (_) { return; }
-      for (const [field, name] of Object.entries(FILTER_PARAMS)) {
-        params.delete(name);
-        appendParams(params, name, this.filterValues(field));
-      }
-      for (const [name, on] of [["hidden", this.showHidden], ["review", this.needsReviewOnly]]) {
-        if (on) params.set(name, "1");
-        else params.delete(name);
-      }
+      for (const name of Array.from(new Set(params.keys())).filter(name => !PAGE_PARAMS.includes(name))) params.delete(name);
+      for (const [name, value] of Object.entries(this.collectionQuery())) appendParams(params, name, value);
       const search = params.toString();
       const target = location.pathname + (search ? "?" + search : "") + location.hash;
       if (target !== location.pathname + location.search + location.hash) history.replaceState(history.state, "", target);
@@ -573,6 +596,7 @@ function taskBoard() {
     clearFilters() {
       this.showHidden = false;
       this.needsReviewOnly = false;
+      this.extraQuery = {};
       this.filters = defaultFilters();
     },
 
@@ -823,11 +847,9 @@ function taskBoard() {
 
     groupOptions(kind) { return cardGroupOptions(kind); },
 
-    // Cards of the current Tasks, Notes or Archive tab, filtered by Kind and grouped.
+    // Cards of the current Tasks, Notes or Archive tab (the Archive's Kind picks its collection), grouped.
     viewGroups() {
-      const kind = this.viewKind();
-      const items = this.collectionItems(this.mode === "archive" ? "archive" : "cards")
-        .filter(item => kind === "all" || item.kind === kind);
+      const items = this.collectionItems(this.mode === "archive" ? ARCHIVE_COLLECTIONS[this.viewKind()] : this.mode);
       const groups = this.groupCards(items, this.settings[this.mode].group, { workflow: this.mode !== "archive" });
       return groups.length ? groups : this.groupCards([], "none");
     },
@@ -1551,8 +1573,9 @@ function taskBoard() {
       });
     },
 
-    applyPayload(payload, fromQuery = false) {
-      const matchesQuery = !payload.query || JSON.stringify(payload.query) === JSON.stringify(this.collectionQuery());
+    // `sentQuery` is the query the request carried; a response to another query keeps the collections.
+    applyPayload(payload, fromQuery = false, sentQuery = {}) {
+      const matchesQuery = fromQuery || JSON.stringify(sentQuery) === JSON.stringify(this.collectionQuery());
       if (!fromQuery) {
         this.querySequence += 1;
         this.queryLoading = false;
@@ -1600,8 +1623,15 @@ function taskBoard() {
       if (this.selected) this.renderSelectedPreview();
     },
 
+    // The query in the server's field names, with only the fields that are set.
     collectionQuery() {
-      return { ...this.filters, show_hidden: this.showHidden, needs_review: this.needsReviewOnly };
+      const query = { ...this.extraQuery };
+      for (const key of FILTER_LISTS) if (this.filterValues(key).length) query[key] = this.filterValues(key);
+      if (this.filters.text.trim()) query.text = this.filters.text.trim();
+      Object.assign(query, UPDATED_RANGES[this.filters.updated]);
+      if (this.showHidden) query.hidden = "include";
+      if (this.needsReviewOnly) query.needs_review = "true";
+      return query;
     },
 
     cardIdInLocation() {
@@ -1653,6 +1683,12 @@ function taskBoard() {
         if (!response.ok) throw new Error(payload.error || "Could not load the workspace.");
         await this.applyPayload(payload, true);
         if (sequence !== this.querySequence) return;
+        if (payload.query_aliased) {
+          // The address used older spellings; show the query as the server understood it.
+          const canonical = new URLSearchParams();
+          for (const [name, value] of Object.entries(payload.query || {})) appendParams(canonical, name, value);
+          this.applyFilterParams(canonical);
+        }
         this.lastItemsRefreshAt = Date.now();
         this.queryError = "";
       } catch (error) {
@@ -1686,16 +1722,17 @@ function taskBoard() {
       this.actionMessage = "";
       this.actionError = false;
       try {
+        const query = this.collectionQuery();
         const response = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Microtask-Token": this.apiToken },
-          body: JSON.stringify({ ...(body || {}), query: this.collectionQuery(), include: this.includedCardIds() })
+          body: JSON.stringify({ ...(body || {}), query, include: this.includedCardIds() })
         });
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload.error || "Action failed");
         }
-        await this.applyPayload(payload);
+        await this.applyPayload(payload, false, query);
         if (!Object.prototype.hasOwnProperty.call(payload, "sync_warning")) {
           this.syncWarning = "";
         }

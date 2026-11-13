@@ -104,7 +104,7 @@ class MaterializedViewTests(unittest.TestCase):
         self.assertEqual(validation.returncode, 0, validation.stderr)
         self.assertFalse((view / ".git").exists())
 
-    def test_visibility_selectors_keep_view_include_semantics(self) -> None:
+    def test_visibility_selectors_are_the_same_as_list(self) -> None:
         visible = self.write_task("visible.md", "Visible")
         archived = self.write_task("archived.md", "Archived")
         hidden = self.write_task("hidden.md", "Hidden")
@@ -118,6 +118,7 @@ class MaterializedViewTests(unittest.TestCase):
             ("default", (), {visible.name}),
             ("archived-only", ("--archived",), {archived.name, both.name}),
             ("hidden-only", ("--hidden",), {hidden.name, both.name}),
+            ("both-only", ("--archived", "--hidden"), {both.name}),
             ("include-archived", ("--include-archived",), {visible.name, archived.name}),
             ("include-hidden", ("--include-hidden",), {visible.name, hidden.name}),
             ("include-both", ("--include-archived", "--include-hidden"),
@@ -147,7 +148,7 @@ class MaterializedViewTests(unittest.TestCase):
         )
         for name, flags, expected in cases:
             with self.subTest(name=name):
-                result = self.run_mt("view", "--search", "Migration", "--name", name, *flags)
+                result = self.run_mt("view", "Migration", "--name", name, *flags)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 actual = {path.name for path in (self.root / ".mt" / "views" / name / "cards").glob("*.md")}
                 self.assertEqual(actual, expected)
@@ -157,7 +158,7 @@ class MaterializedViewTests(unittest.TestCase):
         self.write_task("migration-other.md", "Migration elsewhere", project="other", intent="migration")
 
         created = self.run_mt(
-            "view", "--search", "migration", "--project", "release", "--name", "launch-review"
+            "view", "migration", "--project", "release", "--name", "launch-review"
         )
         view = self.root / ".mt" / "views" / "launch-review"
 
@@ -404,11 +405,11 @@ Take a step.
 
     def test_inapplicable_view_options_fail_instead_of_being_ignored(self) -> None:
         fuzzy = self.run_mt("view", "--project", "release", "--fuzzy")
-        scope = self.run_mt("view", "--search", "paper", "--kind", "note")
+        scope = self.run_mt("view", "paper", "--kind", "note")
         nameless = self.run_mt("view", "--type", "task")
 
         self.assertEqual(fuzzy.returncode, 2)
-        self.assertIn("--fuzzy require --search", fuzzy.stderr)
+        self.assertIn("require search words", fuzzy.stderr)
         self.assertEqual(scope.returncode, 0, scope.stderr)
         self.assertTrue((self.root / ".mt" / "views" / "paper").is_dir())
         self.assertEqual(nameless.returncode, 2)

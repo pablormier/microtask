@@ -343,7 +343,7 @@ console.log(JSON.stringify(summary(app.groupCards(items, 'tag'))));
         result = self.run_node(self.GROUP_SETUP + r"""
 const app = setup(taskBoard());
 app.tasks = [card('t', {status: 'active'}), card('n', {kind: 'note', status: ''})];
-app.collections = {cards: ['t', 'n'], archive: ['t', 'n']};
+app.collections = {tasks: ['t'], notes: ['n'], archive: ['t', 'n'], archive_tasks: ['t'], archive_notes: ['n']};
 const options = kind => app.groupOptions(kind).map(o => o.value);
 const ids = () => summary(app.viewGroups()).filter(([, items]) => items.length);
 app.mode = 'tasks'; app.settings.tasks.group = 'none';
@@ -432,7 +432,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   await events.focus();
   const recentSkipped = requests.length === 1;
   // Explicit searches bypass the grace period.
-  app.filters.search = 'fresh';
+  app.filters.text = 'fresh';
   const search = app.refreshItems();
   reply(1); await search;
   now += 5000;
@@ -442,7 +442,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   app.ready = true;
   const automatic = events.focus();
   // A search can supersede an automatic refresh without waiting for it.
-  app.filters.search = 'newer';
+  app.filters.text = 'newer';
   const newer = app.refreshItems();
   reply(3); await newer;
   now += 6000;
@@ -466,8 +466,8 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         for key in ["coalesced", "recentSkipped", "unavailableSkipped", "staleInFlightSkipped",
                     "failureRetried", "debounceSkipped"]:
             self.assertTrue(result[key], key)
-        self.assertIn("search=fresh", result["searchUrl"])
-        self.assertIn("search=newer", result["newerUrl"])
+        self.assertIn("text=fresh", result["searchUrl"])
+        self.assertIn("text=newer", result["newerUrl"])
 
     def test_collection_requests_reject_stale_successes_and_failures(self) -> None:
         result = self.run_node(r"""
@@ -477,15 +477,15 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   const requests = [];
   global.fetch = (url, options) => new Promise((resolve, reject) => requests.push({url, options, resolve, reject}));
   const payload = (ids, query) => ({tasks: ids.map(id => ({id,kind:'task',status:'active',title:id})),
-    collections:{cards:ids},query,meta:{}});
+    collections:{tasks:ids},query,meta:{}});
   const reply = (request, value) => request.resolve({ok:true,json:async()=>value});
   const old = app.refreshItems();
-  app.filters.search = 'new & café';
+  app.filters.text = 'new & café';
   const currentQuery = app.collectionQuery();
   const current = app.refreshItems();
   reply(requests[1],payload(['second','first'],currentQuery)); await current;
   reply(requests[0],payload(['old'],{})); await old;
-  const ordered = app.collectionItems("cards").map(item=>item.id);
+  const ordered = app.collectionItems("tasks").map(item=>item.id);
   const staleError = app.refreshItems();
   app.filters.priority = 'high';
   const newest = app.refreshItems();
@@ -499,37 +499,36 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
 })().catch(error => {console.error(error);process.exitCode=1;});
 """)
         self.assertEqual(result["ordered"], ["second", "first"])
-        self.assertIn("search=new+%26+caf%C3%A9", result["url"])
+        self.assertIn("text=new+%26+caf%C3%A9", result["url"])
         self.assertEqual(result["latest"], [])
         self.assertFalse(result["loading"])
         self.assertEqual(result["error"], "")
-        self.assertEqual(result["query"]["priority"], "high")
+        self.assertEqual(result["query"]["priority"], ["high"])
 
     def test_default_draft_payload_refreshes_active_query_without_unfiltered_flash(self) -> None:
         result = self.run_node(r"""
 (async () => {
   const app = taskBoard();
-  app.filters.search = 'needle';
-  app.collections = {cards:['keep']};
+  app.filters.text = 'needle';
+  app.collections = {tasks:['keep']};
   const cards = [{id:'keep',kind:'task',status:'active',title:'needle'},
                  {id:'other',kind:'task',status:'active',title:'other'}];
   const query = app.collectionQuery();
   let requested = '';
   global.fetch = async url => {
     requested = url;
-    return {ok:true,json:async()=>({tasks:cards,collections:{cards:['keep']},query,meta:{}})};
+    return {ok:true,json:async()=>({tasks:cards,collections:{tasks:['keep']},query,meta:{}})};
   };
-  app.applyPayload({tasks:cards,collections:{cards:['other','keep']},
-    query:{...query,search:''},meta:{}});
-  const immediate = app.collectionItems("cards").map(item=>item.id);
+  app.applyPayload({tasks:cards,collections:{tasks:['other','keep']},query:{},meta:{}});
+  const immediate = app.collectionItems("tasks").map(item=>item.id);
   await new Promise(resolve=>setTimeout(resolve,20));
-  console.log(JSON.stringify({immediate,final:app.collectionItems("cards").map(item=>item.id),
+  console.log(JSON.stringify({immediate,final:app.collectionItems("tasks").map(item=>item.id),
     requested,cards:app.tasks.length,loading:app.queryLoading}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
 """)
         self.assertEqual(result["immediate"], ["keep"])
         self.assertEqual(result["final"], ["keep"])
-        self.assertIn("search=needle", result["requested"])
+        self.assertIn("text=needle", result["requested"])
         self.assertEqual(result["cards"], 2)
         self.assertFalse(result["loading"])
 

@@ -51,21 +51,26 @@ and the five seconds after a successful current collection refresh. Explicit
 searches and mutations bypass this guard; failed or stale responses do not extend
 the grace period.
 
-`/api/items` accepts search, status, priority, type, project, topic (the path and
-everything under it), tag, due, updated,
-show_hidden and needs_review query parameters. Every filter except search and
-updated may repeat (`status=doing&status=waiting`): a card matches any value of a
-facet and must match every facet. Tags match whole names. The server echoes the
-lists in the order received, and the client keeps its values in a stable order,
-so `applyPayload` can compare the echoed query with the current one. Mutation
-requests send the same query as JSON. `tools/web_queries.py` selects and
-orders each view, returning ID arrays in `collections` alongside card summaries.
-Search reads full bodies on the server. Summaries omit body, references and reference spans; counts and filter choices still
-use the entire summary collection. Changes to filters request new results after
-a short debounce. Request generations reject stale successes and failures;
-failed queries retain existing cards and offer Retry. Mutation requests carry
-the current query so their results preserve active filters. Draft finish
-responses use the default query and trigger a refresh when filters differ.
+`/api/items` accepts the query fields of `scripts/card_query.py` as parameters:
+text, status, priority, type, project, topic (the path and everything under
+it), tag, due (`overdue`, `today`, `week`, `any`, `none`), `updated_since` and
+`updated_before` (a date or an age such as `3m`), `hidden=include`,
+`needs_review=true`, and the other fields `mt list` accepts. List fields may
+repeat (`status=doing&status=waiting`): a card matches any value of a field and
+must match every field. The page address uses the same names, so `mt web`
+filters and bookmarks open the board as filtered; parameters no control shows
+stay in the address and in requests. A bad parameter returns 400 with a message.
+The page never selects cards itself: `tools/web_queries.py` derives each view's
+query from the request's and returns ID arrays in `collections` (`tasks`,
+`notes`, `archive`, `archive_tasks`, `archive_notes`, `open`, `deadlines`)
+alongside card summaries, and the page renders them. Mutation requests send the
+same query as JSON, and the client keeps a response's collections only if the
+filters have not changed since it was sent. Summaries omit body, references and
+reference spans; counts and filter choices still use the entire summary
+collection. Changes to filters request new results after a short debounce.
+Request generations reject stale successes and failures; failed queries retain
+existing cards and offer Retry. Draft finish responses use the default query
+and trigger a refresh when filters differ.
 
 Opening a card requests `/api/item?id=...` for its full content and resolved
 references. Only the selected card retains details; collection refreshes reuse

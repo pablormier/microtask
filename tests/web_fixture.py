@@ -1,4 +1,5 @@
 """Render the server shell and API payload in an isolated workspace for assertions."""
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -25,3 +26,18 @@ print(output)
 '''
     return subprocess.run([sys.executable, '-c', source, str(output)], cwd=root,
                           text=True, capture_output=True, check=False)
+
+
+def dashboard_collections(root: Path, *queries: dict) -> list[dict]:
+    """The dashboard's `collections` for each query mapping, computed in an isolated workspace."""
+    source = '''
+import json
+import sys
+sys.path.insert(0, 'tools')
+import taskweb
+print(json.dumps([taskweb.dashboard_payload(query=taskweb.request_query(query))['collections']
+                  for query in json.loads(sys.argv[1])]))
+'''
+    result = subprocess.run([sys.executable, '-c', source, json.dumps(list(queries))], cwd=root,
+                            text=True, capture_output=True, check=True)
+    return json.loads(result.stdout)

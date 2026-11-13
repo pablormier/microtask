@@ -30,6 +30,7 @@ from pathlib import Path
 
 import policy_parser
 import card_format
+import card_query
 import card_references
 import drafts as draft_store
 import git_ops
@@ -75,10 +76,6 @@ class MutationReceipt:
     payload: dict[str, object]
 
 
-def today_str() -> str:
-    return date.today().isoformat()
-
-
 def now_stamp() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
 
@@ -104,10 +101,6 @@ def is_timestamp(value: str) -> bool:
 
 
 def is_due_value(value: str) -> bool:
-    return is_date(value) or is_timestamp(value)
-
-
-def is_metadata_time_value(value: str) -> bool:
     return is_date(value) or is_timestamp(value)
 
 
@@ -221,24 +214,10 @@ def consume_repo_selector(arguments: list[str]) -> tuple[list[str], str | None]:
     return arguments, None
 
 
-def due_sort_value(value: object, *, date_only_end: bool = True) -> str:
-    if value is None:
-        return ""
-    raw = str(value)
-    if is_date(raw):
-        return f"{raw}T23:59:59" if date_only_end else f"{raw}T00:00:00"
-    return raw if is_timestamp(raw) else raw
-
-
-def due_day_value(value: object) -> str | None:
-    if value is None:
-        return None
-    raw = str(value)
-    if is_date(raw):
-        return raw
-    if is_timestamp(raw):
-        return raw[:10]
-    return raw
+def due_sort_value(value: object) -> str:
+    """A sortable local ISO time for a due value (a date alone counts as the end of its day); "" when none."""
+    moment = card_query.due_moment(value, datetime.now()) if value else None
+    return moment.isoformat() if moment else ""
 
 
 def due_kind_value(fm: dict[str, object]) -> object:
@@ -255,14 +234,9 @@ def due_kind_error(value: object, due: object, cfg: dict | None = None) -> str |
     return None
 
 
-def completion_sort_value(task: "Card") -> str:
-    return str(task.frontmatter.get("completed") or task.frontmatter.get("updated") or "")
-
-
-def done_cutoff(today: date | None = None) -> str:
-    """ISO date before which done tasks count as old (rules.done_window back from today)."""
-    window = policy().get("rules", {}).get("done_window", "2w")
-    return card_format.relative_date(window, today or date.today()).isoformat()
+def done_window() -> str:
+    """The age (rules.done_window, default 2w) after which done tasks drop out of default views."""
+    return str(policy().get("rules", {}).get("done_window", "2w"))
 
 
 def is_archived(item: "Card") -> bool:
@@ -618,11 +592,6 @@ def read_focus_state() -> FocusState | None:
     return FocusState(task_id.strip(), str(mode))
 
 
-def read_focus_task_id() -> str | None:
-    state = read_focus_state()
-    return state.task_id if state else None
-
-
 def write_focus_task_id(task_id: str) -> None:
     write_focus_state(task_id, "manual")
 
@@ -929,48 +898,22 @@ def has_deadline_due(task: Card) -> bool:
 
 def ranked_focus_candidates(tasks: list["Task"], rank: dict[str, int]) -> list[tuple["Task", str]]:
     """Rank actionable tasks; deadline alerts cover blocked and deferred work."""
-    today = date.today().isoformat()
-    current = now_stamp()
-    soon = (date.today() + timedelta(days=7)).isoformat()
+    now = datetime.now()
+
+    def due(task: Card, mode: str) -> bool:
+        return has_deadline_due(task) and card_query.due_matches(task.frontmatter.get("due"), mode, now)
+
+    overdue, today, week = card_query.DUE_OVERDUE, card_query.DUE_TODAY, card_query.DUE_WEEK
 
     def due_value(task: Card) -> str | None:
         return due_sort_value(task.frontmatter.get("due")) or None
 
-    def due_day(task: Card) -> str | None:
-        return due_day_value(task.frontmatter.get("due"))
-
     groups = (
-        (
-            (
-                task for task in tasks
-                if has_deadline_due(task) and due_day(task) == today and (due_value(task) or "") >= current
-            ),
-            "due_today",
-        ),
-        (
-            (
-                task for task in tasks
-                if has_deadline_due(task)
-                and (due_value(task) or "9999-12-31T23:59:59") < current
-                and is_high_priority_task(task)
-            ),
-            "high_overdue",
-        ),
+        ((task for task in tasks if due(task, today) and not due(task, overdue)), "due_today"),
+        ((task for task in tasks if due(task, overdue) and is_high_priority_task(task)), "high_overdue"),
         ((task for task in tasks if task.frontmatter.get("status") == "doing"), "doing"),
-        (
-            (task for task in tasks if has_deadline_due(task)
-             and today < (due_day(task) or "") <= soon),
-            "due_soon",
-        ),
-        (
-            (
-                task for task in tasks
-                if has_deadline_due(task)
-                and (due_value(task) or "9999-12-31T23:59:59") < current
-                and not is_high_priority_task(task)
-            ),
-            "deadline_review",
-        ),
+        ((task for task in tasks if due(task, week) and not due(task, today)), "due_soon"),
+        ((task for task in tasks if due(task, overdue) and not is_high_priority_task(task)), "deadline_review"),
         ((task for task in tasks if task.frontmatter.get("status") == "active"), "active"),
         ((task for task in tasks if task.frontmatter.get("status") == "inbox"), "inbox"),
     )
@@ -991,8 +934,9 @@ def ranked_focus_candidates(tasks: list["Task"], rank: dict[str, int]) -> list[t
 
 
 def task_display_sort_key(task: "Card", rank: dict[str, int]) -> tuple[int, int, str, str]:
-    due = due_sort_value(task.frontmatter.get("due"))
-    due_group = 0 if due and due[:10] <= date.today().isoformat() else 1 if due else 2
+    value, now = task.frontmatter.get("due"), datetime.now()
+    due_group = 0 if any(card_query.due_matches(value, mode, now) for mode in (
+        card_query.DUE_OVERDUE, card_query.DUE_TODAY)) else 1 if value else 2
     priority, normalized_due, _ = focus_sort_key(task, rank)
     return due_group, priority, normalized_due, str(task.path)
 
@@ -1000,7 +944,7 @@ def task_display_sort_key(task: "Card", rank: dict[str, int]) -> tuple[int, int,
 def followup_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, int, str]:
     due = due_sort_value(task.frontmatter.get("due"))
     priority = str(task.frontmatter.get("priority") or "medium")
-    due_group = 0 if due and due <= now_stamp() else 1 if due else 2
+    due_group = 0 if card_query.due_matches(task.frontmatter.get("due"), card_query.DUE_OVERDUE, datetime.now()) else 1 if due else 2
     return due_group, due or "9999-12-31T23:59:59", rank.get(priority, len(rank)), task.path.name
 
 
@@ -1030,13 +974,15 @@ def focus_context(tasks: list["Task"], *, actor: str | None = None) -> dict:
     elif candidates:
         selected = candidates[0]
 
-    cutoff = (date.today() + timedelta(days=7)).isoformat()
+    now = datetime.now()
     alerts = []
     deadline_order = lambda item: (due_sort_value(item.frontmatter.get("due")) or "9999",
                                    *focus_sort_key(item, rank))
     for task in sorted(tasks, key=deadline_order):
-        due = due_day_value(task.frontmatter.get("due"))
-        if not has_deadline_due(task) or not due or due > cutoff:
+        value = task.frontmatter.get("due")
+        # Overdue or due within the week: the same cards as `--due next`.
+        if not has_deadline_due(task) or not any(card_query.due_matches(value, mode, now) for mode in (
+                card_query.DUE_OVERDUE, card_query.DUE_WEEK)):
             continue
         owner = task.frontmatter.get("claimed_by")
         status = task.frontmatter.get("status")
@@ -1146,18 +1092,9 @@ def read_cards(root: Path, kind: str | None = None, *, cache: CardCache | None =
     return cards
 
 
-def in_selection(card: Card, kind: str | None, statuses: list[str] | None) -> bool:
-    """``statuses`` keeps only tasks with those statuses, so it excludes notes."""
-    if kind is not None and card.kind != kind:
-        return False
-    return statuses is None or (card.is_task and card.frontmatter.get("status") in statuses)
-
-
-def discover(kind: str | None = None, statuses: list[str] | None = None, *, cache: CardCache | None = None) -> list[Card]:
-    """Cards in the active workspace, optionally limited to a kind and/or task statuses."""
-    if statuses is not None and kind is None:
-        kind = "task"
-    return [card for card in read_cards(cards_root(), kind, cache=cache) if in_selection(card, kind, statuses)]
+def discover(kind: str | None = None, *, cache: CardCache | None = None) -> list[Card]:
+    """All cards in the active workspace; `kind` only skips reading files of the other kind."""
+    return read_cards(cards_root(), kind, cache=cache)
 
 
 class ReferenceIndex:
@@ -1196,20 +1133,6 @@ def item_references(item: Card, index: ReferenceIndex) -> list[dict[str, object]
         values.extend(str(comment.get("text") or "") for comment in comments if isinstance(comment, dict))
     text = "\n\n".join(values)
     return [index.resolve(ref) for ref in card_references.extract_references(text)]
-
-
-def print_item_references(item: Card, index: ReferenceIndex) -> None:
-    targets: dict[str, dict] = {}
-    for reference in item_references(item, index):
-        if reference["state"] == "resolved":
-            target = reference["target"]
-            targets.setdefault(target["ref"], target)
-    if targets:
-        print("       referenced:")
-        for target in list(targets.values())[:3]:
-            print(f"         {target['ref']}  {target['title']}")
-        if len(targets) > 3:
-            print(f"         … +{len(targets) - 3} more")
 
 
 def item_json_record(item: Card, reference_index: ReferenceIndex | None = None) -> dict[str, object]:
@@ -1402,11 +1325,6 @@ def item_file_snapshot() -> dict[str, bytes]:
     } if root.is_dir() else {}
 
 
-def item_files_changed(before: dict[str, bytes]) -> bool:
-    pin_demo_state()
-    return before != item_file_snapshot()
-
-
 def auto_sync_after_mutation(*, changed: bool = True) -> int:
     if not changed or not policy().get("rules", {}).get("auto_sync", False):
         return 0
@@ -1435,7 +1353,14 @@ def auto_sync_unavailable_message(status: git_ops.WorkspaceGitStatus) -> str:
     return f"Git sync is unavailable: {reason}; changes remain local."
 
 
+def sync_deferred() -> bool:
+    """The caller, such as the dashboard, runs auto-sync itself after this command returns."""
+    return os.environ.get("MT_DEFER_SYNC") == "1"
+
+
 def _run_auto_sync() -> int:
+    if sync_deferred():
+        return 0
     status = git_ops.workspace_status(REPO_ROOT)
     if status.state in {"missing", "uninitialized"}:
         print(auto_sync_unavailable_message(status))
@@ -1451,6 +1376,8 @@ def _run_auto_sync() -> int:
 
 
 def run_auto_sync_for_receipt() -> str | None:
+    if sync_deferred():
+        return None
     status = git_ops.workspace_status(REPO_ROOT)
     if status.state in {"missing", "uninitialized"}:
         return auto_sync_unavailable_message(status)
@@ -2376,121 +2303,13 @@ def command_note_editor(args: argparse.Namespace) -> int:
             draft_path.unlink(missing_ok=True)
 
 
-def task_matches(task: Card, query: str) -> bool:
-    needle = query.casefold()
-    if needle.startswith("@"):
-        return task.short_ref.startswith(needle[1:])
-    task_id = str(task.frontmatter.get("id") or "")
-    return needle in searchable_text(task).casefold() or needle in task_id.casefold()
-
-
-def searchable_text(item: Card) -> str:
-    parts = [item.title, item.body, str(item.next_action or "")]
-    comments = item.frontmatter.get("comments", [])
-    if isinstance(comments, list):
-        parts.extend(str(comment.get("text") or "") for comment in comments if isinstance(comment, dict))
-    return "\n".join(parts)
-
-
-def term_match(task: Card, query: str, mode: str) -> bool:
-    task_id = str(task.frontmatter.get("id") or "")
-    haystack = f"{searchable_text(task)}\n{task_id}".casefold()
-    terms = query.casefold().split()
-    return all(term in haystack for term in terms) if mode == "and" else any(term in haystack for term in terms)
-
-
-def fuzzy_match_score(task: Card, query: str) -> float | None:
-    """Return a fuzzy token-match score, or None when a query token is too distant."""
-    terms = re.findall(r"[\w-]+", query.casefold())
-    candidates = set(re.findall(r"[\w-]+", f"{searchable_text(task)}\n{task.path.stem}".casefold()))
-    if not terms or not candidates:
-        return None
-    scores = [max(difflib.SequenceMatcher(None, term, candidate).ratio() for candidate in candidates) for term in terms]
-    return sum(scores) / len(scores) if min(scores) >= 0.75 else None
-
-
-def match_score(task: Card, query: str, mode: str) -> float | None:
-    if query.casefold().startswith("@"):
-        return 1.0 if task_matches(task, query) else None
-    if mode == "exact":
-        return 1.0 if task_matches(task, query) else None
-    if mode in ("and", "or"):
-        return 1.0 if term_match(task, query, mode) else None
-    return fuzzy_match_score(task, query)
-
-
-def find_matches(tasks: list[Card], query: str, match_mode: str) -> list[tuple[float, Card]]:
-    if query.startswith("@") and not SHORT_REF_RE.fullmatch(query):
-        raise ValueError("short reference must be @ followed by 3 to 8 hexadecimal characters")
-    return [
-        (score, task)
-        for task in tasks
-        if (score := match_score(task, query, match_mode)) is not None
-    ]
-
-
-def search_match_score(item: Card, query: str, mode: str) -> float | None:
-    """Match only visible card text and return a deterministic relevance score."""
-    title = item.title.casefold()
-    item_id = str(item.frontmatter.get("id") or "").casefold()
-    body = "\n".join([item.body, str(item.next_action or ""), *[
-        str(comment.get("text") or "") for comment in (item.frontmatter.get("comments", []) or [])
-        if isinstance(comment, dict)
-    ]]).casefold()
-    regions = ((title, 3), (item_id, 2), (body, 1))
-
-    if mode == "phrase":
-        needle = query.casefold()
-        weights = [weight for text, weight in regions if needle in text]
-        return float(max(weights)) if weights else None
-
-    if mode in ("all", "any"):
-        terms = list(dict.fromkeys(query.casefold().split()))
-        if not terms:
-            return None
-        weights = [max((weight for text, weight in regions if term in text), default=0) for term in terms]
-        if mode == "all" and any(weight == 0 for weight in weights):
-            return None
-        if mode == "any" and all(weight == 0 for weight in weights):
-            return None
-        return float(sum(weights))
-
-    if mode == "fuzzy":
-        terms = re.findall(r"[\w-]+", query.casefold())
-        candidates = sorted(set(re.findall(r"[\w-]+", f"{item.title}\n{item_id}\n{body}".casefold())))
-        if not terms or not candidates:
-            return None
-        scores = [max(difflib.SequenceMatcher(None, term, candidate).ratio() for candidate in candidates)
-                  for term in terms]
-        if min(scores) < 0.75:
-            return None
-        return sum(scores) / len(scores)
-
-    raise ValueError(f"unknown search match mode: {mode}")
-
-
-def find_search_matches(items: list[Card], query: str, mode: str) -> list[tuple[float, Card]]:
-    """Return matching cards with the score used by relevance sorting."""
-    return [
-        (score, item)
-        for item in items
-        if (score := search_match_score(item, query, mode)) is not None
-    ]
-
-
-def items_by_ref(ref: str, kind: str | None = None, statuses: list[str] | None = None) -> list[Card]:
-    """Resolve filename-based refs before reading card content."""
+def items_by_ref(ref: str) -> list[Card]:
+    """Resolve a filename-based ref before reading other cards' content."""
     if not SHORT_REF_RE.fullmatch(ref):
         raise ValueError("short reference must be @ followed by 3 to 8 hexadecimal characters")
     root = cards_root()
-    matches: list[Card] = []
-    for path in sorted(root.glob("*.md")) if root.is_dir() else []:
-        if not hashlib.sha256(path.stem.encode()).hexdigest()[:8].startswith(ref[1:].lower()):
-            continue
-        item = Card.read(path)
-        if in_selection(item, kind, statuses):
-            matches.append(item)
-    return matches
+    return [Card.read(path) for path in (sorted(root.glob("*.md")) if root.is_dir() else [])
+            if hashlib.sha256(path.stem.encode()).hexdigest()[:8].startswith(ref[1:].lower())]
 
 
 def resolve_unique(
@@ -2501,11 +2320,19 @@ def resolve_unique(
     match_mode: str = "exact",
 ) -> tuple[Card | None, int]:
     includes_notes = kind != "task" and statuses is None
+    # Resolution sees every card, archived and hidden ones included; `statuses` limits it to those tasks.
+    scope = card_query.Query(kind=(kind,) if kind else (), status=tuple(statuses or ()),
+                             archived="include", hidden="include")
     try:
-        if query.startswith("@"):
-            matches = items_by_ref(query, kind, statuses)
+        if query.startswith("@") and not SHORT_REF_RE.fullmatch(query):
+            raise ValueError("short reference must be @ followed by 3 to 8 hexadecimal characters")
+        if statuses is not None and not statuses:
+            candidates = []
         else:
-            matches = [task for _, task in find_matches(discover(kind, statuses), query, match_mode)]
+            # A reference is found from file names, so unrelated cards are never read.
+            found = items_by_ref(query) if query.startswith("@") else discover(kind)
+            candidates = select_cards(found, scope)
+        matches = [card for card in candidates if card_query.text_score(card, query, match_mode) is not None]
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return None, 2
@@ -3026,17 +2853,6 @@ def verify_edit_guards(item: Card, args: argparse.Namespace, original: bytes) ->
         raise ValueError("conflict: item changed since it was loaded (content hash mismatch)")
 
 
-def set_card_title(raw: str, title: str) -> str:
-    normalized = title.strip()
-    if not normalized:
-        return raw
-    if any(character in normalized for character in "\r\n"):
-        raise ValueError("title must be single-line")
-    properties, body = card_format.parse_document(raw)
-    properties["title"] = normalized
-    return card_format.render_document(properties, body)
-
-
 def save_item_edit(item: Card, raw: str, args: argparse.Namespace) -> Card:
     base = demo_root() if demo_active() else REPO_ROOT
     relative = str(item.path.relative_to(base))
@@ -3241,90 +3057,32 @@ def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updat
     return card_format.render_document(patched, body, expected_kind=kind)
 
 
-def _bulk_scope(args: argparse.Namespace) -> tuple[str | None, list[str] | None] | None:
-    """Return the (kind, task statuses) a bulk selection reads, or None after printing an error."""
-    valid_statuses = list(policy().get("statuses", {}).keys())
-    statuses = list(getattr(args, "statuses", []) or []) + list(getattr(args, "positional_statuses", []) or [])
-    if args.kind == "note" and statuses:
-        print("error: --kind note cannot be combined with task statuses", file=sys.stderr)
+def command_query(args: argparse.Namespace) -> card_query.Query | None:
+    """The validated query a command's selection flags describe, or None after printing the error."""
+    try:
+        query = card_query.query_from_args(args)
+        card_query.validate(query, statuses=statuses(), priorities=list(policy().get("priorities", {})))
+    except card_query.QueryError as error:
+        print(f"error: {error}", file=sys.stderr)
         return None
-    if args.kind == "note" and args.type:
-        print("error: --type cannot be combined with --kind note", file=sys.stderr)
-        return None
-    invalid = [group for group in statuses if group not in valid_statuses]
-    if invalid:
-        print(f"error: unknown status: {', '.join(invalid)}", file=sys.stderr)
-        return None
-    if statuses:
-        return "task", list(dict.fromkeys(statuses))
-    return ("task" if args.type else args.kind), None
+    return query
 
 
-def _bulk_has_scope(args: argparse.Namespace) -> bool:
-    return bool(
-        getattr(args, "statuses", []) or getattr(args, "positional_statuses", [])
-        or args.kind or args.needs_review or args.tag or args.type
-        or args.project or args.topic or args.since or args.created_since or args.created_before
-        or args.updated_before or args.completed_since or args.completed_before
-        or args.due_before or args.due_after or args.due or args.archived or args.hidden or args.all
-    )
+def select_cards(cards: list[Card], query: card_query.Query, *, done_cutoff: str | None = None) -> list[Card]:
+    return card_query.select(cards, query, now=datetime.now(), done_cutoff=done_cutoff)
 
 
-_BULK_SELECTION_FIELDS = (
-    "statuses", "kind", "needs_review", "tag", "type", "project", "topic",
-    "since", "created_since", "created_before", "updated_before", "completed_since", "completed_before",
-    "due_before", "due_after", "due", "all", "include_archived", "archived", "include_hidden", "hidden",
-)
-
-
-def _bulk_selection(args: argparse.Namespace) -> dict[str, object]:
-    statuses = list(getattr(args, "statuses", []) or []) + list(getattr(args, "positional_statuses", []) or [])
-    normalized = {field: getattr(args, field, None) for field in _BULK_SELECTION_FIELDS}
-    normalized["statuses"] = list(dict.fromkeys(statuses))
-    for field in ("needs_review", "all", "include_archived", "archived", "include_hidden", "hidden"):
-        normalized[field] = bool(normalized[field])
-    return normalized
-
-
-def _bulk_selection_args(selection: object) -> argparse.Namespace:
-    if not isinstance(selection, dict) or set(selection) != set(_BULK_SELECTION_FIELDS):
-        raise ValueError("bulk edit plan has an invalid selection predicate")
-    statuses = selection["statuses"]
-    if not isinstance(statuses, list) or any(not isinstance(status, str) for status in statuses):
-        raise ValueError("bulk edit plan has invalid task statuses in its selection predicate")
-    if selection["kind"] not in {None, "task", "note"}:
-        raise ValueError("bulk edit plan has an invalid kind")
-    if type(selection["needs_review"]) is not bool:
-        raise ValueError("bulk edit plan has an invalid review filter")
-    for field in ("all", "include_archived", "archived", "include_hidden", "hidden"):
-        if type(selection[field]) is not bool:
-            raise ValueError(f"bulk edit plan has an invalid {field.replace('_', '-')} filter")
-    if selection["include_archived"] and selection["archived"]:
-        raise ValueError("bulk edit plan has conflicting archive filters")
-    if selection["include_hidden"] and selection["hidden"]:
-        raise ValueError("bulk edit plan has conflicting visibility filters")
-    for field in ("tag", "type", "project", "topic", "since", "created_since", "created_before",
-                  "updated_before", "completed_since", "completed_before", "due_before", "due_after", "due"):
-        value = selection[field]
-        if value is not None and not isinstance(value, str):
-            raise ValueError(f"bulk edit plan has an invalid {field.replace('_', '-')} filter")
-    due = selection["due"]
-    if due is not None and (not isinstance(due, str) or due not in {"overdue", "today", "week", "next"}):
-        raise ValueError("bulk edit plan has an invalid due filter")
-    return argparse.Namespace(**selection)
-
-
-def _bulk_selected_items(args: argparse.Namespace) -> list[Card]:
-    scope = _bulk_scope(args)
-    if scope is None:
-        raise ValueError("bulk edit plan has an invalid selection predicate")
-    keep = metadata_matcher(args)
-    if keep is None:
-        raise ValueError("bulk edit plan has an invalid metadata filter")
-    return [
-        item for item in discover(*scope)
-        if keep(item) and (not args.needs_review or item.frontmatter.get("needs_review") is True)
-    ]
+def _plan_query(plan: dict[str, object]) -> card_query.Query:
+    """The query a saved plan holds, checked like one typed on the command line."""
+    stored = plan["query"]
+    if not isinstance(stored, dict):
+        raise ValueError("bulk edit plan has an invalid query")
+    try:
+        query = card_query.query_from_mapping(stored)
+        card_query.validate(query, statuses=statuses(), priorities=list(policy().get("priorities", {})))
+    except card_query.QueryError as error:
+        raise ValueError(f"bulk edit plan has an invalid query: {error}") from error
+    return query
 
 
 def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated: str) -> tuple[dict[str, object], bytes | None]:
@@ -3353,8 +3111,11 @@ def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated
 
 
 def _bulk_preview(args: argparse.Namespace) -> int:
-    if not _bulk_has_scope(args):
-        print("error: bulk-edit requires a scope such as a status, --kind, or metadata filter", file=sys.stderr)
+    query = command_query(args)
+    if query is None:
+        return 2
+    if query == card_query.DEFAULT:
+        print("error: bulk-edit requires a selection such as --status, --kind, or another filter", file=sys.stderr)
         return 2
     try:
         assignments = _bulk_edit_assignments(args.assignments or [])
@@ -3364,11 +3125,7 @@ def _bulk_preview(args: argparse.Namespace) -> int:
     if not run_validator():
         return 1
     base = demo_root() if demo_active() else REPO_ROOT
-    try:
-        matching = _bulk_selected_items(args)
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
+    matching = select_cards(discover(), query)
     if not matching:
         print("error: no cards match the bulk-edit selection", file=sys.stderr)
         return 2
@@ -3398,7 +3155,7 @@ def _bulk_preview(args: argparse.Namespace) -> int:
         "workspace": str(REPO_ROOT.resolve()),
         "data_root": "demo" if demo_active() else "workspace",
         "assignments": assignments,
-        "selection": _bulk_selection(args),
+        "query": card_query.query_to_mapping(query),
         "selected": len(records),
         "changed": sum(bool(record["changed"]) for record in records),
         "unchanged": sum(not bool(record["changed"]) for record in records),
@@ -3430,8 +3187,10 @@ def _read_bulk_plan(path_text: str) -> dict[str, object]:
         plan = json.loads(raw)
     except json.JSONDecodeError as error:
         raise ValueError(f"bulk edit plan is not valid JSON: {error}") from error
+    if isinstance(plan, dict) and "selection" in plan:
+        raise ValueError("this plan was made by an older mt; run the preview again")
     if not isinstance(plan, dict) or set(plan) != {
-        "version", "workspace", "data_root", "assignments", "selection", "selected", "changed", "unchanged", "items"
+        "version", "workspace", "data_root", "assignments", "query", "selected", "changed", "unchanged", "items"
     }:
         raise ValueError("bulk edit plan has an unsupported structure")
     if type(plan["version"]) is not int or plan["version"] != 1:
@@ -3451,7 +3210,7 @@ def _read_bulk_plan(path_text: str) -> dict[str, object]:
     assignments = _bulk_edit_assignments(assignments_raw)
     if not isinstance(plan["items"], list) or not plan["items"]:
         raise ValueError("bulk edit plan must contain at least one selected card")
-    _bulk_selection_args(plan["selection"])
+    _plan_query(plan)
     if any(type(plan[field]) is not int or plan[field] < 0 for field in ("selected", "changed", "unchanged")):
         raise ValueError("bulk edit plan has invalid selection counts")
     records = plan["items"]
@@ -3475,9 +3234,8 @@ def _apply_bulk_plan_locked(args: argparse.Namespace) -> int:
         plan = _read_bulk_plan(args.apply_plan)
         assignments = plan["assignments"]
         assert isinstance(assignments, dict)
-        selection = _bulk_selection_args(plan["selection"])
         base = demo_root() if demo_active() else REPO_ROOT
-        current_items = _bulk_selected_items(selection)
+        current_items = select_cards(discover(), _plan_query(plan))
         current_members = {item.path.relative_to(base).as_posix() for item in current_items}
         planned_members = {
             entry.get("path") for entry in plan["items"]
@@ -3589,177 +3347,17 @@ def _command_bulk_edit_apply(args: argparse.Namespace) -> int:
 
 
 def command_bulk_edit(args: argparse.Namespace) -> int:
-    args.statuses = list(getattr(args, "statuses", []) or [])
-    args.positional_statuses = list(getattr(args, "positional_statuses", []) or [])
     if args.apply_plan is not None:
-        if args.statuses or args.positional_statuses or args.kind or args.assignments or _bulk_has_scope(args):
+        try:
+            explicit = card_query.query_from_args(args, env={})
+        except card_query.QueryError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        if explicit != card_query.DEFAULT or args.assignments:
             print("error: --apply cannot be combined with a new selection or --set", file=sys.stderr)
             return 2
         return _command_bulk_edit_apply(args)
     return _bulk_preview(args)
-
-
-def metadata_matcher(args: argparse.Namespace, *, list_selection: bool = False):
-    archived_only = getattr(args, "archived", False)
-    include_archived = getattr(args, "include_archived", False)
-    hidden_only = getattr(args, "hidden", False)
-    include_hidden = getattr(args, "include_hidden", False)
-    since = None
-    list_date_ranges: dict[str, tuple[date | None, date | None]] = {}
-    for field in ("created", "updated", "due", "completed"):
-        since_text = getattr(args, f"{field}_since", None)
-        if field == "updated" and since_text is None:
-            since_text = getattr(args, "since", None)
-        before_text = getattr(args, f"{field}_before", None)
-        values: list[date | None] = []
-        for option, value in ((f"--{field}-since", since_text), (f"--{field}-before", before_text)):
-            if value is None:
-                values.append(None)
-                continue
-            try:
-                if not DATE_RE.fullmatch(value):
-                    raise ValueError
-                values.append(date.fromisoformat(value))
-            except ValueError:
-                print(f"error: {option} must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
-                return None
-        if values[0] is not None and values[1] is not None and values[0] >= values[1]:
-            print(f"error: --{field}-since must be earlier than --{field}-before", file=sys.stderr)
-            return None
-        list_date_ranges[field] = (values[0], values[1])
-    since = None
-    today = date.today()
-    now = now_stamp()
-    due_before = getattr(args, "due_before", None)
-    if due_before:
-        try:
-            if not is_date(due_before):
-                raise ValueError
-        except ValueError:
-            print("error: --due-before must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
-            return None
-        due_before = f"{due_before}T00:00:00"
-    due_after = getattr(args, "due_after", None) or getattr(args, "due_since", None)
-    if due_after:
-        try:
-            if not is_date(due_after):
-                raise ValueError
-        except ValueError:
-            print("error: --due-after must be a date in YYYY-MM-DD format or an age like 2w, 3m, 1y", file=sys.stderr)
-            return None
-        due_after = f"{due_after}T00:00:00"
-    due_mode = getattr(args, "due", None)
-    if due_mode == "overdue":
-        due_before = now
-    elif due_mode == "today":
-        due_after = f"{today.isoformat()}T00:00:00"
-        due_before = f"{(today + timedelta(days=1)).isoformat()}T00:00:00"
-    elif due_mode == "week":
-        due_after = f"{today.isoformat()}T00:00:00"
-        due_before = f"{(today + timedelta(days=7)).isoformat()}T00:00:00"
-    elif due_mode == "next":
-        due_before = f"{(today + timedelta(days=8)).isoformat()}T00:00:00"
-    wanted_tag = args.tag.casefold() if args.tag else None
-    supplied_type = getattr(args, "type", getattr(args, "task_type", None))
-    wanted_type = supplied_type.casefold() if supplied_type else None
-    wanted_project = args.project.casefold() if args.project else None
-    wanted_topic = card_format.normalize_topic(args.topic) if args.topic else None
-
-    def date_range_matches(task: Card) -> bool:
-        for field, (since_day, before_day) in list_date_ranges.items():
-            if since_day is None and before_day is None:
-                continue
-            value = task.frontmatter.get(field)
-            if not isinstance(value, str) or len(value) < 10:
-                return False
-            try:
-                item_day = date.fromisoformat(value[:10])
-            except ValueError:
-                return False
-            if since_day is not None and item_day < since_day:
-                return False
-            if before_day is not None and item_day >= before_day:
-                return False
-        return True
-
-    def list_visibility_matches(task: Card) -> bool:
-        all_inventory = getattr(args, "all", False)
-        archived = is_archived(task)
-        hidden = is_hidden(task)
-        if archived_only and not archived:
-            return False
-        if hidden_only and not hidden:
-            return False
-        if archived_only or hidden_only:
-            return True
-        return all_inventory or (include_archived or not archived) and (include_hidden or not hidden)
-
-    def matches(task: Card) -> bool:
-        tags = task.frontmatter.get("tags") or []
-        due = task.frontmatter.get("due")
-        due_value = due_sort_value(due) if due is not None else None
-        return all(
-            (
-                wanted_tag is None or wanted_tag in [str(tag).casefold() for tag in tags],
-                wanted_type is None or wanted_type == str(task.frontmatter.get("type") or task.kind).casefold(),
-                wanted_project is None
-                or wanted_project == str(task.frontmatter.get("project") or "").casefold(),
-                wanted_topic is None
-                or card_format.topic_within(task.frontmatter.get("topic"), wanted_topic),
-                list_visibility_matches(task),
-                date_range_matches(task),
-                due_before is None or (due_value is not None and due_value < due_before),
-                due_after is None or (due_value is not None and due_value >= due_after),
-            )
-        )
-
-    return matches
-
-
-def select_card_items(args: argparse.Namespace) -> tuple[list[Card], list[Card]] | None:
-    """Apply the shared list/search metadata and collection selection."""
-    valid_statuses = set(policy().get("statuses", {}))
-    statuses = list(dict.fromkeys(args.statuses))
-    invalid = [status for status in statuses if status not in valid_statuses]
-    if invalid:
-        print(f"error: unknown status: {', '.join(invalid)}", file=sys.stderr)
-        return None
-    if args.kind == "note" and statuses:
-        print("error: --kind note cannot be combined with --status", file=sys.stderr)
-        return None
-    if args.type and args.kind == "note":
-        print("error: --type cannot be combined with --kind note", file=sys.stderr)
-        return None
-
-    keep = metadata_matcher(args, list_selection=True)
-    if keep is None:
-        return None
-    all_items = discover()
-    selected: list[Card] = []
-    for item in all_items:
-        if args.kind == "task" and not item.is_task:
-            continue
-        if args.kind == "note" and not item.is_note:
-            continue
-        if statuses and (not item.is_task or item.frontmatter.get("status") not in statuses):
-            continue
-        if args.type and (
-            not item.is_task
-            or str(item.frontmatter.get("type") or "").casefold() != args.type.casefold()
-        ):
-            continue
-        if args.needs_review and item.frontmatter.get("needs_review") is not True:
-            continue
-        if getattr(args, "triage", False):
-            is_triage = (
-                (item.is_task and (item.frontmatter.get("status") == "inbox" or item.frontmatter.get("needs_review") is True))
-                or (item.is_note and item.frontmatter.get("needs_review") is True)
-            )
-            if not is_triage:
-                continue
-        if keep(item):
-            selected.append(item)
-    return all_items, selected
 
 
 def sort_card_items(
@@ -3798,15 +3396,12 @@ def command_list(args: argparse.Namespace) -> int:
         print("error: --tail must be a positive integer", file=sys.stderr)
         return 2
 
-    selection = select_card_items(args)
-    if selection is None:
+    query = command_query(args)
+    if query is None:
         return 2
-    all_items, selected = selection
-    if not (args.all or args.archived or args.statuses or args.completed_since or args.completed_before):
-        cutoff = done_cutoff()
-        selected = [item for item in selected if not (
-            item.is_task and item.frontmatter.get("status") == "done"
-            and "" < completion_sort_value(item)[:10] < cutoff)]
+    all_items = discover()
+    selected = select_cards(all_items, query,
+                            done_cutoff=card_query.default_done_cutoff(query, done_window(), date.today()))
     reference_index = ReferenceIndex(all_items)
     priorities = list(policy().get("priorities", {}).keys())
     rank = {name: index for index, name in enumerate(priorities)}
@@ -4017,9 +3612,44 @@ def command_time_end(args: argparse.Namespace) -> int:
     return 0
 
 
+TIME_QUERY_DEFAULTS = {"archived": "include", "hidden": "include"}
+
+
+def add_session_window_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--session-since", metavar="DATE",
+                         help=f"count sessions that started on or after this day: {card_query.DATE_HELP}")
+    command.add_argument("--session-before", metavar="DATE",
+                         help=f"count sessions that started before this day: {card_query.DATE_HELP}")
+
+
+def session_window(args: argparse.Namespace) -> tuple[str | None, str | None] | None:
+    """The --session-since / --session-before days (start of sessions to count), or None after an error."""
+    try:
+        since, before = (card_query.parse_day(getattr(args, name), name, date.today())
+                         for name in ("session_since", "session_before"))
+    except card_query.QueryError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return None
+    if since and before and since >= before:
+        print("error: --session-since must be earlier than --session-before", file=sys.stderr)
+        return None
+    return since, before
+
+
+def session_entries(task: Card, window: tuple[str | None, str | None]) -> list[dict[str, object]]:
+    """The task's recorded sessions that started inside the window: since <= start day < before."""
+    since, before = window
+    return [entry for entry in time_entries_from(task.frontmatter)
+            if (not since or str(entry["start"])[:10] >= since) and (not before or str(entry["start"])[:10] < before)]
+
+
 def command_time_list(args: argparse.Namespace) -> int:
     if not run_validator():
         return 1
+    selection = command_query(args)
+    window = session_window(args)
+    if selection is None or window is None:
+        return 2
     query = " ".join(args.query).strip()
     if query:
         task, result = resolve_unique(query, kind="task")
@@ -4028,7 +3658,8 @@ def command_time_list(args: argparse.Namespace) -> int:
         tasks = [task]
     else:
         tasks = discover("task")
-    sessions = [(task, entry) for task in tasks for entry in time_log_entries(task.raw)]
+    sessions = [(task, entry) for task in select_cards(tasks, selection)
+                for entry in session_entries(task, window)]
     if not sessions:
         print("No recorded sessions.")
         return 0
@@ -4127,11 +3758,14 @@ def command_time_add(args: argparse.Namespace) -> int:
 def command_time_report(args: argparse.Namespace) -> int:
     if not run_validator():
         return 1
-    tasks = discover("task")
+    selection = command_query(args)
+    window = session_window(args)
+    if selection is None or window is None:
+        return 2
     grouped: dict[str, int] = {}
     labels: dict[str, list[str]] = {}
-    for task in tasks:
-        seconds = saved_time_seconds(task)
+    for task in select_cards(discover("task"), selection):
+        seconds = sum(int(entry["elapsed_seconds"]) for entry in session_entries(task, window))
         if not seconds:
             continue
         if args.by == "task":
@@ -4231,6 +3865,11 @@ def command_topic_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def topic_query(path: str) -> card_query.Query:
+    """Every card at or under a topic, whether archived or hidden."""
+    return card_query.Query(topic=(path,), archived="include", hidden="include")
+
+
 def topic_rename_plan(old: str, new: str, merge: bool) -> list[tuple[Card, str]]:
     """Cards to move and their new topics, or ValueError when the rename is not allowed."""
     for label, value in (("OLD", old), ("NEW", new)):
@@ -4244,13 +3883,12 @@ def topic_rename_plan(old: str, new: str, merge: bool) -> list[tuple[Card, str]]
     if len(new_key) > len(old_key) and new_key[:len(old_key)] == old_key:
         raise CardInputError(f"cannot move topic '{old}' into its own subtree '{new}'")
     cards = discover()
-    affected = [card for card in cards if card_format.topic_within(card.frontmatter.get("topic"), old)]
+    affected = select_cards(cards, topic_query(old))
     if not affected:
         raise CardInputError(f"no cards use topic '{old}' or anything under it")
     if new_key != old_key and not merge:
         moving = {card.path for card in affected}
-        existing = [card for card in cards if card.path not in moving
-                    and card_format.topic_within(card.frontmatter.get("topic"), new)]
+        existing = select_cards([card for card in cards if card.path not in moving], topic_query(new))
         if existing or any(card_format.topic_key(item) == new_key for item in suggested_topics(policy())):
             raise CardInputError(f"topic '{new}' already exists; use --merge to combine into it")
     plan = []
@@ -4329,10 +3967,6 @@ def command_topic_rename(args: argparse.Namespace) -> int:
 def command_focus(args: argparse.Namespace) -> int:
     query = " ".join(getattr(args, "query", []) or []).strip()
     set_query = (getattr(args, "set_query", None) or "").strip()
-    has_filters = any(
-        getattr(args, name, None)
-        for name in ("tag", "type", "project", "topic", "since", "due_before", "due_after", "due")
-    )
     if query and set_query:
         print("error: use either a focus query or --set, not both", file=sys.stderr)
         return 2
@@ -4345,11 +3979,11 @@ def command_focus(args: argparse.Namespace) -> int:
     if args.clear and args.next:
         print("error: --clear cannot be combined with --next", file=sys.stderr)
         return 2
-    if (query or set_query or args.clear) and has_filters:
-        print("error: set and clear focus operations cannot be combined with filters", file=sys.stderr)
+    selection = command_query(args)
+    if selection is None:
         return 2
-    keep = metadata_matcher(args)
-    if keep is None:
+    if (query or set_query or args.clear) and card_query.query_from_args(args, env={}) != card_query.DEFAULT:
+        print("error: set and clear focus operations cannot be combined with filters", file=sys.stderr)
         return 2
     actor = current_username(getattr(args, "by", None))
     if args.clear:
@@ -4363,7 +3997,8 @@ def command_focus(args: argparse.Namespace) -> int:
             return 2
         check_claim(task, actor)
         write_focus_task_id(str(task.frontmatter.get("id") or task.path.stem))
-    open_tasks = [task for task in discover(statuses=open_statuses()) if keep(task)]
+    open_query = card_query.narrow(selection, "status", open_statuses())
+    open_tasks = select_cards(discover(), open_query) if open_query else []
     context = focus_context(open_tasks, actor=actor)
     candidates = context["candidates"]
     if args.next:
@@ -4398,31 +4033,17 @@ def command_focus(args: argparse.Namespace) -> int:
 
 def command_unfocus(args: argparse.Namespace) -> int:
     clear_focus_task_id()
-    return command_focus(
-        argparse.Namespace(
-            query=[],
-            set_query=None,
-            clear=False,
-            next=False,
-            tag=None,
-            type=None,
-            project=None,
-            topic=None,
-            since=None,
-            due_before=None,
-            due_after=None,
-            due=None,
-            include_archived=False,
-            archived=False,
-        )
-    )
+    return command_focus(parser().parse_args(["focus"]))
 
 
 def command_followup(args: argparse.Namespace) -> int:
-    cfg = policy()
-    priorities = list(cfg.get("priorities", {}).keys())
+    selection = command_query(args)
+    if selection is None:
+        return 2
+    priorities = list(policy().get("priorities", {}).keys())
     rank = {name: index for index, name in enumerate(priorities)}
-    tasks = [task for task in discover(statuses=["waiting"]) if not is_archived(task) and not is_hidden(task)]
+    waiting = card_query.narrow(selection, "status", ["waiting"])
+    tasks = select_cards(discover(), waiting) if waiting else []
     tasks = sorted(tasks, key=lambda task: followup_sort_key(task, rank))
     if not tasks:
         print("No waiting follow-ups.")
@@ -4440,8 +4061,10 @@ def command_followup(args: argparse.Namespace) -> int:
 
 
 def command_search(args: argparse.Namespace) -> int:
-    query = " ".join(args.query).strip()
-    if not query:
+    query = command_query(args)
+    if query is None:
+        return 2
+    if not query.text.strip():
         print("error: search requires a non-empty query", file=sys.stderr)
         return 2
     if args.limit is not None and args.limit < 1:
@@ -4450,20 +4073,10 @@ def command_search(args: argparse.Namespace) -> int:
     if args.tail is not None and args.tail < 1:
         print("error: --tail must be a positive integer", file=sys.stderr)
         return 2
-    try:
-        selection = select_card_items(args)
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
-    if selection is None:
-        return 2
-    all_items, selected = selection
-    try:
-        scored_matches = find_search_matches(selected, query, args.match_mode)
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
-    relevance_scores = {item.path: score for score, item in scored_matches}
+    all_items = discover()
+    selected = select_cards(all_items, query)
+    relevance_scores = {item.path: card_query.text_score(item, query.text, query.match) for item in selected}
+    scored_matches = [(relevance_scores[item.path], item) for item in selected]
     priorities = list(policy().get("priorities", {}).keys())
     priority_rank = {name: index for index, name in enumerate(priorities)}
     results = sort_card_items(
@@ -4494,7 +4107,7 @@ def command_search(args: argparse.Namespace) -> int:
         status = f" [{item.frontmatter['status']}]" if item.is_task else ""
         priority = str(item.frontmatter.get("priority") or "-")
         claim = f" [claimed: {item.frontmatter['claimed_by']}]" if item.frontmatter.get("claimed_by") else ""
-        fuzzy_suffix = f" (fuzzy {relevance_scores[item.path]:.0%})" if args.match_mode == "fuzzy" else ""
+        fuzzy_suffix = f" (fuzzy {relevance_scores[item.path]:.0%})" if query.match == "fuzzy" else ""
         print(f"[@{item.short_ref}] [{kind}]{status} [{priority}] {item.title}"
               f"{item_state_suffix(item)}{claim}{fuzzy_suffix}")
     return 0
@@ -4502,7 +4115,7 @@ def command_search(args: argparse.Namespace) -> int:
 
 def add_match_mode_arguments(command: argparse.ArgumentParser, allow_fuzzy: bool = False) -> None:
     command.description = (
-        "Match task title, ID, and body with an exact case-insensitive substring by default. "
+        "Match task title, ID, reference, tags, and body with an exact case-insensitive substring by default. "
         "Use --and to require every word or --or to match any word. "
         "Use @ followed by a unique 3 to 8 character hexadecimal prefix to select a short reference."
     )
@@ -4514,93 +4127,6 @@ def add_match_mode_arguments(command: argparse.ArgumentParser, allow_fuzzy: bool
     if allow_fuzzy:
         modes.add_argument("--fuzzy", dest="match_mode", action="store_const", const="fuzzy", help="allow close word matches")
     command.set_defaults(match_mode="exact")
-
-
-def add_card_selection_arguments(command: argparse.ArgumentParser) -> None:
-    """Register the shared collection and metadata filters for list and search."""
-    command.add_argument("--all", action="store_true",
-                         help="include every task and note, including hidden and archived cards")
-    command.add_argument("--kind", choices=("task", "note"), help="select tasks or notes")
-    command.add_argument("--status", dest="statuses", action="append", default=[], metavar="STATUS",
-                         help="select a task status; repeat to select several statuses")
-    command.add_argument("--needs-review", action="store_true", help="select cards marked for review")
-    command.add_argument("--triage", action="store_true",
-                         help="select cards needing triage (inbox tasks and notes needing review)")
-    command.add_argument("--project", help="exact case-insensitive project match")
-    command.add_argument("--topic", metavar="PATH",
-                         help="select this topic and everything under it (case-insensitive, whole segments)")
-    command.add_argument("--tag", help="exact case-insensitive tag match")
-    command.add_argument("--type", "--task-type", dest="type",
-                         help="select tasks of this type (alias: --task-type)")
-    for field in ("created", "updated", "due", "completed"):
-        since_flags = ("--updated-since", "--since") if field == "updated" else (f"--{field}-since",)
-        command.add_argument(*since_flags, dest=f"{field}_since", metavar="DATE",
-                             help=f"include cards with {field} on or after this day ({DATE_HELP})")
-        command.add_argument(f"--{field}-before", metavar="DATE",
-                             help=f"include cards with {field} before this day ({DATE_HELP})")
-    command.add_argument("--due-after", dest="due_since", metavar="DATE",
-                         help=f"alias for --due-since; include cards due on or after this date ({DATE_HELP})")
-    command.add_argument("--archived", action="store_true", help="select archived cards, including hidden ones")
-    command.add_argument("--hidden", action="store_true", help="select hidden cards, including archived ones")
-
-
-DATE_HELP = "YYYY-MM-DD or an age like 2w, 3m, 1y"
-
-
-def add_metadata_filter_arguments(
-    command: argparse.ArgumentParser,
-    *,
-    item_label: str = "tasks",
-    include_project: bool = True,
-    collection: bool = False,
-) -> None:
-    command.add_argument("--tag")
-    command.add_argument("--type", "--task-type", dest="type", help="task type (alias: --task-type)")
-    if include_project:
-        command.add_argument("--project")
-    command.add_argument("--topic", metavar="PATH", help="this topic and everything under it")
-    if collection:
-        command.add_argument("--kind", choices=("task", "note"), help="select tasks or notes")
-        command.add_argument("--status", dest="statuses", action="append", default=[], metavar="STATUS",
-                             help="select a task status; repeat to select several")
-        command.add_argument("--needs-review", action="store_true", help=f"select {item_label} marked for review")
-    command.add_argument(
-        "--since", "--updated-since", dest="since",
-        metavar="DATE",
-        help=f"include {item_label} updated on or after this date ({DATE_HELP})",
-    )
-    for field in ("created", "updated", "completed"):
-        if field == "updated":
-            command.add_argument("--updated-before", metavar="DATE",
-                                 help=f"include {item_label} updated before this date, exclusive ({DATE_HELP})")
-            continue
-        command.add_argument(f"--{field}-since", metavar="DATE",
-                             help=f"include {item_label} {field} on or after this date ({DATE_HELP})")
-        command.add_argument(f"--{field}-before", metavar="DATE",
-                             help=f"include {item_label} {field} before this date, exclusive ({DATE_HELP})")
-    command.add_argument(
-        "--due-before",
-        metavar="DATE",
-        help=f"include {item_label} due before this day, exclusive ({DATE_HELP})",
-    )
-    command.add_argument(
-        "--due-after", "--due-since", dest="due_after",
-        metavar="DATE",
-        help=f"include {item_label} due on or after this date ({DATE_HELP})",
-    )
-    command.add_argument(
-        "--due",
-        choices=("overdue", "today", "week", "next"),
-        help="shortcut due filter: overdue, today, week, or next 7 days including overdue",
-    )
-    archive = command.add_mutually_exclusive_group()
-    archive.add_argument("--include-archived", action="store_true", help=f"include archived {item_label}")
-    archive.add_argument("--archived", action="store_true", help=f"show only archived {item_label}")
-    visibility = command.add_mutually_exclusive_group()
-    visibility.add_argument("--include-hidden", action="store_true", help=f"include hidden {item_label}")
-    visibility.add_argument("--hidden", action="store_true", help=f"show only hidden {item_label}")
-    command.add_argument("--all", action="store_true",
-                         help="include hidden and archived cards in the selected collection")
 
 
 def add_card_metadata_arguments(command: argparse.ArgumentParser, *, editing: bool) -> None:
@@ -4939,11 +4465,11 @@ def command_scratch(args: argparse.Namespace) -> int:
     return 0
 
 
-def view_name_from_args(args: argparse.Namespace) -> str:
+def view_name_from_args(args: argparse.Namespace, query: card_query.Query) -> str:
     supplied = getattr(args, "name", None)
-    source_text = " ".join(args.search) if args.search else (args.project or args.tag)
+    source_text = query.text or next(iter(query.project or query.tag), None)
     if supplied is None:
-        if source_text is None:
+        if not source_text:
             raise ValueError("provide --name when no project, tag, or search text supplies a name")
         slug = "-".join(re.findall(r"[a-z0-9]+", str(source_text).casefold()))
         if not slug or len(slug) > 64:
@@ -4952,77 +4478,6 @@ def view_name_from_args(args: argparse.Namespace) -> str:
     if len(supplied) > 64 or not VIEW_NAME_RE.fullmatch(supplied):
         raise ValueError("--name must be a lowercase slug using letters, digits, and single hyphens")
     return supplied
-
-
-def view_selector_arguments(args: argparse.Namespace) -> list[str]:
-    """Select a validated inventory snapshot or delegate a text search."""
-    metadata = (("--tag", args.tag), ("--type", args.type), ("--project", args.project),
-                ("--topic", args.topic), ("--since", args.since),
-                ("--due-before", args.due_before), ("--due-after", args.due_after), ("--due", args.due))
-    if any(value is not None and not value.strip() for _flag, value in metadata):
-        raise ValueError("view filters must have non-empty values")
-    if args.search:
-        mode = {"exact": "phrase", "and": "all", "or": "any", "fuzzy": "fuzzy"}[args.match_mode]
-        # Search the full inventory, then apply view's legacy visibility and
-        # date filters to the validated snapshot in filter_view_items.
-        return ["search", "--all", "--json", "--match", mode, "--", *args.search]
-    if args.match_mode != "exact":
-        raise ValueError("--and, --or, and --fuzzy require --search")
-    has_list_filter = any((args.project, args.tag, args.type, args.topic, args.since,
-                           args.created_since, args.created_before, args.updated_before,
-                           args.completed_since, args.completed_before, args.due_before,
-                           args.due_after, args.due, args.statuses, args.kind,
-                           args.needs_review, args.include_archived, args.archived,
-                           args.include_hidden, args.hidden, args.all))
-    if not has_list_filter and not args.name:
-        raise ValueError("view requires --project, a list filter, --search, or --name")
-    # Keep view's existing include and date semantics independent of list's
-    # simpler selectors. Filter the validated inventory bytes in create_view.
-    return ["list", "--all", "--json"]
-
-
-def filter_view_items(args: argparse.Namespace, selected: list[tuple[str, str, bytes, str]]
-                      ) -> list[tuple[str, str, bytes, str]] | None:
-    """Apply view's legacy structured filters to a validated card snapshot."""
-    valid_statuses = set(policy().get("statuses", {}))
-    if any(status not in valid_statuses for status in args.statuses):
-        print("error: unknown status in --status", file=sys.stderr)
-        return None
-    if args.statuses and args.kind == "note":
-        print("error: --status cannot be combined with --kind note", file=sys.stderr)
-        return None
-    if args.type and args.kind == "note":
-        print("error: --type cannot be combined with --kind note", file=sys.stderr)
-        return None
-    keep = metadata_matcher(args)
-    if keep is None:
-        return None
-    filtered = []
-    for entry in selected:
-        kind, source_path, raw, _content_hash = entry
-        text = raw.decode("utf-8")
-        frontmatter_text, body = parse_frontmatter(text)
-        if frontmatter_text is None:
-            raise ValueError(f"selected card has no frontmatter: {source_path}")
-        item = Card(REPO_ROOT / source_path, text, frontmatter_text, body, parse_yaml(frontmatter_text))
-        if args.kind is not None and kind != args.kind:
-            continue
-        if args.statuses and (kind != "task" or item.frontmatter.get("status") not in args.statuses):
-            continue
-        if args.type and kind == "note":
-            continue
-        if args.needs_review and item.frontmatter.get("needs_review") is not True:
-            continue
-        if getattr(args, "triage", False):
-            is_triage = (
-                (item.is_task and (item.frontmatter.get("status") == "inbox" or item.frontmatter.get("needs_review") is True))
-                or (item.is_note and item.frontmatter.get("needs_review") is True)
-            )
-            if not is_triage:
-                continue
-        if keep(item):
-            filtered.append(entry)
-    return filtered
 
 
 def validated_view_items(records: object) -> list[tuple[str, str, bytes, str]]:
@@ -5099,9 +4554,17 @@ def copy_application(target: Path, *, local_policy: bool = False, examples: bool
 
 
 def create_view(args: argparse.Namespace) -> int:
+    query = command_query(args)
+    if query is None:
+        return 2
+    if query.match != "exact" and not query.text:
+        print("error: --and, --or, --fuzzy, and --match require search words", file=sys.stderr)
+        return 2
+    if query == card_query.DEFAULT and not args.name:
+        print("error: view requires search words, a filter, or --name", file=sys.stderr)
+        return 2
     try:
-        name = view_name_from_args(args)
-        selector_args = view_selector_arguments(args)
+        name = view_name_from_args(args, query)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -5116,32 +4579,11 @@ def create_view(args: argparse.Namespace) -> int:
     work_parent.mkdir(parents=True, exist_ok=True)
     work_root = Path(tempfile.mkdtemp(prefix="run-", dir=work_parent))
     try:
-        selection = subprocess.run(
-            [str(APP_ROOT / "mt"), *selector_args],
-            cwd=REPO_ROOT, env=workspace_env(),
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if selection.returncode != 0:
-            if selection.stderr:
-                print(selection.stderr, end="", file=sys.stderr)
-            return selection.returncode
         try:
-            records = json.loads(selection.stdout)
-            selected = validated_view_items(records)
-        except (json.JSONDecodeError, OSError, ValueError) as error:
+            selected = validated_view_items([item_json_record(card) for card in select_cards(discover(), query)])
+        except (OSError, ValueError) as error:
             print(f"error: could not create view: {error}", file=sys.stderr)
             return 1
-
-        try:
-            filtered = filter_view_items(args, selected)
-        except (UnicodeError, ValueError) as error:
-            print(f"error: could not create view: {error}", file=sys.stderr)
-            return 1
-        if filtered is None:
-            return 2
-        selected = filtered
 
         copy_application(work_root, local_policy=True)
         items: list[dict[str, str]] = []
@@ -5259,18 +4701,12 @@ def command_repo_remove(args: argparse.Namespace) -> int:
     return 0
 
 
-# Commands whose --project/--topic select cards, plus add/note, where they file new ones.
-SCOPED_COMMANDS = {"add", "note", "list", "search", "focus", "view", "bulk-edit", "web"}
-
-
-def apply_env_scope(args: argparse.Namespace) -> list[str]:
-    """Default --project/--topic from MT_PROJECT/MT_TOPIC; explicit options win."""
-    if args.command not in SCOPED_COMMANDS:
-        return []
+def apply_capture_scope(args: argparse.Namespace) -> list[str]:
+    """Default --project/--topic of add and note from MT_PROJECT/MT_TOPIC; explicit options win."""
     applied = []
     for field, variable in (("project", "MT_PROJECT"), ("topic", "MT_TOPIC")):
         value = os.environ.get(variable, "").strip()
-        if value and hasattr(args, field) and getattr(args, field) is None:
+        if value and getattr(args, field, None) is None:
             setattr(args, field, value)
             applied.append(f"{field} {value} ({variable})")
     return applied
@@ -5730,18 +5166,19 @@ def command_web(args: argparse.Namespace) -> int:
         command.extend(["--host", args.host])
     if args.port is not None:
         command.extend(["--port", str(args.port)])
-    for option in WEB_FILTERS:
-        values = getattr(args, option)  # a list from the flags, or a string from MT_PROJECT / MT_TOPIC
-        for value in [values] if isinstance(values, str) else values or []:
-            command.extend([f"--{option}", value])
+    query = command_query(args)
+    if query is None:
+        return 2
+    for field, value in card_query.query_to_mapping(query).items():
+        flag = "--" + field.replace("_", "-")
+        if value is True:
+            command.append(flag)
+        else:
+            command.extend(arg for item in (value if isinstance(value, list) else [value]) for arg in (flag, item))
     try:
         return subprocess.run(command, cwd=REPO_ROOT, check=False, env=workspace_env()).returncode
     except KeyboardInterrupt:
         return 130
-
-
-WEB_FILTERS = ("project", "topic", "tag", "updated")
-WEB_UPDATED_CHOICES = ("2w", "1m", "3m", "1y", "older-3m", "older-1y")
 
 
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
@@ -5749,11 +5186,7 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument("--host", default="127.0.0.1", help="server host; defaults to 127.0.0.1")
     parser.add_argument("--port", type=int, default=0, help="server port; defaults to an available port")
-    parser.add_argument("--project", action="append", help="open the board filtered to this project; repeat to show several")
-    parser.add_argument("--topic", action="append", metavar="PATH",
-                        help="open the board filtered to this topic and everything under it; repeat to show several")
-    parser.add_argument("--tag", action="append", help="open the board filtered to this tag; repeat to show several")
-    parser.add_argument("--updated", choices=WEB_UPDATED_CHOICES, help="open the board filtered by last update")
+    card_query.add_query_arguments(parser)
 
 
 class MtArgumentParser(argparse.ArgumentParser):
@@ -5798,8 +5231,8 @@ def parser() -> argparse.ArgumentParser:
                "Use 'mt <command> --help' for command-specific options and matching behavior. "
                "For metadata and body changes, see 'mt edit --help'; "
                "for configured values and defaults, use 'mt policy --json'. "
-               "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, view, bulk-edit, "
-               "and web to one project or topic; an explicit --project or --topic wins.",
+               "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, followup, view, bulk-edit, "
+               "time list, time report, and web to one project or topic; an explicit --project or --topic wins.",
     )
     root.add_argument(
         "-R",
@@ -6034,6 +5467,12 @@ def parser() -> argparse.ArgumentParser:
     time_status.set_defaults(func=command_time_status)
     time_list = time_sub.add_parser("list", help="list recorded sessions with IDs for removal")
     time_list.add_argument("query", nargs="*", help="optional task title, id, or short reference")
+    time_list.description = (
+        "List recorded sessions, newest first. Selection filters pick the tasks; unlike list, they include "
+        "archived and hidden tasks unless you pass --archived exclude or --hidden exclude. "
+        "--session-since and --session-before count only sessions that started inside that window.")
+    card_query.add_query_arguments(time_list, defaults=TIME_QUERY_DEFAULTS)
+    add_session_window_arguments(time_list)
     time_list.set_defaults(func=command_time_list)
     time_remove = time_sub.add_parser("remove", help="remove one recorded session by its ID or unique prefix")
     time_remove.add_argument("session_id", help="session ID from time list; at least 8 hexadecimal characters")
@@ -6045,7 +5484,15 @@ def parser() -> argparse.ArgumentParser:
     time_add.add_argument("--end", metavar="TIME", help="local session end; defaults to now (same TIME format as stop --at)")
     time_add.set_defaults(func=command_time_add)
     time_report = time_sub.add_parser("report", help="report saved task time")
-    time_report.add_argument("--by", choices=("task", "project", "topic"), default="task")
+    time_report.add_argument("--by", choices=("task", "project", "topic"), default="task",
+                             help="group the report by task, project, or topic (default: task)")
+    time_report.description = (
+        "Sum saved task time. Selection filters pick the tasks; unlike list, they include archived and "
+        "hidden tasks unless you pass --archived exclude or --hidden exclude. --session-since and "
+        "--session-before count only sessions that started inside that window, for example "
+        "--session-since 1w for last week's time.")
+    card_query.add_query_arguments(time_report, defaults=TIME_QUERY_DEFAULTS)
+    add_session_window_arguments(time_report)
     time_report.set_defaults(func=command_time_report)
 
     topic_command = sub.add_parser(
@@ -6093,25 +5540,30 @@ def parser() -> argparse.ArgumentParser:
     focus.add_argument("--clear", action="store_true", help="clear the local focus selection")
     focus.add_argument("--json", action="store_true", help="print selection, ordered candidates, and nearby deadline alerts as JSON")
     focus.add_argument("--by", help="choose tasks available to this identity; does not claim work")
-    add_metadata_filter_arguments(focus)
+    focus.description = ("Show the task to focus on next among open tasks. Selection filters narrow the "
+                         "candidates; --status further limits the open statuses. Setting or clearing the "
+                         "pinned task takes no filters.")
+    card_query.add_query_arguments(focus)
     focus.set_defaults(func=command_focus)
 
     unfocus = sub.add_parser("unfocus", help="clear the local focus selection")
     unfocus.set_defaults(func=command_unfocus)
 
     followup = sub.add_parser("followup", help="show waiting tasks needing follow-up")
+    followup.description = "Show waiting tasks, narrowed by the selection filters."
+    card_query.add_query_arguments(followup)
     followup.set_defaults(func=command_followup)
 
     listing = sub.add_parser("list", help="list tasks and notes")
     listing.description = (
-        "List visible, unarchived tasks and notes by default. Selection filters combine; "
-        "repeated --status values are alternatives. --status and --type select tasks; "
-        "--needs-review selects any card marked for review. --all includes hidden and archived cards. "
-        "--archived and --hidden select that state, including cards with both flags. "
-        "Done tasks older than rules.done_window (default 2w) are left out unless --all, --archived, "
-        "--status, --completed-since, or --completed-before is given."
+        "List visible, unarchived tasks and notes by default. Filters on different fields combine; "
+        "repeated values of one filter are alternatives. --status, --priority, and --type select tasks; "
+        "--needs-review selects any card marked for review. --archived and --hidden take exclude "
+        "(default), include, or only; --all includes both. "
+        "Done tasks older than rules.done_window (default 2w) are left out unless --status, "
+        "--completed-since, --completed-before, or --archived include/only (or --all) is given."
     )
-    add_card_selection_arguments(listing)
+    card_query.add_query_arguments(listing)
     listing.add_argument("--sort", choices=("updated", "created", "due", "completed", "priority", "title"),
                          default="updated", help="sort field (default: updated)")
     listing.add_argument("--order", choices=("asc", "desc"), default="desc",
@@ -6130,16 +5582,15 @@ def parser() -> argparse.ArgumentParser:
 
     search = sub.add_parser("search", help="search task and note titles, IDs, and Markdown bodies")
     search.description = (
-        "Search card titles, IDs, and Markdown bodies, excluding YAML frontmatter. "
-        "The default phrase mode matches one contiguous case-insensitive query. "
-        "Use --match all or any to tokenize on whitespace, or fuzzy for approximate token matches. "
-        "Relevance ranks title matches above ID matches above body matches; all/any reward more matching terms, "
+        "Search card titles, IDs, and Markdown bodies, excluding YAML frontmatter, among the cards the "
+        "selection filters leave (visible, unarchived cards by default). "
+        "The default exact mode matches one contiguous case-insensitive phrase. "
+        "Use --and or --or to tokenize on whitespace, or --fuzzy for approximate token matches "
+        "(--match MODE does the same). "
+        "Relevance ranks title matches above ID matches above body matches; and/or reward more matching terms, "
         "and fuzzy ranks by average token similarity."
     )
-    search.add_argument("query", nargs="+", metavar="WORDS", help="one or more words to search for")
-    add_card_selection_arguments(search)
-    search.add_argument("--match", dest="match_mode", choices=("phrase", "all", "any", "fuzzy"),
-                        default="phrase", help="query matching mode (default: phrase)")
+    card_query.add_query_arguments(search, text=True)
     search.add_argument("--sort", choices=("relevance", "updated", "created", "due", "completed", "priority", "title"),
                         default="relevance", help="sort field (default: relevance)")
     search.add_argument("--order", choices=("asc", "desc"), default="desc",
@@ -6157,12 +5608,10 @@ def parser() -> argparse.ArgumentParser:
     search.set_defaults(func=command_search)
 
     view = sub.add_parser("view", help="create an editable workspace copy")
-    view.add_argument("--search", nargs="+", help="select by the existing search command")
     view.add_argument("--name", help="view name; defaults to a safe slug from the selector")
-    add_match_mode_arguments(view, allow_fuzzy=True)
-    add_metadata_filter_arguments(view, item_label="items", collection=True)
+    card_query.add_query_arguments(view, text=True)
     view.description = (
-        "Create an independent workspace copy from the current list or search selection. "
+        "Create an independent workspace copy of the cards selected by the same filters as list and search. "
         "The source selection is copied once; later source changes are not included. "
         "By default, the view directory name is a safe slug from the project, tag, or search text; "
         "use --name when the selector does not provide a clear name."
@@ -6258,13 +5707,12 @@ def parser() -> argparse.ArgumentParser:
         "bulk-edit",
         help="preview or apply guarded metadata changes to a selected card collection",
         description=(
-            "Preview metadata changes for an explicit collection. Save the JSON preview, "
-            "review its selection predicate, counts, paths, and hashes, then apply that exact "
+            "Preview metadata changes for the cards the selection filters pick. Save the JSON preview, "
+            "review its query, counts, paths, and hashes, then apply that exact "
             "plan; collection membership and every selected card hash must still match."
         ),
     )
-    bulk_edit.add_argument("positional_statuses", nargs="*", help="task status IDs to include (compatibility form)")
-    add_metadata_filter_arguments(bulk_edit, item_label="items", collection=True)
+    card_query.add_query_arguments(bulk_edit)
     bulk_edit.add_argument(
         "--set", dest="assignments", action="append", default=[], metavar="FIELD=VALUE",
         help="repeat to set editable metadata fields on every selected card",
@@ -6361,8 +5809,9 @@ def parser() -> argparse.ArgumentParser:
     web = sub.add_parser(
         "web", help="open the local web dashboard",
         description="Open the local web dashboard. Board filters are kept in the page address, so a "
-                    "reload keeps them; --project, --topic, and --tag open the board already filtered, and each "
-                    "can be repeated to show cards matching any of the values.",
+                    "reload keeps them. The selection filters of list (for example --project, --topic, --tag, "
+                    "--updated-since 3m) open the board already filtered; repeat one to show cards matching "
+                    "any of its values.",
     )
     add_web_arguments(web)
     web.set_defaults(func=command_web)
@@ -6408,13 +5857,7 @@ def main() -> int:
         return 2
     root_parser = parser()
     args = root_parser.parse_args(arguments)
-    # Resolve ages like 2w once, so saved bulk-edit plans hold absolute dates.
-    for name in ("since", "created_since", "created_before", "updated_since", "updated_before",
-                 "completed_since", "completed_before", "due_since", "due_before", "due_after"):
-        resolved = card_format.relative_date(getattr(args, name, None) or "", date.today())
-        if resolved:
-            setattr(args, name, resolved.isoformat())
-    scope = apply_env_scope(args)
+    scope = apply_capture_scope(args) if args.command in {"add", "note"} else card_query.env_scope(args)
     if args.command == "run":
         if args.argv and args.argv[0] == "--":
             args.argv = args.argv[1:]

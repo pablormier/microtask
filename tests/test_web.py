@@ -21,9 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import taskweb
 from tools.taskweb import load_js
-from tools.web_queries import collection_results
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from web_fixture import render_dashboard
+from web_fixture import dashboard_collections, render_dashboard
 from card_files import card_files  # noqa: E402
 
 
@@ -634,10 +633,11 @@ view_labels:
         self.assertEqual(meta["deadline_progress_start"], "created")
         self.assertIn("let start = item && item.created;", rendered)
 
-    def test_cards_collection_lists_tasks_by_rank_then_notes_latest_first(self) -> None:
+    def test_collections_list_tasks_by_rank_and_notes_latest_first(self) -> None:
         self.render_dashboard()
-        cards = json.loads(self.payload_json("collections"))["cards"]
-        self.assertEqual(cards[-1], self.note.stem)
+        collections = json.loads(self.payload_json("collections"))
+        self.assertEqual(collections["notes"], [self.note.stem])
+        self.assertNotIn(self.note.stem, collections["tasks"])
 
     def test_embedded_policy_metadata_includes_priority_order_and_wip_limit(self) -> None:
         self.render_dashboard()
@@ -777,14 +777,15 @@ view_labels:
         meta = json.loads(self.payload_json("meta"))
         self.assertEqual({item["id"] for item in data if item["hidden"]}, {self.tasks[1].stem, self.note.stem})
         js_source = json.dumps(load_js(self.root / "tools/web"))
+        normal_collections, hidden_collections = dashboard_collections(self.root, {}, {"hidden": "include"})
         probe = (
             'const fs = require("fs");\n'
             f'const data = {json.dumps(data)}; const meta = {json.dumps(meta)};\n'
-            f'const normalCollections = {json.dumps(collection_results(data))}; const hiddenCollections = {json.dumps(collection_results(data, {"show_hidden": True}))};\n'
+            f'const normalCollections = {json.dumps(normal_collections)}; const hiddenCollections = {json.dumps(hidden_collections)};\n'
             'global.document = {getElementById: id => ({textContent: JSON.stringify('
             'id === "task-data" ? data : id === "mt-statuses" ? [] : meta)})};\n'
             f'eval({js_source} + `\n'
-            'const app = taskBoard(); app.collections = normalCollections; app.applyPayload({tasks: typeof data === "undefined" ? [] : data, meta: typeof meta === "undefined" ? {} : meta, statuses: typeof statuses === "undefined" ? [] : statuses}); app.ready = true; const ids = items => items.map(t => t.id); const cards = kind => app.collectionItems("cards").filter(t => t.kind === kind);\n'
+            'const app = taskBoard(); app.collections = normalCollections; app.applyPayload({tasks: typeof data === "undefined" ? [] : data, meta: typeof meta === "undefined" ? {} : meta, statuses: typeof statuses === "undefined" ? [] : statuses}); app.ready = true; const ids = items => items.map(t => t.id); const cards = kind => app.collectionItems(kind === "note" ? "notes" : "tasks");\n'
             'const normal = {doing: ids(cards("task").filter(t => t.status === "doing")), notes: ids(cards("note")), '
             'focus: app.focusTask().id, dates: ids(app.deadlineItems()), count: app.doingCount()};\n'
             'app.showHidden = true; app.collections = hiddenCollections;\n'
@@ -923,7 +924,8 @@ view_labels:
         js_source = json.dumps(load_js(self.root / "tools/web"))
         probe = (
             'global.location = {hash: "#mt-card-a", pathname: "/", '
-            'search: "?layout=horizontal&project=myproj&topic=Work//infra/&topic=home&tag=a&tag=b&q=login&review=1"};\n'
+            'search: "?layout=horizontal&project=myproj&topic=Work//infra/&topic=home&tag=a&tag=b&text=login'
+            '&needs_review=true&created_since=2026-01-01&updated_since=2w&due=next7"};\n'
             'global.history = {state: {kept: true}, replaceState(state, _, url) {\n'
             '  this.state = state; const u = new URL(url, "http://x");\n'
             '  location.pathname = u.pathname; location.search = u.search; location.hash = u.hash;\n'
@@ -932,11 +934,11 @@ view_labels:
             'getElementById: () => ({textContent: "{}"})};\n'
             f'eval({js_source} + `\n'
             'const app = taskBoard(); app.readFilterLocation();\n'
-            'const read = {filters: JSON.parse(JSON.stringify(app.filters)), review: app.needsReviewOnly, hidden: app.showHidden};\n'
+            'const read = {filters: JSON.parse(JSON.stringify(app.filters)), review: app.needsReviewOnly, hidden: app.showHidden, extra: app.extraQuery};\n'
             'const unlisted = app.pickerRows("tag").map(row => row.kind + ":" + row.name);\n'
             'app.refreshDerivedLists({workspace_projects: ["MyProj"]});\n'
             'const canonical = app.filters.project;\n'
-            'app.filters.search = ""; app.filters.status = ["doing", "todo"]; app.showHidden = true; app.needsReviewOnly = false;\n'
+            'app.filters.text = ""; app.filters.status = ["doing", "todo"]; app.showHidden = true; app.needsReviewOnly = false;\n'
             'app.writeFilterLocation();\n'
             'const written = location.search + location.hash;\n'
             'const params = new URLSearchParams(); for (const [k, v] of Object.entries(app.collectionQuery())) appendParams(params, k, v);\n'
@@ -952,7 +954,10 @@ view_labels:
         self.assertEqual(payload["read"]["filters"]["project"], ["myproj"])
         self.assertEqual(payload["read"]["filters"]["topic"], ["Work/infra", "home"])
         self.assertEqual(payload["read"]["filters"]["tag"], ["a", "b"])
-        self.assertEqual(payload["read"]["filters"]["search"], "login")
+        self.assertEqual(payload["read"]["filters"]["text"], "login")
+        self.assertEqual(payload["read"]["filters"]["updated"], "2w")
+        self.assertEqual(payload["read"]["filters"]["due"], ["next7"])  # the server reads it as week
+        self.assertEqual(payload["read"]["extra"], {"created_since": ["2026-01-01"]})
         self.assertEqual(payload["read"]["filters"]["status"], [])
         self.assertTrue(payload["read"]["review"])
         self.assertFalse(payload["read"]["hidden"])
@@ -960,8 +965,8 @@ view_labels:
         self.assertEqual(payload["unlisted"], ["clear:", "option:a", "option:b"])
         self.assertEqual(payload["canonical"], ["MyProj"])
         self.assertEqual(payload["written"],
-                         "?layout=horizontal&status=doing&status=todo&project=MyProj&topic=Work%2Finfra&topic=home"
-                         "&tag=a&tag=b&hidden=1#mt-card-a")
+                         "?layout=horizontal&created_since=2026-01-01&status=doing&status=todo&project=MyProj"
+                         "&topic=Work%2Finfra&topic=home&tag=a&tag=b&due=next7&updated_since=2w&hidden=include#mt-card-a")
         self.assertIn("status=doing&status=todo&", payload["request"])
         self.assertIn("tag=a&tag=b&", payload["request"])
         self.assertEqual(payload["cleared"], "?layout=horizontal")
@@ -973,21 +978,24 @@ view_labels:
         taskweb = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(taskweb)
         args = taskweb.parse_args(["--project", "Big project", "--project", "Other", "--topic", "work/infra",
-                                   "--updated", "older-1y"])
+                                   "--updated-before", "1y", "--needs-review"])
+        year_ago = taskweb.tasklib.card_format.relative_date("1y", date.today()).isoformat()
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(args)),
-                         "http://127.0.0.1:8123/?project=Big+project&project=Other&topic=work%2Finfra&updated=older-1y")
+                         "http://127.0.0.1:8123/?project=Big+project&project=Other&topic=work%2Finfra"
+                         f"&needs_review=true&updated_before={year_ago}")
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
 
     def test_mt_web_passes_each_repeated_filter_to_the_dashboard(self) -> None:
         tasklib = taskweb.tasklib
-        args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated", "1m"])
+        args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.object(tasklib.subprocess, "run") as run:
             tasklib.command_web(args)
         command = run.call_args.args[0]
-        self.assertEqual(command[command.index("--project"):], ["--project", "a", "--project", "b", "--tag", "x", "--updated", "1m"])
-        args.project, args.tag, args.updated = "env-project", None, None  # MT_PROJECT supplies a string
-        with mock.patch.object(tasklib.subprocess, "run") as run:
-            tasklib.command_web(args)
+        self.assertEqual(command[command.index("--project"):],
+                         ["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
+        with mock.patch.dict(os.environ, {"MT_PROJECT": "env-project"}), \
+                mock.patch.object(tasklib.subprocess, "run") as run:
+            tasklib.command_web(taskweb.parse_args([]))
         self.assertEqual(run.call_args.args[0][-2:], ["--project", "env-project"])
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
@@ -1040,8 +1048,8 @@ view_labels:
         path = self.write_task("active", "2026-06-01-120000-large", "Large card", "large", body=body)
         process, url = self.start_interactive_web()
         try:
-            response = self.get_json(url + "api/items?search=" + secret)
-            self.assertEqual(response["collections"]["cards"], [path.stem])
+            response = self.get_json(url + "api/items?text=" + secret)
+            self.assertEqual(response["collections"]["tasks"], [path.stem])
             for card in response["tasks"]:
                 self.assertFalse({"body", "content", "body", "references", "reference_spans"} & card.keys())
             summary = next(card for card in response["tasks"] if card["id"] == path.stem)
@@ -1053,10 +1061,10 @@ view_labels:
             self.assertTrue(detail["reference_spans"]["body"])
             self.assertLess(len(json.dumps(response)), len(json.dumps(detail)) / 4)
             status, moved = self.post_json(url + "api/move", response["meta"]["api_token"], {
-                "ref": summary["ref"], "status": "waiting", "query": {"search": secret},
+                "ref": summary["ref"], "status": "waiting", "query": {"text": secret},
             })
             self.assertEqual(status, 200, moved)
-            self.assertEqual(moved["collections"]["cards"], [path.stem])
+            self.assertEqual(moved["collections"]["tasks"], [path.stem])
             self.assertTrue(all("body" not in card and "body" not in card for card in moved["tasks"]))
             for endpoint, expected in [("api/item", 400), ("api/item?id=missing", 404),
                                        ("api/item?id=../../README.md", 404), ("api/item?id=a&id=b", 400)]:
@@ -1092,11 +1100,11 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertEqual(initial['response_builds'], 1)
             task = next(item for item in initial['tasks'] if item['id'] == self.tasks[0].stem)
             body = {'ref':task['ref'], 'expected_hash':task['content_hash'],
-                    'patch':{'project':'Optimized'}, 'query':{'search':'bold'}}
+                    'patch':{'project':'Optimized'}, 'query':{'text':'bold'}}
             status, saved = self.post_json(url + 'api/card-metadata', initial['meta']['api_token'], body)
             self.assertEqual(status, 200, saved)
             self.assertEqual(saved['response_builds'], 2)
-            self.assertIn(task['id'], saved['collections']['cards'])
+            self.assertIn(task['id'], saved['collections']['tasks'])
             status, rejected = self.post_json(url + 'api/card-metadata', initial['meta']['api_token'], body)
             self.assertEqual(status, 409, rejected)
             self.assertEqual(self.get_json(url + 'api/items')['response_builds'], 3)
@@ -1136,14 +1144,14 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         self.tasks[0].write_text(self.tasks[0].read_text().replace("project: Alpha", "project: Alpha\ntopic: learning/rust/async"))
         process, url = self.start_interactive_web()
         try:
-            payload = self.get_json(url + "api/items?search=Plan&project=Alpha&show_hidden=false")
+            payload = self.get_json(url + "api/items?text=Plan&project=Alpha")
             tree = {node["path"]: (node["depth"], node["count"]) for node in payload["meta"]["topic_tree"]}
             self.assertEqual((tree["learning"], tree["learning/rust"], tree["learning/rust/async"]),
                              ((0, 1), (1, 1), (2, 1)))
             self.assertIn("work", tree)  # suggested_topics seeds empty top-level topics
             nested = self.get_json(url + "api/items?topic=learning")
-            self.assertEqual(nested["collections"]["cards"], [self.tasks[0].stem])
-            self.assertEqual(payload["collections"]["cards"], [self.tasks[0].stem])
+            self.assertEqual(nested["collections"]["tasks"], [self.tasks[0].stem])
+            self.assertEqual(payload["collections"]["tasks"], [self.tasks[0].stem])
             # Only matching cards are sent; filter choices and counts still cover the workspace.
             self.assertEqual([item["id"] for item in payload["tasks"]], [self.tasks[0].stem])
             self.assertEqual(payload["meta"]["workspace_projects"], ["Alpha", "Beta"])
@@ -1165,12 +1173,12 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
                 "query": {"status": "active", "project": "Alpha"}, "include": [task["id"]],
             })
             self.assertEqual(code, 200, result)
-            self.assertEqual(result["collections"]["cards"], [])
+            self.assertEqual(result["collections"]["tasks"], [])
             self.assertEqual([item["id"] for item in result["tasks"]], [task["id"]])
             self.assertEqual(result["tasks"][0]["status"], "waiting")
             self.assertEqual(result["meta"]["reference_revision"], payload["meta"]["reference_revision"])
             refreshed = self.get_json(url + "api/items?status=waiting&project=Alpha")
-            self.assertEqual(refreshed["collections"]["cards"], [self.tasks[0].stem])
+            self.assertEqual(refreshed["collections"]["tasks"], [self.tasks[0].stem])
         finally:
             self.stop_interactive_web(process)
 
@@ -1404,7 +1412,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertIn(f"Completed item {i:02d}", titles)
 
         # The Archive collection holds all done and archived cards.
-        self.assertIn('this.mode === "archive" ? "archive" : "cards"', rendered)
+        self.assertIn('this.mode === "archive" ? ARCHIVE_COLLECTIONS[this.viewKind()] : this.mode', rendered)
         archive = json.loads(self.payload_json("collections"))["archive"]
         self.assertEqual(len([i for i in archive if i in {item["id"] for item in done}]), len(done))
         self.assertEqual(len(archive), len(done) + len(archived))
@@ -1447,12 +1455,9 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         self.assertEqual(meta["focus"]["selected"], expected["selected"])
         self.assertEqual(meta["focus"]["candidates"], expected["candidates"])
         self.assertEqual(meta["focus"]["alerts"], expected["alerts"])
-        collections = {
-            "normal": collection_results(data),
-            "active": collection_results(data, {"status": "active"}),
-            "search": collection_results(data, {"status": "active", "search": "Tomorrow deadline"}),
-            "waiting": collection_results(data, {"status": "waiting"}),
-        }
+        collections = dict(zip(("normal", "active", "search", "waiting"), dashboard_collections(
+            self.root, {}, {"status": "active"}, {"status": "active", "text": "Tomorrow deadline"},
+            {"status": "waiting"})))
         probe = (
             f'const collections = {json.dumps(collections)};\n'
             f'const data = {json.dumps(data)}; const meta = {json.dumps(meta)}; '
@@ -1465,9 +1470,9 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             'alerts: app.focusAlerts().map(t => t.id), followups: app.followupTasks().map(t => t.id)};\n'
             'app.filters.status = ["active"]; app.collections = collections.active;\n'
             'const active = app.focusTask().id;\n'
-            'app.filters.search = "Tomorrow deadline"; app.collections = collections.search;\n'
+            'app.filters.text = "Tomorrow deadline"; app.collections = collections.search;\n'
             'const searched = {id: app.focusTask().id, reason: app.focusReason(app.focusTask())};\n'
-            'app.filters.status = ["waiting"]; app.filters.search = ""; app.collections = collections.waiting;\n'
+            'app.filters.status = ["waiting"]; app.filters.text = ""; app.collections = collections.waiting;\n'
             'console.log(JSON.stringify({normal, active, searched, blocked: app.focusTask()}));\n'
             '`);'
         )
@@ -1827,6 +1832,45 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             saved_raw = (self.root / note["path"]).read_text(encoding="utf-8")
             self.assertEqual(taskweb.tasklib.card_format.parse_document(saved_raw)[0]["processing_instructions"],
                 created["instructions"])
+        finally:
+            self.stop_interactive_web(process)
+
+    def test_writes_reply_before_auto_sync_and_report_sync_failures_later(self) -> None:
+        def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(["git", *arguments], cwd=self.root, text=True, capture_output=True, check=False)
+
+        remote = Path(self.temporary.name) / "remote.git"
+        shutil.copy2(SOURCE_ROOT / ".gitignore", self.root / ".gitignore")
+        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        for arguments in (("init", "-q", "-b", "main"), ("config", "user.name", "Web Test"),
+                          ("config", "user.email", "web@example.invalid"), ("add", "."),
+                          ("commit", "-qm", "Initial"), ("init", "-q", "--bare", "-b", "main", str(remote)),
+                          ("remote", "add", "origin", str(remote)), ("push", "-q", "-u", "origin", "main")):
+            self.assertEqual(git(*arguments).returncode, 0, arguments)
+
+        def remote_log() -> str:
+            return git("--git-dir", str(remote), "log", "--format=%s", "main").stdout
+
+        def wait_for(condition) -> None:
+            deadline = time.time() + 15
+            while time.time() < deadline and not condition():
+                time.sleep(0.1)
+            self.assertTrue(condition())
+
+        process, url = self.start_interactive_web()
+        try:
+            initial = self.get_json(url + "api/items")
+            token = initial["meta"]["api_token"]
+            inbox = next(item for item in initial["tasks"] if item["status"] == "inbox")
+            status, moved = self.post_json(url + "api/move", token, {"ref": inbox["ref"], "status": "active"})
+            self.assertEqual(status, 200, moved)
+            self.assertEqual(moved["sync_warning"], "")
+            wait_for(lambda: "Vague idea" in remote_log())
+
+            git("remote", "set-url", "origin", str(Path(self.temporary.name) / "missing.git"))
+            status, moved = self.post_json(url + "api/move", token, {"ref": inbox["ref"], "status": "inbox"})
+            self.assertEqual(status, 200, moved)
+            wait_for(lambda: self.get_json(url + "api/items")["sync_warning"] != "")
         finally:
             self.stop_interactive_web(process)
 

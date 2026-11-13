@@ -62,19 +62,34 @@ mt capture "Call the dentist"     # interactive review in the terminal
 mt list                                        # every open task and note
 mt list --kind task --status active --sort due --limit 10
 mt list --needs-review
-mt search dentist appointment --match all
+mt search dentist appointment --and
 mt read @4e91a7c2
 ```
 
-`list` and `search` share filters (status, kind, type, project, topic, tags,
-dates), sorting, limits, and `--json`; `--full` prints whole cards
-as `mt read --json` does. Archived and hidden cards are left out
-unless you pass `--all`, `--archived`, or `--hidden`. `list` also leaves out
-done tasks completed longer ago than `rules.done_window` (default `2w`); see
-them with `--status done`, `--completed-since`, or `--all`, or in the
-dashboard's Archive tab. Date filters take
+One set of filters selects cards everywhere: `list`, `search`, `focus`,
+`followup`, `view`, `bulk-edit`, `time list`, `time report`, `mt web`, and the
+dashboard's filter bar. Filters on different fields combine; repeat a filter to
+accept several values (`--status active --status doing`). The fields are
+`--kind`, `--status`, `--priority`, `--type`, `--project`, `--topic`, `--tag`,
+`--needs-review`, `--triage`, the date ranges `--created-*`, `--updated-*`,
+`--completed-*`, and `--due-*` (with `since` and `before`), `--due MODE`
+(`overdue`, `today`, `week`, `any`, `none`), `--archived`, and `--hidden`. `search`
+and `view` also take words, with `--and`, `--or`, or `--fuzzy`. Sorting,
+limits, and `--json` belong to `list` and `search`; `--full` prints whole cards
+as `mt read --json` does.
+
+Archived and hidden cards are left out. `--archived` and `--hidden` take
+`exclude` (the default), `include`, or `only` (bare means `only`), and `--all`
+includes both. `list` also leaves out done tasks completed longer ago than
+`rules.done_window` (default `2w`); see them with `--status done`,
+`--completed-since`, `--archived include`, or `--all`, or in the dashboard's
+Archive tab. `mt time list` and `mt time report` include archived and hidden
+tasks, since history should not disappear; `--session-since` and
+`--session-before` count only sessions that started inside a period, for
+example `mt time report --session-since 1w`. Date filters take
 `YYYY-MM-DD` or an age such as `2w`, `3m`, or `1y` (days, weeks, months, years
-back from today); `since` includes the date and `before` excludes it.
+back from today); `since` includes the date and `before` excludes it. A card
+without that date never matches a date filter.
 
 ```sh
 mt list --updated-before 6m                    # cards untouched for six months
@@ -83,7 +98,8 @@ mt bulk-edit --apply plan.json                 # archive them after reviewing th
 ```
 
 `bulk-edit` only previews until you apply the saved plan, and the plan stores
-the resolved dates, so applying it later affects the same cards.
+its query with resolved dates, so applying it later affects the same cards. A
+plan saved by an older version asks you to run the preview again.
 
 ## Work on tasks
 
@@ -154,7 +170,7 @@ starts there. To keep one workspace for many efforts and open the board for just
 one of them (repeat a flag to show several):
 
 ```sh
-mt web --project release              # or --topic work/infra, --tag review, --updated older-1y
+mt web --project release              # or --topic work/infra, --tag review, --updated-before 1y
 mt web --project release --project docs --port 8765  # a fixed port keeps bookmarks working
 ```
 

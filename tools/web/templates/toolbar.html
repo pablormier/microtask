@@ -50,7 +50,7 @@
       <search id="mt-filters" class="mt-filters" aria-label="Search and filters" x-show="filtersOpen && filtersApply()" x-cloak>
         <label class="mt-filter-search">
           <span class="mt-sr-only">Search</span>
-          <input class="mt-field mt-field-compact" type="search" x-model="filters.search" aria-label="Search tasks" placeholder="Search">
+          <input class="mt-field mt-field-compact" type="search" x-model="filters.text" aria-label="Search tasks" placeholder="Search">
         </label>
         <template x-for="facet in filterFacets()" :key="facet.key">
           <div class="mt-picker mt-filter" :class="{ 'is-active': facet.active, 'is-ignored': facet.note }" :title="facet.note || null"

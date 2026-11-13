@@ -1,140 +1,82 @@
-"""Dashboard collection selection and ordering; Markdown payloads remain unchanged."""
-from datetime import datetime, time
+"""Dashboard collections: each one is the request's query narrowed for that view, then ordered."""
+from dataclasses import replace
+from datetime import datetime
 
-import card_format  # on sys.path via tools/taskweb.py, which inserts scripts/
-
-
-FILTER_FIELDS = ("search", "status", "priority", "type", "project", "topic", "tag", "due", "updated")
-# Lists of selected values: a card matches one of them (OR); all filters must match (AND).
-FILTER_LISTS = ("status", "priority", "type", "project", "topic", "tag", "due")
+import card_query  # on sys.path via tools/taskweb.py, which inserts scripts/
 
 
-def selected_values(value):
-    """Selected values in the order received. A single string (the older form) selects one."""
-    items = value if isinstance(value, list) else [value]
-    return [text for text in (str(item or "").strip() for item in items) if text and text != "all"]
+def card_id(card):
+    return str(card.frontmatter.get("id") or card.path.stem)
 
 
-def normalize_query(values=None):
-    values = values or {}
-    query = {key: selected_values(values.get(key)) if key in FILTER_LISTS
-             else str(values.get(key) or ("" if key == "search" else "all"))
-             for key in FILTER_FIELDS}
-    for key in ("show_hidden", "needs_review"):
-        query[key] = values.get(key) is True or values.get(key) == "true"
+def recent_rank(card):
+    return (str(card.frontmatter.get("completed") or card.frontmatter.get("updated") or ""), card_id(card))
+
+
+def _narrowed(query, **allowed):
+    for field, values in allowed.items():
+        query = card_query.narrow(query, field, values)
     return query
 
 
-def due_datetime(value, now):
-    try:
-        text = str(value)
-        result = (datetime.combine(datetime.fromisoformat(text).date(), time(23, 59, 59))
-                  if len(text) == 10 else datetime.fromisoformat(text.replace("Z", "+00:00")))
-        if now.tzinfo is None:
-            # Use local rules at the due date, including daylight saving changes.
-            return result if result.tzinfo is None else result.astimezone().replace(tzinfo=None)
-        return result.replace(tzinfo=now.tzinfo) if result.tzinfo is None else result.astimezone(now.tzinfo)
-    except (TypeError, ValueError):
-        return None
+def collection_results(cards, query, *, now=None, done_cutoff=None, open_statuses, display_rank=None):
+    """Return ordered card IDs per collection.
 
-
-def due_matches(value, option, now):
-    if option == "none":
-        return not value
-    if not value:
-        return False
-    due = due_datetime(value, now)
-    days = (due.date() - now.date()).days if due else None
-    if option == "overdue":
-        return due is None or due < now
-    if option == "today":
-        return days == 0
-    if option == "next7":
-        return days is not None and 0 <= days <= 7
-    return True
-
-
-def value_selected(key, value, wanted):
-    if key == "topic":
-        # A topic selects its path and everything under it.
-        return any(card_format.topic_within(value, path) for path in wanted)
-    if key == "project":
-        # Match `mt list --project`, so `mt web --project` links work in any case.
-        return str(value).casefold() in {name.casefold() for name in wanted}
-    return value in wanted
-
-
-def matches(item, query, now, *, status=True):
-    if query["needs_review"] and not item.get("needs_review"):
-        return False
-    for key in ("status", "priority", "type", "project", "topic"):
-        if key == "status" and not status:
-            continue
-        value = item.get(key) or (item.get("kind") if key == "type" else "")
-        if query[key] and not value_selected(key, value, query[key]):
-            return False
-    # Tags match whole names, like `mt list --tag`.
-    if query["tag"] and not {tag.casefold() for tag in query["tag"]} & {tag.casefold() for tag in item.get("tags", [])}:
-        return False
-    if query["due"] and not any(due_matches(item.get("due"), option, now) for option in query["due"]):
-        return False
-    updated_filter = query["updated"]
-    cutoff = card_format.relative_date(updated_filter.removeprefix("older-"), now.date())
-    if cutoff:
-        # ISO dates compare as text; a card without `updated` counts as old.
-        recent = str(item.get("updated") or "")[:10] >= cutoff.isoformat()
-        if recent == updated_filter.startswith("older-"):
-            return False
-    search = query["search"].strip().lower()
-    if search:
-        text = "\n".join(str(item.get(key) or "") for key in
-                         ("title", "ref", "id", "next_action", "body"))
-        text += "\n" + " ".join(item.get("tags", []))
-        if search not in text.lower():
-            return False
-    return True
-
-
-def task_rank(item):
-    return item.get("display_rank") or [0, 0, "", item.get("path") or item["id"]]
-
-
-def recent_rank(item):
-    return (item.get("completed") or item.get("updated") or "", item.get("path") or item["id"])
-
-
-def collection_results(items, values=None, *, now=None, done_since=None):
-    """Return ordered IDs per collection.
-
-    `cards` holds live cards: tasks by rank (done last, by recency), then notes by
-    recency. `archive` holds archived cards and done tasks by recency. The client
-    filters either by kind. `cards` leaves out done tasks completed (or, without
-    that, updated) before the ISO date `done_since`; undated done tasks stay.
+    `tasks` holds live tasks by rank (done last, by recency); `notes` holds live notes by recency.
+    `archive` holds archived cards and done tasks by recency, with `archive_tasks` and
+    `archive_notes` as its parts. `open` holds open, visible tasks for the Focus view and
+    `deadlines` cards with a due date, hidden ones included, by due time. Each is `query` narrowed
+    with `replace` and `card_query.narrow`; `done_cutoff` leaves old done tasks out of `tasks`.
     """
-    query = normalize_query(values)
     now = now or datetime.now()
-    visible = [item for item in items if query["show_hidden"] or not item.get("hidden")]
-    live = [item for item in visible if not item.get("archived")]
-    tasks = [item for item in live if item["kind"] == "task" and matches(item, query, now)]
-    notes = [item for item in live if item["kind"] == "note" and matches(item, query, now, status=False)]
-    ordered = sorted((item for item in tasks if item.get("status") != "done"), key=task_rank)
-    ordered += sorted((item for item in tasks if item.get("status") == "done"
-                       and not (done_since and "" < recent_rank(item)[0][:10] < done_since)),
+    rank = display_rank or (lambda card: card_id(card))
+
+    def pick(derived, cutoff=None):
+        return card_query.select(cards, derived, now=now, done_cutoff=cutoff) if derived else []
+
+    # Notes have no status, priority, or type, so those filters must not hide them.
+    note_base = replace(query, status=(), priority=(), type=())
+    live_tasks = _narrowed(query, kind=("task",))
+    live_notes = _narrowed(note_base, kind=("note",))
+    tasks = pick(live_tasks, done_cutoff)
+    ordered = sorted((card for card in tasks if card.frontmatter.get("status") != "done"), key=rank)
+    ordered += sorted((card for card in tasks if card.frontmatter.get("status") == "done"),
                       key=recent_rank, reverse=True)
-    notes.sort(key=lambda item: (item.get("updated") or item.get("created") or "",
-                                 item.get("path") or item["id"]), reverse=True)
-    archived = [item for item in visible
-                if (item.get("archived") or (item["kind"] == "task" and item.get("status") == "done"))
-                and matches(item, query, now, status=False)]
+    notes = sorted(pick(live_notes), reverse=True, key=lambda card: (
+        str(card.frontmatter.get("updated") or card.frontmatter.get("created") or ""), card_id(card)))
+    open_query = _narrowed(replace(query, archived="exclude", hidden="exclude"),
+                           kind=("task",), status=open_statuses)
+
+    # The archive ignores the status filter: it holds archived cards and every done task.
+    archive_tasks = {card_id(card): card
+                     for derived in (_narrowed(replace(query, status=(), archived="only"), kind=("task",)),
+                                     _narrowed(replace(query, status=("done",), archived="include"), kind=("task",)))
+                     for card in pick(derived)}
+    archive_tasks = sorted(archive_tasks.values(), key=recent_rank, reverse=True)
+    archive_notes = sorted(pick(_narrowed(replace(note_base, archived="only"), kind=("note",))),
+                           key=recent_rank, reverse=True)
+
+    # Deadlines follow the board filters, so one project's board shows only that project's dates.
+    def dated(derived):
+        # Every other due mode already needs a due date; "none" asks for cards a deadline list cannot hold.
+        modes = tuple(mode for mode in derived.due if mode != card_query.DUE_NONE)
+        modes = modes or (() if derived.due else (card_query.DUE_ANY,))
+        return replace(derived, hidden="include", due=modes) if modes else None
+
+    deadline_tasks = _narrowed(query, kind=("task",), status=open_statuses)
+    deadline_notes = live_notes
+    deadlines = pick(dated(deadline_tasks) if deadline_tasks else None) + pick(
+        dated(deadline_notes) if deadline_notes else None)
+    deadlines.sort(key=lambda card: card_query.due_moment(card.frontmatter["due"], now)
+                   or datetime.max.replace(tzinfo=now.tzinfo))
+
     collections = {
-        "cards": ordered + notes,
-        "open": [item for item in ordered if not item.get("hidden") and item.get("status") != "done"],
-        "archive": sorted(archived, key=recent_rank, reverse=True),
-        # Deadlines include hidden cards but follow the board filters, so one
-        # project's board shows only that project's dates.
-        "deadlines": sorted((item for item in items if not item.get("archived") and item.get("due")
-                             and item.get("status") != "done"
-                             and matches(item, query, now, status=item["kind"] == "task")),
-                            key=lambda item: due_datetime(item["due"], now) or datetime.max.replace(tzinfo=now.tzinfo)),
+        "tasks": ordered,
+        "notes": notes,
+        "open": sorted(pick(open_query), key=rank),
+        "archive": sorted(archive_tasks + archive_notes, key=recent_rank, reverse=True),
+        "archive_tasks": archive_tasks,
+        "archive_notes": archive_notes,
+        "deadlines": deadlines,
     }
-    return {name: [item["id"] for item in values] for name, values in collections.items()}
+    return {name: [card_id(card) for card in found] for name, found in collections.items()}

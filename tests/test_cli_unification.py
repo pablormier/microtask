@@ -254,7 +254,7 @@ class CLIUnificationTests(unittest.TestCase):
         self.assertEqual(view.returncode, 0, view.stderr)
         view_names = {path.stem for path in (self.root / ".mt/views/archived-visibility/cards").glob("*.md")}
         selected_names = {item["title"] for item in listed}
-        self.assertEqual(selected_names, {"Visibility archived", "Visibility both"})
+        self.assertEqual(selected_names, {"Visibility archived", "Visibility both"})  # only archived includes hidden ones
         self.assertEqual({item["title"] for item in searched}, selected_names)
         self.assertEqual({item["title"] for item in plan["items"]}, selected_names)
         self.assertEqual(view_names, {item["id"] for item in listed})
