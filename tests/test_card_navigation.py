@@ -129,6 +129,49 @@ console.log(JSON.stringify({direct, deletedPrevious, missing, malformed:app.sele
             "missing": {"id": None, "back": False, "hash": "#mt-card-missing"}, "malformed": None,
         })
 
+    def test_cards_outside_the_filtered_list_open_and_stay_requested(self):
+        result = self.run_navigation(r"""
+(async () => {
+  const requests = [];
+  global.fetch = async url => {
+    const params = new URLSearchParams(url.split('?')[1]);
+    if (url.startsWith('/api/item?')) {
+      return { ok: true, json: async () => ({ item: { ...data.find(card => card.id === params.get('id')), body: '' } }) };
+    }
+    requests.push(params.getAll('include'));
+    return { ok: true, json: async () => ({ tasks: data, meta }) };
+  };
+  const app = makeApp();
+  app.tasks = [data[0]]; // The filters leave the other cards out.
+  app.select(data[0]);
+  // A reference target opens from the summary the open card carries.
+  app.selected = { ...data[0], body: '', references: [{ target: data[1] }] };
+  app.openReference({ target: { closest() { return { target: '', getAttribute() { return referenceHref(data[1]); } }; } },
+    currentTarget: { contains() { return true; } }, button: 0, preventDefault() {} });
+  const referenced = { id: app.selectedId, back: app.canGoBackReference(), requests: requests.length };
+  // A linked card is requested once, then opened when the server has it.
+  app.tasks = [data[0]];
+  location.hash = '#mt-card-task-c'; app.readCardLocation(); app.readCardLocation();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  // A response requested before the card was opened keeps it open and asks again;
+  // one that did ask for it and came back without it closes the card.
+  const sent = requests.length;
+  app.applyPayload({ tasks: [data[0]], meta, include: [] });
+  const stale = { id: app.selectedId, kept: app.tasks.some(card => card.id === 'task-c') };
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const asked = requests.length - sent;
+  app.applyPayload({ tasks: [data[0]], meta, include: ['task-c'] });
+  console.log(JSON.stringify({ referenced, linked: app.selectedId === null ? 'closed' : 'open', requests: requests.slice(0, sent),
+    stale, asked }));
+})();
+""")
+        self.assertEqual(result["stale"], {"id": "task-c", "kept": True})
+        self.assertEqual(result["asked"], 1)
+        self.assertEqual(result["linked"], "closed")
+        self.assertEqual(result["referenced"], {"id": "note-b", "back": True, "requests": 0})
+        self.assertEqual(len(result["requests"]), 1)
+        self.assertIn("task-c", result["requests"][0])
+
     def test_reference_modifier_clicks_keep_native_link_behavior(self):
         result = self.run_navigation(r"""
 const app = makeApp(); app.select(data[0]);

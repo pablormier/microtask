@@ -296,6 +296,7 @@ const summary = groups => groups.map(g => [g.key, g.items.map(i => i.id)]);
 const app = setup(taskBoard());
 app.tasks = [card('a'), card('d1', {status: 'doing'}), card('x1', {status: 'done'}), card('x2', {status: 'done'}),
   card('x3', {status: 'done'}), card('n', {kind: 'note', status: ''})];
+app.doingTotal = 1;
 const groups = app.groupCards(app.tasks, 'status', {workflow: true});
 const plain = app.groupCards(app.tasks, 'status');
 console.log(JSON.stringify({keys: groups.map(g => g.key), labels: groups.map(g => g.label), counts: groups.map(g => g.countLabel),
@@ -594,7 +595,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
     references:[{ref:'@b',state:++calls===1?'resolved':'missing'}]}})});
   await app.showCard(a);
   app.propertyEditor.form.project='Pending';
-  await app.applyPayload({tasks:[a],meta:{}});
+  await app.applyPayload({tasks:[a],meta:{reference_revision:'b-removed'}});
   console.log(JSON.stringify({calls,state:app.selected.references[0].state,
     project:app.propertyEditor.form.project,hash:app.propertyEditor.baselineHash}));
 })().catch(error=>{console.error(error);process.exitCode=1;});

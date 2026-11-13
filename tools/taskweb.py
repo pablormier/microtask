@@ -37,7 +37,11 @@ KATEX_CSS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css"
 KATEX_JS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"
 KATEX_AUTO_RENDER_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"
 
+# Parsed cards reused across requests; every read re-checks each file's stat signature.
+CARD_CACHE = tasklib.CardCache()
+
 WEB_DIR = Path(__file__).resolve().parent / "web"
+MAX_INCLUDED_IDS = 8
 
 
 def load_css() -> str:
@@ -192,7 +196,7 @@ def task_to_dict(task: tasklib.Card, reference_index: tasklib.ReferenceIndex | N
 def dashboard_detail(identity: str) -> dict | None:
     tasklib.pin_demo_state()
     tasklib.maybe_seed_demo()
-    items = tasklib.discover()
+    items = tasklib.discover(cache=CARD_CACHE)
     item = next((item for item in items if str(item.frontmatter.get("id") or item.path.stem) == identity), None)
     return task_to_dict(item, tasklib.ReferenceIndex(items)) if item else None
 
@@ -268,12 +272,24 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
     }
 
 
-def dashboard_payload(*, api_token: str = "", query: dict | None = None) -> dict:
+def included_ids(value: object) -> list[str]:
+    """Card IDs a client asked to receive whatever the filters say; a short list of text only."""
+    values = value if isinstance(value, list) else []
+    return [item for item in values if isinstance(item, str) and item][:MAX_INCLUDED_IDS]
+
+
+def dashboard_payload(*, api_token: str = "", query: dict | None = None, include: object = None) -> dict:
+    """Collections for ``query`` plus only the card summaries a client needs to show them.
+
+    ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
+    ``include`` IDs (the open card and its navigation trail), which are echoed back.
+    Workspace-wide figures are in ``meta``.
+    """
     tasklib.pin_demo_state()
     tasklib.maybe_seed_demo()
     cfg = tasklib.policy()
     statuses = list(cfg.get("statuses", {}))
-    tasks = tasklib.discover()
+    tasks = tasklib.discover(cache=CARD_CACHE)
     ordered = sorted(
         tasks,
         key=lambda t: statuses.index(t.frontmatter.get("status") or "")
@@ -285,17 +301,35 @@ def dashboard_payload(*, api_token: str = "", query: dict | None = None) -> dict
         task for task in tasks if task.kind == "task"
         and not tasklib.is_archived(task) and not tasklib.is_hidden(task)
     ])
-    payload = {
-        "tasks": [task_to_dict(task, detail=False, cfg=cfg) for task in ordered],
+    summaries = [task_to_dict(task, detail=False, cfg=cfg) for task in ordered]
+    # Search full text on the server without including it in collection responses.
+    query_items = [{**summary, "body": item.body} for summary, item in zip(summaries, ordered)]
+    collections = collection_results(query_items, query, done_since=tasklib.done_cutoff())
+    drafts = draft_store.list_drafts(tasklib.REPO_ROOT)
+    included = included_ids(include)
+    wanted = {identity for ids in collections.values() for identity in ids} | set(included)
+    draft_targets = {draft.get("target") for draft in drafts}
+    meta["draft_count"] = len(drafts)
+    # The Focus view shows only open cards that pass the filters, so send the focus entries for those.
+    shown = set(collections["open"])
+    for key in ("candidates", "alerts"):
+        meta["focus"][key] = [entry for entry in meta["focus"][key] if entry["id"] in shown]
+    meta["focus"]["followup_ids"] = [identity for identity in meta["focus"]["followup_ids"] if identity in shown]
+    meta["doing_count"] = sum(1 for item in summaries if item["kind"] == "task"
+                              and item["status"] == "doing" and not item["archived"])
+    # Changes when any card is added, removed, renamed or converted, so an open card can refresh its references.
+    meta["reference_revision"] = hashlib.sha256(json.dumps(sorted(
+        [str(item["id"]), item["ref"], item["title"], item["kind"]] for item in summaries
+    )).encode("utf-8")).hexdigest()[:16]
+    return {
+        "tasks": [item for item in summaries if item["id"] in wanted or item["path"] in draft_targets],
         "statuses": statuses,
         "meta": meta,
+        "query": normalize_query(query),
+        # Echoed so a client can tell a card that is gone from one this request never asked for.
+        "include": included,
+        "collections": collections,
     }
-    payload["query"] = normalize_query(query)
-    # Search full text on the server without including it in collection responses.
-    query_items = [{**summary, "body": item.body} for summary, item in zip(payload["tasks"], ordered)]
-    payload["collections"] = collection_results(query_items, query, done_since=tasklib.done_cutoff())
-    payload["meta"]["draft_count"] = len(draft_store.list_drafts(tasklib.REPO_ROOT))
-    return payload
 
 
 def fill_placeholders(page: str, values: dict[str, str]) -> str:
@@ -389,8 +423,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/items":
             try:
-                payload = dashboard_payload(api_token=self.server.token, query={
-                    key: values if key in FILTER_LISTS else values[-1] for key, values in parse_qs(url.query).items()
+                params = parse_qs(url.query)
+                payload = dashboard_payload(api_token=self.server.token, include=params.pop("include", None), query={
+                    key: values if key in FILTER_LISTS else values[-1] for key, values in params.items()
                 })
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
@@ -426,7 +461,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if status == HTTPStatus.OK:
             query = body.get("query") if isinstance(body.get("query"), dict) else None
             # Actions return receipts; build the queried collection once, after success.
-            payload = {**dashboard_payload(api_token=self.server.token, query=query), **payload}
+            payload = {**dashboard_payload(api_token=self.server.token, query=query, include=body.get("include")),
+                       **payload}
         self.send_json(status, payload)
 
 

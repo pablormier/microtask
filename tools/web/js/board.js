@@ -245,6 +245,8 @@ function taskBoard() {
     workspaceTags: [],
     workspaceUsage: {},
     maxDoingTasks: 1,
+    doingTotal: 0,
+    referenceRevision: "",
     focusContext: { candidates: [], alerts: [], followup_ids: [] },
     runningTimers: {},
     timerWarnHours: 8,
@@ -275,6 +277,7 @@ function taskBoard() {
     selectedId: null,
     selected: null,
     previousCardId: null,
+    requestedCardId: null,
     previewHtml: "",
     propertiesHtml: "",
     moveDestination: "",
@@ -583,13 +586,8 @@ function taskBoard() {
     filtersApply() { return this.mode !== "drafts"; },
     openTasks() { return this.collectionItems("open"); },
 
-    taskItems() {
-      return this.tasks.filter(t => t.kind === "task");
-    },
-
-    doingCount() {
-      return this.taskItems().filter(t => !t.archived && t.status === "doing").length;
-    },
+    // Counted by the server: `tasks` holds only the cards the current filters show.
+    doingCount() { return this.doingTotal; },
 
     // ---------------------------------------------------------------------------
     // Due Dates, Deadlines & Countdown Calculations
@@ -1526,6 +1524,7 @@ function taskBoard() {
       this.workspaceTags = meta.workspace_tags || [];
       this.workspaceUsage = meta.workspace_usage || {};
       this.maxDoingTasks = meta.max_doing_tasks || 1;
+      this.doingTotal = meta.doing_count || 0;
       this.focusContext = meta.focus || { candidates: [], alerts: [], followup_ids: [] };
       this.runningTimers = meta.time_running || {};
       this.timerWarnHours = meta.timer_warn_hours || 8;
@@ -1542,7 +1541,7 @@ function taskBoard() {
       this.types = Object.keys(this.taskTypePolicy).length
         ? Object.keys(this.taskTypePolicy)
         : Array.from(new Set(this.tasks.map(t => t.type || t.kind).filter(Boolean)));
-      this.projects = Array.from(new Set(this.tasks.map(t => t.project).filter(Boolean))).sort();
+      this.projects = Array.from(new Set(this.workspaceProjects)).sort();
       // A linked project may differ in case; use the workspace spelling. One with no
       // cards yet still shows in the filter (see filterChoices).
       this.filters.project.forEach((linked, index) => {
@@ -1560,13 +1559,18 @@ function taskBoard() {
       }
       if (payload.collections && matchesQuery) this.collections = payload.collections;
       if (!fromQuery && !matchesQuery) this.scheduleQuery(0);
-      const incomingItems = payload.tasks || [];
-      const targets = new Map(incomingItems.map(item => [item.id, item]));
-      const referencesChanged = this.selected && (this.tasks.length !== incomingItems.length || this.tasks.some(item => {
-        const target = targets.get(item.id);
-        return !target || item.ref !== target.ref || item.title !== target.title || item.kind !== target.kind;
-      }));
-      this.tasks = incomingItems;
+      // `tasks` is only what the filters show, so the server reports changes to any card's reference.
+      const revision = (payload.meta || {}).reference_revision || "";
+      const referencesChanged = this.selected && revision !== this.referenceRevision;
+      this.referenceRevision = revision;
+      const incoming = payload.tasks || [];
+      // A response requested before a card was opened cannot tell whether that card still
+      // exists, so keep the card and ask again instead of closing it.
+      const unasked = Array.isArray(payload.include)
+        ? this.includedCardIds().filter(id => !payload.include.includes(id) && !incoming.some(item => item.id === id))
+        : [];
+      this.tasks = incoming.concat(this.tasks.filter(item => unasked.includes(item.id)));
+      if (unasked.length) this.scheduleQuery(0);
       this.statuses = payload.statuses || this.statuses;
       if (Object.prototype.hasOwnProperty.call(payload, "drafts")) this.drafts = payload.drafts || [];
       if (Object.prototype.hasOwnProperty.call(payload, "sync_warning")) {
@@ -1600,6 +1604,17 @@ function taskBoard() {
       return { ...this.filters, show_hidden: this.showHidden, needs_review: this.needsReviewOnly };
     },
 
+    cardIdInLocation() {
+      if (!location.hash.startsWith("#mt-card-")) return null;
+      try { return decodeURIComponent(location.hash.slice("#mt-card-".length)); }
+      catch (_) { return null; }
+    },
+
+    // Cards the server must send even when the filters leave them out: the open card and its trail.
+    includedCardIds() {
+      return Array.from(new Set([this.selectedId, this.previousCardId, this.cardIdInLocation()].filter(Boolean)));
+    },
+
     scheduleQuery(delay = 180, preserveError = false) {
       if (!this.ready) return;
       clearTimeout(this.queryTimer);
@@ -1631,6 +1646,7 @@ function taskBoard() {
       try {
         const params = new URLSearchParams();
         for (const [name, value] of Object.entries(query)) appendParams(params, name, value);
+        for (const id of this.includedCardIds()) params.append("include", id);
         const response = await fetch("/api/items?" + params, { cache: "no-store" });
         const payload = await response.json();
         if (sequence !== this.querySequence) return;
@@ -1673,7 +1689,7 @@ function taskBoard() {
         const response = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Microtask-Token": this.apiToken },
-          body: JSON.stringify({ ...(body || {}), query: this.collectionQuery() })
+          body: JSON.stringify({ ...(body || {}), query: this.collectionQuery(), include: this.includedCardIds() })
         });
         const payload = await response.json();
         if (!response.ok) {
@@ -1807,7 +1823,9 @@ function taskBoard() {
       let id;
       try { id = decodeURIComponent(link.getAttribute("href").slice("#mt-card-".length)); }
       catch (error) { return; }
-      const target = this.tasks.find(task => task.id === id);
+      // A referenced card may be outside the filtered list; its summary comes with the open card.
+      const target = this.tasks.find(task => task.id === id) ||
+        (this.selected && (this.selected.references || []).find(r => r.target && r.target.id === id)?.target);
       if (target) this.select(target);
     },
 
@@ -1917,6 +1935,7 @@ function taskBoard() {
       if (!this.selected) {
         this.detailReturnFocus = event && event.currentTarget ? event.currentTarget : document.activeElement;
       }
+      if (!this.tasks.some(item => item.id === task.id)) this.tasks = [...this.tasks, task];
       if (this.selectedId !== task.id) {
         history.pushState({ ...history.state, mtCard: {
           workspace: this.workspaceKey, id: task.id, previous: this.selectedId,
@@ -1927,12 +1946,9 @@ function taskBoard() {
 
     readCardLocation() {
       if (!this.ready) return;
-      let id = null;
-      if (location.hash.startsWith("#mt-card-")) {
-        try { id = decodeURIComponent(location.hash.slice("#mt-card-".length)); }
-        catch (_) {}
-      }
+      const id = this.cardIdInLocation();
       const target = this.tasks.find(task => task.id === id);
+      if (id && !target) this.requestCard(id);
       if (this.selected && this.selectedId !== (target && target.id) && !this.canLeaveCard()) {
         history.replaceState({ ...history.state, mtCard: {
           workspace: this.workspaceKey, id: this.selectedId, previous: this.previousCardId,
@@ -1948,6 +1964,15 @@ function taskBoard() {
       this.previousCardId = target ? navigation.previous : null;
       if (target && this.selectedId !== target.id) return this.showCard(target);
       else if (!target && this.selected) this.clearSelection(false);
+    },
+
+    // A linked card outside the filtered list: ask for it, then read the location again if it exists.
+    requestCard(id) {
+      if (this.requestedCardId === id) return;
+      this.requestedCardId = id;
+      this.refreshItems().then(() => {
+        if (this.cardIdInLocation() === id && this.tasks.some(task => task.id === id)) this.readCardLocation();
+      }).catch(() => {}).finally(() => { if (this.requestedCardId === id) this.requestedCardId = null; });
     },
 
     canGoBackReference() {

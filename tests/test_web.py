@@ -934,7 +934,7 @@ view_labels:
             'const app = taskBoard(); app.readFilterLocation();\n'
             'const read = {filters: JSON.parse(JSON.stringify(app.filters)), review: app.needsReviewOnly, hidden: app.showHidden};\n'
             'const unlisted = app.pickerRows("tag").map(row => row.kind + ":" + row.name);\n'
-            'app.tasks = [{id: "a", project: "MyProj"}]; app.refreshDerivedLists({});\n'
+            'app.refreshDerivedLists({workspace_projects: ["MyProj"]});\n'
             'const canonical = app.filters.project;\n'
             'app.filters.search = ""; app.filters.status = ["doing", "todo"]; app.showHidden = true; app.needsReviewOnly = false;\n'
             'app.writeFilterLocation();\n'
@@ -1130,7 +1130,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
-    def test_server_queries_and_mutations_keep_full_cards_and_global_choices(self) -> None:
+    def test_server_queries_and_mutations_send_matching_cards_and_global_choices(self) -> None:
         self.tasks[0].write_text(self.tasks[0].read_text().replace("project: null", "project: Alpha"))
         self.tasks[1].write_text(self.tasks[1].read_text().replace("project: null", "project: Beta"))
         self.tasks[0].write_text(self.tasks[0].read_text().replace("project: Alpha", "project: Alpha\ntopic: learning/rust/async"))
@@ -1144,17 +1144,31 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             nested = self.get_json(url + "api/items?topic=learning")
             self.assertEqual(nested["collections"]["cards"], [self.tasks[0].stem])
             self.assertEqual(payload["collections"]["cards"], [self.tasks[0].stem])
-            self.assertEqual(len(payload["tasks"]), 5)
+            # Only matching cards are sent; filter choices and counts still cover the workspace.
+            self.assertEqual([item["id"] for item in payload["tasks"]], [self.tasks[0].stem])
             self.assertEqual(payload["meta"]["workspace_projects"], ["Alpha", "Beta"])
+            self.assertEqual(payload["meta"]["doing_count"], 1)
+            self.assertEqual([entry["id"] for entry in payload["meta"]["focus"]["candidates"]], payload["collections"]["open"])
+            everything = self.get_json(url + "api/items")
+            self.assertEqual(len(everything["tasks"]), 5)
+            self.assertEqual(everything["meta"]["reference_revision"], payload["meta"]["reference_revision"])
+            # An open card and its trail stay available outside the filters; unknown IDs are ignored.
+            extra = self.get_json(url + "api/items?" + urlencode(
+                {"project": "Alpha", "include": [self.tasks[1].stem, "missing"]}, doseq=True))
+            self.assertEqual({item["id"] for item in extra["tasks"]}, {self.tasks[0].stem, self.tasks[1].stem})
+            self.assertEqual(extra["collections"], self.get_json(url + "api/items?project=Alpha")["collections"])
+            self.assertEqual(extra["include"], [self.tasks[1].stem, "missing"])
             token = payload["meta"]["api_token"]
             task = self.get_card(url, next(item for item in payload["tasks"] if item["id"] == self.tasks[0].stem))
             code, result = self.post_json(url + "api/move", token, {
                 "ref": task["ref"], "status": "waiting",
-                "query": {"status": "active", "project": "Alpha"},
+                "query": {"status": "active", "project": "Alpha"}, "include": [task["id"]],
             })
             self.assertEqual(code, 200, result)
             self.assertEqual(result["collections"]["cards"], [])
-            self.assertEqual(len(result["tasks"]), 5)
+            self.assertEqual([item["id"] for item in result["tasks"]], [task["id"]])
+            self.assertEqual(result["tasks"][0]["status"], "waiting")
+            self.assertEqual(result["meta"]["reference_revision"], payload["meta"]["reference_revision"])
             refreshed = self.get_json(url + "api/items?status=waiting&project=Alpha")
             self.assertEqual(refreshed["collections"]["cards"], [self.tasks[0].stem])
         finally:
@@ -1259,7 +1273,9 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
                     self.assertEqual(status, 400)
                     self.assertIn("hidden must be true or false", error["error"])
                 for value in (True, False):
-                    status, payload = self.post_json(url + "api/hidden", token, {"ref": item["ref"], "hidden": value})
+                    # The dashboard keeps the open card in the response even once it is hidden.
+                    status, payload = self.post_json(url + "api/hidden", token, {
+                        "ref": item["ref"], "hidden": value, "include": [item["id"]]})
                     self.assertEqual(status, 200, payload)
                     changed = self.get_card(url, next(card for card in payload["tasks"] if card["id"] == item["id"]))
                     self.assertIs(changed["hidden"], value)

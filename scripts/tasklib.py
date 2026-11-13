@@ -21,7 +21,7 @@ import textwrap
 import threading
 import time as clock_time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -1070,26 +1070,65 @@ def card_kind_hint(path: Path) -> str | None:
     return None
 
 
-def read_cards(root: Path, kind: str | None = None) -> list[Card]:
-    """Read and validate the cards in ``root``; the kind hint only skips files that cannot match ``kind``."""
+class CardCache:
+    """Parsed cards keyed by path, reused while the file's stat signature is unchanged."""
+
+    def __init__(self) -> None:
+        self.entries: dict[Path, tuple[tuple[int, int, int, int], Card]] = {}
+        self.lock = threading.Lock()
+
+    def read(self, path: Path) -> Card:
+        """Like ``Card.read``; the caller holds ``lock``."""
+        try:
+            stat = path.stat()  # Stat before reading: a change in between leaves an older signature, so the next call re-parses.
+            signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
+            entry = self.entries.get(path)
+            if entry is not None and entry[0] == signature:
+                return entry[1]
+            card = Card.read(path)
+        except BaseException:
+            self.entries.pop(path, None)
+            raise
+        self.entries[path] = (signature, card)
+        return card
+
+    def prune(self, root: Path, kept: set[Path]) -> None:
+        """Forget cached files directly in ``root`` that are not in ``kept``."""
+        for path in [path for path in self.entries if path.parent == root and path not in kept]:
+            del self.entries[path]
+
+
+def read_cards(root: Path, kind: str | None = None, *, cache: CardCache | None = None) -> list[Card]:
+    """Read and validate the cards in ``root``; the kind hint only skips files that cannot match ``kind``.
+
+    With a ``cache``, unchanged files are not parsed again; validation still runs on every call.
+    """
     if not root.is_dir():
         return []
     allowed = set(statuses())
     cards = []
-    for path in sorted(root.glob("*.md")):
-        hint = card_kind_hint(path)
-        if kind is not None and hint is not None and hint != kind:
-            continue
-        card = Card.read(path)
-        if kind is not None and card.kind != kind:
-            continue
-        status = card.frontmatter.get("status")
-        if card.is_task and (not isinstance(status, str) or status not in allowed):
-            raise ValueError(
-                f"{card.path}: invalid or missing task status {status!r}; "
-                "custom status IDs must be defined in mt-policy.yaml"
-            )
-        cards.append(card)
+    listed = sorted(root.glob("*.md"))
+    skipped = False
+    with cache.lock if cache is not None else nullcontext():
+        read = cache.read if cache is not None else Card.read
+        for path in listed:
+            if kind is not None:
+                hint = card_kind_hint(path)
+                if hint is not None and hint != kind:
+                    skipped = True
+                    continue
+            card = read(path)
+            if kind is not None and card.kind != kind:
+                continue
+            status = card.frontmatter.get("status")
+            if card.is_task and (not isinstance(status, str) or status not in allowed):
+                raise ValueError(
+                    f"{card.path}: invalid or missing task status {status!r}; "
+                    "custom status IDs must be defined in mt-policy.yaml"
+                )
+            cards.append(card)
+        if cache is not None and not skipped:
+            cache.prune(root, set(listed))
     return cards
 
 
@@ -1100,11 +1139,11 @@ def in_selection(card: Card, kind: str | None, statuses: list[str] | None) -> bo
     return statuses is None or (card.is_task and card.frontmatter.get("status") in statuses)
 
 
-def discover(kind: str | None = None, statuses: list[str] | None = None) -> list[Card]:
+def discover(kind: str | None = None, statuses: list[str] | None = None, *, cache: CardCache | None = None) -> list[Card]:
     """Cards in the active workspace, optionally limited to a kind and/or task statuses."""
     if statuses is not None and kind is None:
         kind = "task"
-    return [card for card in read_cards(cards_root(), kind) if in_selection(card, kind, statuses)]
+    return [card for card in read_cards(cards_root(), kind, cache=cache) if in_selection(card, kind, statuses)]
 
 
 class ReferenceIndex:
