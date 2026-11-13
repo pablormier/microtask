@@ -6,8 +6,9 @@ assign its tasks to you.
 
 To work with cards, read the
 [microtask skill](.agents/skills/microtask/SKILL.md). Related skills cover
-[triage](.agents/skills/mt-triage/SKILL.md) and
-[choosing what to do next](.agents/skills/mt-focus/SKILL.md).
+[triage](.agents/skills/mt-triage/SKILL.md),
+[choosing what to do next](.agents/skills/mt-focus/SKILL.md), and
+[weekly summaries](.agents/skills/mt-weekly/SKILL.md).
 
 The rules that matter most:
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Microtask Weekly"
+  short_description: "Summarize the week's work in a few key points"
+  default_prompt: "Use $mt-weekly to summarize what I got done this week."

@@ -122,6 +122,8 @@ Skills in [`.agents/skills`](.agents/skills) cover the common workflows:
   for the time and energy you have, and gives a small first step.
 - **[mt-paper-review](.agents/skills/mt-paper-review/SKILL.md)** reads a paper
   with you, journal-club style, and saves the review as a note.
+- **[mt-weekly](.agents/skills/mt-weekly/SKILL.md)** summarizes the week's
+  work in a few points you can paste into a status update.
 
 The agent follows [AGENTS.md](AGENTS.md) and the
 [microtask skill](.agents/skills/microtask/SKILL.md). Codex and Cursor read
