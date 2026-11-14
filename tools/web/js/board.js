@@ -3,6 +3,14 @@ const MT_CONFIG = JSON.parse(document.getElementById("mt-config").textContent);
 
 
 function taskBoard() {
+  // Closure-scoped caches stay outside Alpine's reactive proxy.
+  let tasksByIdSource = null;
+  let tasksByIdMap = new Map();
+  let focusTaskCache = null;
+  let focusAlertsCache = null;
+  let followupTasksCache = null;
+  let viewGroupsCache = null;
+
   return {
     tasks: [],
     collections: {},
@@ -96,6 +104,7 @@ function taskBoard() {
     hoverTimer: null,
     hoverTarget: null,
     now: Date.now(),
+    nowSeconds: null,
     nowAtLoad: Date.now(),
 
     // ---------------------------------------------------------------------------
@@ -119,7 +128,18 @@ function taskBoard() {
       this.loadSettings();
       this.readFilterLocation();
       this.nowAtLoad = Date.now();
-      setInterval(() => { this.now = Date.now(); }, 1000);
+      setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        this.now = Date.now();
+      }, 60000);
+      setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        if (this.runningTimers && Object.keys(this.runningTimers).length > 0) {
+          this.nowSeconds = Date.now();
+        } else if (this.nowSeconds !== null) {
+          this.nowSeconds = null;
+        }
+      }, 1000);
       window.addEventListener("load", () => {
         if (this.selected) this.renderSelectedPreview();
       }, { once: true });
@@ -153,7 +173,16 @@ function taskBoard() {
           return "";
         }
       });
-      const refreshVisibleBoard = () => this.refreshItemsAutomatically();
+      const refreshVisibleBoard = () => {
+        if (!document.hidden) {
+          const ts = Date.now();
+          this.now = ts;
+          if (this.runningTimers && Object.keys(this.runningTimers).length > 0) {
+            this.nowSeconds = ts;
+          }
+        }
+        return this.refreshItemsAutomatically();
+      };
       window.addEventListener("focus", refreshVisibleBoard);
       document.addEventListener("visibilitychange", refreshVisibleBoard);
       setInterval(refreshVisibleBoard, 60000);
@@ -166,11 +195,10 @@ function taskBoard() {
       this.loading = true;
       this.loadError = "";
       try {
-        await this.refreshItems();
         if (!this.ready) {
           this.restoreLocalWorkspaceDrafts();
         }
-        await this.loadWorkspaceDrafts();
+        await Promise.all([this.refreshItems(), this.loadWorkspaceDrafts()]);
         this.ready = true;
         this.$nextTick(() => this.readCardLocation());
       } catch (error) {
@@ -228,8 +256,16 @@ function taskBoard() {
       try { localStorage.setItem("mt-text-size-v2", this.textSize); } catch (_) {}
     },
 
+    tasksById() {
+      if (tasksByIdSource !== this.tasks) {
+        tasksByIdSource = this.tasks;
+        tasksByIdMap = new Map(this.tasks.map(item => [item.id, item]));
+      }
+      return tasksByIdMap;
+    },
+
     collectionItems(name) {
-      const byId = new Map(this.tasks.map(item => [item.id, item]));
+      const byId = this.tasksById();
       return (this.collections[name] || []).map(id => byId.get(id)).filter(Boolean);
     },
 
@@ -309,7 +345,8 @@ function taskBoard() {
     runningTimeSeconds(task) {
       const timer = task && this.runningTimers[task.id];
       if (!timer || timer.saved) return 0;
-      return Math.max(0, Math.floor(this.now / 1000) - Number(timer.start_epoch || 0));
+      const current = this.nowSeconds !== null ? this.nowSeconds : this.now;
+      return Math.max(0, Math.floor(current / 1000) - Number(timer.start_epoch || 0));
     },
 
     hasTrackedTime(task) {
@@ -425,14 +462,33 @@ function taskBoard() {
     // ---------------------------------------------------------------------------
 
     focusTask() {
-      const visible = this.openTasks();
-      const selected = visible.find(t => t.id === this.focusContext.selected?.id);
-      if (selected) return selected;
-      for (const candidate of this.focusContext.candidates) {
-        const task = visible.find(t => t.id === candidate.id);
-        if (task) return task;
+      const openIds = this.collections.open;
+      const tasks = this.tasks;
+      const ctx = this.focusContext;
+      const cache = focusTaskCache;
+      if (cache && cache.openIds === openIds && cache.tasks === tasks && cache.ctx === ctx) {
+        return cache.value;
       }
-      return null;
+      const byId = this.tasksById();
+      const openSet = new Set(openIds || []);
+      let value = null;
+      const selectedId = ctx && ctx.selected && ctx.selected.id;
+      if (selectedId && openSet.has(selectedId)) {
+        value = byId.get(selectedId) || null;
+      }
+      if (!value && ctx && Array.isArray(ctx.candidates)) {
+        for (const candidate of ctx.candidates) {
+          if (openSet.has(candidate.id)) {
+            const task = byId.get(candidate.id);
+            if (task) {
+              value = task;
+              break;
+            }
+          }
+        }
+      }
+      focusTaskCache = { openIds, tasks, ctx, value };
+      return value;
     },
 
     focusReason(task) {
@@ -442,14 +498,35 @@ function taskBoard() {
     },
 
     focusAlerts() {
+      const openIds = this.collections.open;
+      const ctx = this.focusContext;
       const selectedId = this.focusTask()?.id;
-      const visibleIds = new Set(this.openTasks().map(t => t.id));
-      return this.focusContext.alerts.filter(t => t.id !== selectedId && visibleIds.has(t.id));
+      const cache = focusAlertsCache;
+      if (cache && cache.openIds === openIds && cache.ctx === ctx && cache.selectedId === selectedId) {
+        return cache.value;
+      }
+      const visibleIds = new Set(openIds || []);
+      const value = (ctx.alerts || []).filter(t => t.id !== selectedId && visibleIds.has(t.id));
+      focusAlertsCache = { openIds, ctx, selectedId, value };
+      return value;
     },
 
     followupTasks() {
-      const tasks = this.openTasks();
-      return this.focusContext.followup_ids.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+      const openIds = this.collections.open;
+      const tasks = this.tasks;
+      const ctx = this.focusContext;
+      const cache = followupTasksCache;
+      if (cache && cache.openIds === openIds && cache.tasks === tasks && cache.ctx === ctx) {
+        return cache.value;
+      }
+      const byId = this.tasksById();
+      const openSet = new Set(openIds || []);
+      const value = (this.focusContext.followup_ids || [])
+        .filter(id => openSet.has(id))
+        .map(id => byId.get(id))
+        .filter(Boolean);
+      followupTasksCache = { openIds, tasks, ctx, value };
+      return value;
     },
 
     needsRestartStep(task) {
@@ -470,9 +547,35 @@ function taskBoard() {
 
     // Cards of the current Tasks, Notes or Archive tab (the Archive's Kind picks its collection), grouped.
     viewGroups() {
-      const items = this.collectionItems(this.mode === "archive" ? ARCHIVE_COLLECTIONS[this.viewKind()] : this.mode);
-      const groups = this.groupCards(items, this.settings[this.mode].group, { workflow: this.mode !== "archive" });
-      return groups.length ? groups : this.groupCards([], "none");
+      const mode = this.mode;
+      const kind = this.viewKind();
+      const group = this.settings[mode].group;
+      const collectionName = this.mode === "archive" ? ARCHIVE_COLLECTIONS[this.viewKind()] : this.mode;
+      const ids = this.collections[collectionName];
+      const tasks = this.tasks;
+      const statuses = this.statuses;
+      const topicTree = this.topicTree;
+      const doingTotal = this.doingTotal;
+      const maxDoingTasks = this.maxDoingTasks;
+      const statusLabels = this.statusLabels;
+      const priorityOrder = this.priorityOrder;
+      const dueKinds = this.dueKinds;
+      const cache = viewGroupsCache;
+      if (cache && cache.mode === mode && cache.kind === kind && cache.group === group &&
+          cache.ids === ids && cache.tasks === tasks && cache.statuses === statuses &&
+          cache.topicTree === topicTree && cache.doingTotal === doingTotal &&
+          cache.maxDoingTasks === maxDoingTasks && cache.statusLabels === statusLabels &&
+          cache.priorityOrder === priorityOrder && cache.dueKinds === dueKinds) {
+        return cache.value;
+      }
+      const items = this.collectionItems(collectionName);
+      const groups = this.groupCards(items, group, { workflow: mode !== "archive" });
+      const value = groups.length ? groups : this.groupCards([], "none");
+      viewGroupsCache = {
+        mode, kind, group, ids, tasks, statuses, topicTree,
+        doingTotal, maxDoingTasks, statusLabels, priorityOrder, dueKinds, value,
+      };
+      return value;
     },
 
     // Ordered {key, label, items, countLabel, className, empty} groups. Groups with
@@ -704,6 +807,8 @@ function taskBoard() {
 
     // `sentQuery` is the query the request carried; a response to another query keeps the collections.
     applyPayload(payload, fromQuery = false, sentQuery = {}) {
+      this.now = Date.now();
+      this.nowSeconds = null;
       const matchesQuery = fromQuery || JSON.stringify(sentQuery) === JSON.stringify(this.collectionQuery());
       if (!fromQuery) {
         this.querySequence += 1;

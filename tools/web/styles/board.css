@@ -18,6 +18,7 @@
   background: var(--mt-column-surface);
   border: 1px solid color-mix(in srgb, var(--mt-border) 60%, transparent);
   border-radius: var(--mt-radius-lg);
+  contain: layout style;
 }
 .mt-column > h2 {
   margin: 0;

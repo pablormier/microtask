@@ -70,16 +70,40 @@ def extract_excerpt(text: str, max_len: int = 180) -> str:
     return excerpt
 
 
-def task_to_dict(task: store.Card, reference_index: store.ReferenceIndex | None = None, *, detail: bool = True, cfg: dict | None = None) -> dict:
+def _card_summary_fields(task: store.Card) -> tuple[str, str]:
+    cached = getattr(task, "_summary_fields", None)
+    if cached is not None:
+        return cached
+    fields = (extract_excerpt(task.body), hashlib.sha256(task.raw.encode("utf-8")).hexdigest())
+    try:
+        object.__setattr__(task, "_summary_fields", fields)
+    except AttributeError:
+        pass
+    return fields
+
+
+def task_to_dict(
+    task: store.Card,
+    reference_index: store.ReferenceIndex | None = None,
+    *,
+    detail: bool = True,
+    cfg: dict | None = None,
+    rank: dict[str, int] | None = None,
+    ws_root: Path | None = None,
+) -> dict:
     cfg = cfg if cfg is not None else store.policy()
     fm = task.frontmatter
     tags = fm.get("tags", [])
     body = task.body
     base_uri = task.path.resolve().parent.as_uri() + "/"
-    rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    if rank is None:
+        rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    if ws_root is None:
+        ws_root = workspace_root()
     processing_instructions = fm.get("processing_instructions", "")
     comments = fm.get("comments", [])
     time_entries = fm.get("time_entries", [])
+    excerpt, content_hash = _card_summary_fields(task)
     result = {
         "id": fm["id"],
         "kind": task.kind,
@@ -103,12 +127,12 @@ def task_to_dict(task: store.Card, reference_index: store.ReferenceIndex | None 
         "next_action": task.next_action,
         "needs_restart": operations.next_action_needs_restart_step(task),
         "display_rank": operations.task_display_sort_key(task, rank),
-        "excerpt": extract_excerpt(body),
-        "content_hash": hashlib.sha256(task.raw.encode("utf-8")).hexdigest(),
+        "excerpt": excerpt,
+        "content_hash": content_hash,
         "needs_review": fm.get("needs_review") is True,
         "time_seconds": store.saved_time_seconds(task) if task.kind == "task" else 0,
         "comment_count": len(comments) if isinstance(comments, list) else 0,
-        "path": str(task.path.relative_to(workspace_root())) if task.path.is_relative_to(workspace_root()) else str(task.path),
+        "path": str(task.path.relative_to(ws_root)) if task.path.is_relative_to(ws_root) else str(task.path),
         "base_uri": base_uri,
     }
     if detail:
@@ -241,16 +265,16 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
+    ws_root = workspace_root()
     meta = dashboard_meta(api_token=api_token, items=tasks, cfg=cfg)
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
-    summaries = [task_to_dict(task, detail=False, cfg=cfg) for task in ordered]
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
     collections = collection_results(
         ordered, query, now=now, open_statuses=store.open_statuses(),
         done_cutoff=card_query.default_done_cutoff(query, store.done_window(), date.today()),
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
-    drafts = draft_store.list_drafts(workspace_root())
+    drafts = draft_store.list_drafts(ws_root)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
     draft_targets = {draft.get("target") for draft in drafts}
@@ -264,10 +288,18 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
         tasks, card_query.Query(status=("doing",), hidden="include"), now=now))
     # Changes when any card is added, removed, renamed or converted, so an open card can refresh its references.
     meta["reference_revision"] = hashlib.sha256(json.dumps(sorted(
-        [str(item["id"]), item["ref"], item["title"], item["kind"]] for item in summaries
+        [str(card.frontmatter["id"]), f"@{card.short_ref}", card.title, card.kind] for card in ordered
     )).encode("utf-8")).hexdigest()[:16]
+
+    def _card_relpath(card: store.Card) -> str:
+        return str(card.path.relative_to(ws_root)) if card.path.is_relative_to(ws_root) else str(card.path)
+
+    selected_cards = [
+        card for card in ordered
+        if str(card.frontmatter["id"]) in wanted or (draft_targets and _card_relpath(card) in draft_targets)
+    ]
     return {
-        "tasks": [item for item in summaries if item["id"] in wanted or item["path"] in draft_targets],
+        "tasks": [task_to_dict(card, detail=False, cfg=cfg, rank=rank, ws_root=ws_root) for card in selected_cards],
         "statuses": statuses,
         "meta": meta,
         "query": card_query.query_to_mapping(query),

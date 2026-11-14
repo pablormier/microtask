@@ -148,11 +148,14 @@ class TaskWebServer(ThreadingHTTPServer):
         self.token = token
         self.sync = BackgroundSync()
         self.app_version = application_version(APP_ROOT)
+        self._cached_restart_notice = ""
 
     def restart_notice(self) -> str:
+        if self._cached_restart_notice:
+            return self._cached_restart_notice
         if application_version(APP_ROOT) != self.app_version:
-            return "Application updated on disk; restart the dashboard to use the new version."
-        return ""
+            self._cached_restart_notice = "Application updated on disk; restart the dashboard to use the new version."
+        return self._cached_restart_notice
 
 
 class TaskWebHandler(BaseHTTPRequestHandler):

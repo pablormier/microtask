@@ -49,12 +49,22 @@ function cardDueDayDifference(value, now) {
   return Math.round((dueDay - today) / 86400000);
 }
 
+const CARD_DATE_FORMATTER = typeof Intl !== "undefined"
+  ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
+  : null;
+const CARD_DATETIME_FORMATTER = typeof Intl !== "undefined"
+  ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  : null;
+
 function formatCardDate(value) {
   if (!value) return "—";
   const date = parseCardDueDate(value);
   if (Number.isNaN(date.getTime())) return String(value);
+  const hasTime = String(value).includes("T");
+  const formatter = hasTime ? CARD_DATETIME_FORMATTER : CARD_DATE_FORMATTER;
+  if (formatter) return formatter.format(date);
   const options = { day: "numeric", month: "short", year: "numeric" };
-  if (String(value).includes("T")) {
+  if (hasTime) {
     options.hour = "2-digit";
     options.minute = "2-digit";
   }
