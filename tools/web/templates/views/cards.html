@@ -43,6 +43,7 @@
             </button>
           </nav>
           <p class="mt-sync-warning" role="status" x-show="syncWarning" x-text="syncWarning"></p>
+          <p class="mt-sync-warning" role="status" x-show="restartNotice" x-text="restartNotice"></p>
         </div>
         <div class="mt-groups" :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
           <template x-for="group in viewGroups()" :key="group.key">

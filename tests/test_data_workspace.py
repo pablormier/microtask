@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
-IGNORED = shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store", "cards", "drafts")
+IGNORED = shutil.ignore_patterns(".git", ".mt", ".DS_Store", "cards", "drafts")
 
 
 def tree(root: Path, folders: tuple[str, ...] = ("cards", "drafts", ".mt")) -> dict[str, bytes]:

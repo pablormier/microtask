@@ -309,6 +309,7 @@ function taskBoard() {
     draftWorkspaceStatus: "",
     draftBusy: false,
     syncWarning: "",
+    restartNotice: "",
     detailReturnFocus: null,
     hoverCard: null,
     hoverPos: { top: 0, left: 0, placeAbove: false },
@@ -1598,6 +1599,9 @@ function taskBoard() {
       if (Object.prototype.hasOwnProperty.call(payload, "drafts")) this.drafts = payload.drafts || [];
       if (Object.prototype.hasOwnProperty.call(payload, "sync_warning")) {
         this.syncWarning = payload.sync_warning || "";
+      }
+      if (Object.prototype.hasOwnProperty.call(payload, "restart_notice")) {
+        this.restartNotice = payload.restart_notice || "";
       }
       this.refreshDerivedLists(payload.meta || {});
       if (this.selectedId) {

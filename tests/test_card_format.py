@@ -8,7 +8,10 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import card_format as cards
-import tasklib
+import cli as tasklib
+import operations
+import store
+import transaction
 import validators
 
 
@@ -47,7 +50,7 @@ class CardFormatTests(unittest.TestCase):
             cards.toggle_task_checkbox(body, 0, 5, False)
 
     def properties(self, kind="task"):
-        properties, _ = cards.parse_document(tasklib.render_new_card(kind, "example", "Example", body_text=""))
+        properties, _ = cards.parse_document(operations.render_new_card(kind, "example", "Example", body_text=""))
         return properties
 
     def test_arbitrary_markdown_round_trips_without_encoding(self):
@@ -63,7 +66,7 @@ class CardFormatTests(unittest.TestCase):
                     actual, document = cards.parse_document(raw, expected_kind=kind)
                     self.assertEqual(actual, properties)
                     self.assertEqual(document, body)
-                    context = validators.CheckContext(kind, f"{kind}s/example.md", actual, document, tasklib.policy())
+                    context = validators.CheckContext(kind, f"{kind}s/example.md", actual, document, store.policy())
                     self.assertEqual(validators.run_item_validators(context), [])
 
     def test_nested_activity_multiline_properties_and_unknown_data_round_trip(self):
@@ -142,7 +145,7 @@ class CardFormatTests(unittest.TestCase):
             properties.update(capture_id="550e8400-e29b-41d4-a716-446655440000",
                               github_source="https://github.com/acme/tasks/issues/11",
                               github_source_hash="a" * 64, needs_review=True)
-            context = validators.CheckContext(kind, f"{kind}s/example.md", properties, "", tasklib.policy())
+            context = validators.CheckContext(kind, f"{kind}s/example.md", properties, "", store.policy())
             self.assertEqual(validators.run_item_validators(context), [])
             properties["needs_review"] = "true"
             self.assertTrue(any("needs_review" in error for error in validators.run_item_validators(context)))
@@ -158,7 +161,7 @@ class CardFormatTests(unittest.TestCase):
             properties = self.properties(kind)
             for field in ("needs_review", "archived", "hidden", "project", "topic", "due", "due_kind"):
                 properties.pop(field, None)
-            context = validators.CheckContext(kind, f"{kind}s/example.md", properties, "", tasklib.policy())
+            context = validators.CheckContext(kind, f"{kind}s/example.md", properties, "", store.policy())
             self.assertEqual(validators.run_item_validators(context), [])
 
 

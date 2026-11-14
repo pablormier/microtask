@@ -13,7 +13,9 @@ from unittest.mock import patch
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 import card_format  # noqa: E402
-import tasklib  # noqa: E402
+import cli as tasklib
+import store
+import transaction  # noqa: E402
 
 
 class TopicPathTests(unittest.TestCase):
@@ -52,7 +54,7 @@ class TopicCliTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
-        shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+        shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
         for card in (self.root / "cards").glob("*.md"):
             card.unlink()
         policy = self.root / "mt-policy.yaml"
@@ -260,86 +262,36 @@ class TopicCliTests(unittest.TestCase):
         self.ok("topic", "rename", "learning", "study", "--by", "other-agent")
         self.assertEqual(self.card_topics(), {"Note": "study", "Claimed": "study/rust"})
 
-    def test_validate_warns_about_unmigrated_area_and_policy_key(self) -> None:
-        ref = self.add("Old", "work")
-        path = next((self.root / "cards").glob("*.md"))
-        path.write_text(path.read_text().replace("topic: work", "area: work"))
-        policy = self.root / "mt-policy.yaml"
-        policy.write_text(policy.read_text().replace("suggested_topics:", "suggested_areas:"))
-        result = self.mt("validate")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(path.name, result.stderr)
-        self.assertIn("suggested_areas", result.stderr)
-        self.assertIn("migrate_area_to_topic.py --plan", result.stderr)
-        plan = json.loads(subprocess.run([sys.executable, str(self.root / "scripts" / "migrate_area_to_topic.py"), "--plan"],
-                                         capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout)
-        self.assertTrue(plan["policy"]["suggested_areas_renamed"])
-
     def test_rename_rolls_back_every_card_when_validation_fails(self) -> None:
         self.add("A", "learning")
         self.add("B", "learning/rust")
         cards = sorted((self.root / "cards").glob("*.md"))
         before = {path: path.read_bytes() for path in cards}
         arguments = argparse.Namespace(old="learning", new="study", dry_run=False, merge=False, as_json=False)
-        with patch.object(tasklib, "REPO_ROOT", self.root), patch.object(tasklib, "_DEMO_STATE", False), \
-             patch.object(tasklib, "validate_data_root", side_effect=ValueError("forced validation failure")):
-            self.assertEqual(tasklib.command_topic_rename(arguments), 1)
+        with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
+            self.assertEqual(
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                1,
+            )
         self.assertEqual({path: path.read_bytes() for path in cards}, before)
 
     def test_rename_detects_concurrent_change(self) -> None:
         self.add("A", "learning")
         cards = sorted((self.root / "cards").glob("*.md"))
         arguments = argparse.Namespace(old="learning", new="study", dry_run=False, merge=False, as_json=False)
-        real = tasklib.apply_item_transaction
+        real = transaction.apply_item_transaction
 
         def concurrent(changes, **kwargs):
             cards[0].write_bytes(cards[0].read_bytes() + b"\nedited meanwhile\n")
             return real(changes, **kwargs)
 
-        with patch.object(tasklib, "REPO_ROOT", self.root), patch.object(tasklib, "_DEMO_STATE", False), \
-             patch.object(tasklib, "apply_item_transaction", side_effect=concurrent):
-            self.assertEqual(tasklib.command_topic_rename(arguments), 1)
+        with patch.object(transaction, "apply_item_transaction", side_effect=concurrent):
+            self.assertEqual(
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                1,
+            )
         self.assertIn("edited meanwhile", cards[0].read_text())
         self.assertIn("topic: learning", cards[0].read_text())
-
-
-class AreaMigrationTests(unittest.TestCase):
-    def test_migration_renames_area_in_cards_drafts_and_policy(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "repo"
-            shutil.copytree(SOURCE_ROOT, root, ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
-            for card in (root / "cards").glob("*.md"):
-                card.unlink()
-            policy = root / "mt-policy.yaml"
-            policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false")
-                              .replace("suggested_topics:", "suggested_areas:"))
-            run = lambda *a: subprocess.run([str(root / "mt"), *a], cwd=root, capture_output=True, text=True,
-                                                   stdin=subprocess.DEVNULL)
-            ref = json.loads(run("add", "--kind", "note", "--title", "Old", "--project", "p", "--json").stdout)["ref"]
-            path = next((root / "cards").glob("*.md"))
-            text = path.read_text()
-            path.write_text(text.replace("project: p\n", "project: p\narea: work\n", 1))
-            (root / "drafts").mkdir(exist_ok=True)
-            created = run("draft", "create", "note", "--title", "D", "--json")
-            self.assertEqual(created.returncode, 0, created.stderr)
-            draft = root / "drafts" / f"{json.loads(created.stdout)['id']}.md"
-            draft.write_text(draft.read_text().replace("\ntitle:", "\narea: home\ntitle:", 1))
-            script = root / "scripts" / "migrate_area_to_topic.py"
-            plan = subprocess.run([sys.executable, str(script), "--plan"], capture_output=True, text=True)
-            self.assertIn(path.name, plan.stdout)
-            self.assertIn("area: work", path.read_text())  # plan does not write
-            applied = subprocess.run([sys.executable, str(script), "--apply"], capture_output=True, text=True)
-            self.assertEqual(applied.returncode, 0, applied.stderr)
-            migrated = path.read_text()
-            self.assertIn("topic: work", migrated)
-            self.assertNotIn("area:", migrated)
-            self.assertIn("topic: home", draft.read_text())
-            self.assertIn("suggested_topics:", policy.read_text())
-            checked = run("validate")
-            self.assertEqual(checked.returncode, 0, checked.stderr)
-            self.assertEqual(json.loads(run("list", "--topic", "work", "--json").stdout)[0]["ref"], ref)
-            again = subprocess.run([sys.executable, str(script), "--apply"], capture_output=True, text=True)
-            self.assertEqual(again.returncode, 0, again.stderr)
 
 
 if __name__ == "__main__":

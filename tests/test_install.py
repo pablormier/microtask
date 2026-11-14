@@ -107,7 +107,7 @@ class InstallTest(unittest.TestCase):
         """Return a bare repository holding a minimal microtask workspace."""
         source = root / "source"
         (source / "scripts").mkdir(parents=True)
-        (source / "scripts" / "tasklib.py").write_text("")
+        (source / "scripts" / "cli.py").write_text("")
         (source / "mt").write_text("#!/usr/bin/env bash\nexit 0\n")
         (source / "mt").chmod(0o755)
         shutil.copy2(SOURCE_ROOT / "install.sh", source / "install.sh")
@@ -181,7 +181,7 @@ class InstallTest(unittest.TestCase):
 
     def make_local_workspace(self, folder: Path) -> Path:
         (folder / "scripts").mkdir(parents=True)
-        (folder / "scripts" / "tasklib.py").write_text("")
+        (folder / "scripts" / "cli.py").write_text("")
         (folder / "mt").write_text("#!/usr/bin/env bash\nexit 0\n")
         (folder / "mt").chmod(0o755)
         return folder

@@ -11,9 +11,13 @@ from pathlib import Path
 
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 import card_format
-import tasklib
+import cli as tasklib
+import store
+import support
+import transaction
 
 
 class MoveTests(unittest.TestCase):
@@ -21,15 +25,14 @@ class MoveTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
         self.env = {**os.environ, "MT_USERNAME": "move-test", "MT_AUTO_SYNC": "false"}
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def run_mt(self, *args: str, input_bytes: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=self.env,
-                              input=input_bytes, capture_output=True, check=False)
+        return support.run_cli(self.root, *args, input_bytes=input_bytes, env=self.env, text=False)
 
     def json(self, *args: str, input_bytes: bytes | None = None) -> dict:
         result = self.run_mt(*args, input_bytes=input_bytes)

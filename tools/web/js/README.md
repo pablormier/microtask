@@ -87,8 +87,10 @@ files for requests. The smaller payload is preparation for bounded loading.
 
 Collection views mount with `x-if` only while active. Their filters and grouping
 stay in board state; card, capture and draft dialogs remain outside the collection
-view lifecycle. Mutation handlers return receipts; the HTTP boundary builds one
-queried dashboard response after a successful action. Target lookup discovers
+view lifecycle. Mutation handlers call `scripts/operations.py` in-process under
+the shared mutation lock (`sync=False`, with `BackgroundSync` running
+`command_sync` in-process afterwards) and return receipts; the HTTP boundary builds
+one queried dashboard response after a successful action. Target lookup discovers
 cards without constructing a dashboard. Serialization shares one policy snapshot
 within a response; it does not cache policy across requests.
 

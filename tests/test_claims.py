@@ -15,26 +15,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from web_fixture import render_dashboard
 from card_files import card_files  # noqa: E402
+import support  # noqa: E402
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
-import tasklib
+import cli as tasklib
+import store
+import transaction
 
 class ClaimTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
         self.env = {**os.environ, "MT_USERNAME": "test-user"}
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def run_mt(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root,
-                              env=self.env if env is None else env, text=True, capture_output=True)
+        return support.run_cli(self.root, *args, env=self.env if env is None else env)
 
     def ready(self, title: str = "Claim this task") -> Path:
         result = self.run_mt("add", title, "--next-action", "Open the draft.")
@@ -145,8 +147,8 @@ class ClaimTests(unittest.TestCase):
         released = self.run_mt("move", path.stem, "active", "--by", "agent:two")
         self.assertEqual(released.returncode, 0, released.stderr)
         raw = path.read_text()
-        fields = tasklib.parse_yaml(tasklib.parse_frontmatter(raw)[0])
-        self.assertTrue(all(field not in fields for field in tasklib.CLAIM_FIELDS))
+        fields = store.parse_yaml(store.parse_frontmatter(raw)[0])
+        self.assertTrue(all(field not in fields for field in store.CLAIM_FIELDS))
         self.assertEqual(fields.get("time_entries"), original_properties.get("time_entries"))
         self.assertIn("agent:two", "\n".join(comment["text"] for comment in fields["comments"]))
 
@@ -157,7 +159,7 @@ class ClaimTests(unittest.TestCase):
         result = self.run_mt("done", path.stem, "--by", "agent:one", "--note", "Finished draft")
         self.assertEqual(result.returncode, 0, result.stderr)
         done = tasklib.Card.read(path)
-        self.assertTrue(all(field not in done.frontmatter for field in tasklib.CLAIM_FIELDS))
+        self.assertTrue(all(field not in done.frontmatter for field in store.CLAIM_FIELDS))
         self.assertEqual(len(tasklib.time_log_entries(done.raw)), 1)
         self.assertIn("agent:one", "\n".join(comment["text"] for comment in done.frontmatter["comments"]))
         self.assertFalse((self.root / ".mt/time-running").exists())

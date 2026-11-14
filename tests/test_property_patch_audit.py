@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tests"))
+import support  # noqa: E402
 
 
 class PropertyPatchAuditTests(unittest.TestCase):
@@ -16,13 +19,12 @@ class PropertyPatchAuditTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
-        shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+        shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
         policy = self.root / "mt-policy.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def run_mt(self, *args, input_bytes: bytes | None = None):
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root,
-                              input=input_bytes, capture_output=True)
+        return support.run_cli(self.root, *args, input_bytes=input_bytes, text=False)
 
     def json(self, result):
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
@@ -77,9 +79,9 @@ class PropertyPatchAuditTests(unittest.TestCase):
         import sys
         sys.path.insert(0, str(ROOT / "scripts"))
         import card_format
-        import tasklib
+        import operations
 
-        properties, _ = card_format.parse_document(tasklib.render_new_card("note", "audit", "Audit"))
+        properties, _ = card_format.parse_document(operations.render_new_card("note", "audit", "Audit"))
         properties["hidden"] = False
         with self.assertRaisesRegex(ValueError, "hidden must be true or false"):
             card_format.apply_property_patch(properties, {"hidden": 0}, kind="note")

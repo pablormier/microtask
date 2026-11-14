@@ -12,6 +12,7 @@ from pathlib import Path
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
+import support  # noqa: E402
 
 
 class DemoWorkspaceTests(unittest.TestCase):
@@ -21,7 +22,7 @@ class DemoWorkspaceTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         self.env = os.environ.copy()
 
@@ -29,14 +30,7 @@ class DemoWorkspaceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_mt(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.root / "mt"), *args],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            check=False,
-            env=env or self.env,
-        )
+        return support.run_cli(self.root, *args, env=env or self.env)
 
     def test_demo_mode_active_on_empty_workspace_with_examples(self) -> None:
         result = self.run_mt("list", "--status", "active")

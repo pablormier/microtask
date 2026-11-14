@@ -10,8 +10,10 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SOURCE / 'tests'))
 sys.path.insert(0, str(SOURCE / 'scripts'))
 import drafts
+import support
 
 
 class CardDraftTests(unittest.TestCase):
@@ -20,14 +22,13 @@ class CardDraftTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / 'workspace'
         self.root.mkdir()
-        shutil.copytree(SOURCE / 'scripts', self.root / 'scripts', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(SOURCE / 'scripts', self.root / 'scripts', ignore=shutil.ignore_patterns())
         shutil.copy2(SOURCE / 'mt', self.root / 'mt')
         (self.root / 'mt-policy.yaml').write_text((SOURCE / 'mt-policy.yaml').read_text().replace('demo_workspace: true', 'demo_workspace: false'))
         (self.root / 'cards').mkdir()
 
     def run_mt(self, *args, data=None, actor='test-run'):
-        return subprocess.run([str(self.root / 'mt'), *args], input=data, capture_output=True,
-                              env={**os.environ, 'MT_USERNAME': actor}, cwd=self.root, timeout=15)
+        return support.run_cli(self.root, *args, input_bytes=data, env={**os.environ, 'MT_USERNAME': actor}, text=False)
 
     def json(self, *args, data=None, actor='test-run'):
         result = self.run_mt(*args, data=data, actor=actor)

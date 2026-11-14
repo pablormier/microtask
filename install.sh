@@ -27,7 +27,7 @@ done
 set -- ${arguments[@]+"${arguments[@]}"}
 
 is_workspace() {
-  [[ -x "$1/mt" && -f "$1/scripts/tasklib.py" ]]
+  [[ -x "$1/mt" && -f "$1/scripts/cli.py" ]]
 }
 
 # Print "owner/repo" (lowercase) for a GitHub URL; print nothing otherwise.

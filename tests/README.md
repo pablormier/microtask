@@ -22,8 +22,15 @@ elsewhere. Prefer one canonical test per behavior and extend existing end-to-
 end scenarios when setup is shared. Avoid tests that only assert prose,
 terminology, or exact documentation wording.
 
-Run the suite with:
+`tests/support.py` provides shared CLI execution (`run_cli`) and a deterministic
+`FakeClock` so time-tracking tests avoid wall-clock sleeps. `test_operations_api.py`
+tests core write operations and typed errors directly against a data-only
+`Workspace` in-process, while CLI contract and multi-process tests (`test_golden_cli.py`,
+`test_publish.py`, `test_update.py`, `test_web.py`) cover process boundaries and locks.
+
+Run the parallel suite (with the 60s time budget) or `unittest discover`:
 
 ```sh
+python3 tests/run.py
 python3 -m unittest discover -s tests -v
 ```

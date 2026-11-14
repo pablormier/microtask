@@ -19,8 +19,13 @@ from unittest import mock
 
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
-import tasklib  # noqa: E402
+import cli as tasklib
+import operations
+import store
+import support  # noqa: E402
+import transaction  # noqa: E402
 
 
 class TimeTrackingTests(unittest.TestCase):
@@ -30,7 +35,7 @@ class TimeTrackingTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
 
     def tearDown(self) -> None:
@@ -39,14 +44,7 @@ class TimeTrackingTests(unittest.TestCase):
     def run_mt(
         self, *args: str, env: dict[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.root / "mt"), *args],
-            cwd=self.root,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        return support.run_cli(self.root, *args, env=env)
 
     def add_task(self, title: str) -> Path:
         result = self.run_mt("add", title)
@@ -74,8 +72,10 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertTrue(claimed.frontmatter["claimed_by"])
         self.assertFalse((self.root / ".mt" / "focus").exists())
         state = self.root / ".mt" / "time-running"
-        first_timer = json.loads(state.read_text())[task.stem]
-        time.sleep(1.05)
+        timers_data = json.loads(state.read_text())
+        timers_data[task.stem]["start_epoch"] -= 2
+        state.write_text(json.dumps(timers_data), encoding="utf-8")
+        first_timer = timers_data[task.stem]
         switched = self.run_mt("time", "start", "Other running task")
         self.assertEqual(switched.returncode, 0, switched.stderr)
         timers = json.loads(state.read_text())
@@ -168,14 +168,13 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(self.run_mt("time", "start", first.stem).returncode, 0)
         state = self.root / ".mt/time-running"
         before = {p: p.read_bytes() for p in (first, second, state)}
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), \
-             mock.patch.object(tasklib, "_DEMO_STATE", False), \
-             mock.patch.object(tasklib, "run_validator", return_value=True), \
-             mock.patch.object(tasklib, "validate_data_root", side_effect=ValueError("forced failure")):
-            result = tasklib.command_time_start(argparse.Namespace(query=[second.stem]))
+        ws = tasklib.Workspace.at(self.root, demo=False)
+        with mock.patch.object(transaction, "run_validator", return_value=True), \
+             mock.patch.object(transaction, "validate_data_root", side_effect=ValueError("forced failure")):
+            result = tasklib.command_time_start(argparse.Namespace(query=[second.stem]), ws=ws)
             self.assertEqual(result, 1)
             result = tasklib.command_move(argparse.Namespace(query=[first.stem], destination="waiting",
-                                                            match_mode="exact", comments=[]))
+                                                            match_mode="exact", comments=[]), ws=ws)
             self.assertEqual(result, 1)
         for path, raw in before.items():
             self.assertEqual(path.read_bytes(), raw)
@@ -206,11 +205,10 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(self.run_mt("time", "start", first.stem).returncode, 0)
         state = self.root / ".mt/time-running"
         before = {p: p.read_bytes() for p in (first, second, state)}
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), \
-             mock.patch.object(tasklib, "_DEMO_STATE", False), \
-             mock.patch.object(tasklib, "run_validator", return_value=True), \
-             mock.patch.object(tasklib, "write_time_timers", side_effect=OSError("forced failure")):
-            self.assertEqual(tasklib.command_time_start(argparse.Namespace(query=[second.stem])), 1)
+        ws = tasklib.Workspace.at(self.root, demo=False)
+        with mock.patch.object(transaction, "run_validator", return_value=True), \
+             mock.patch.object(transaction, "write_time_timers", side_effect=OSError("forced failure")):
+            self.assertEqual(tasklib.command_time_start(argparse.Namespace(query=[second.stem]), ws=ws), 1)
         for path, raw in before.items():
             self.assertEqual(path.read_bytes(), raw)
 
@@ -243,7 +241,7 @@ class TimeTrackingTests(unittest.TestCase):
             state = self.root / ".mt/time-running"
             timers = json.loads(state.read_text())
             timers[task.stem].update(start="2020-01-04T09:00:00",
-                                    start_epoch=int(tasklib.datetime(2020, 1, 4, 9).timestamp()))
+                                    start_epoch=int(store.datetime(2020, 1, 4, 9).timestamp()))
             state.write_text(json.dumps(timers))
             self.assertIn("long-running timer", self.run_mt("time", "status").stdout)
             mutation_start = tasklib.now_stamp()
@@ -319,7 +317,7 @@ class TimeTrackingTests(unittest.TestCase):
         quoted = f"session {first['session_id']} | start: {first['start']} | end: {first['end']}"
         fields, body = tasklib.card_format.parse_document(task.read_text())
         raw = tasklib.card_format.render_document(fields, body + "\n\n## Notes\n\n" + quoted + "\n")
-        raw = tasklib.replace_frontmatter_field(raw, "updated", "2000-01-01T00:00:00")
+        raw = tasklib.card_format.replace_property(raw, "updated", "2000-01-01T00:00:00")
         task.write_text(raw)
         original = task.read_text()
         other_before = other.read_bytes()
@@ -354,7 +352,7 @@ class TimeTrackingTests(unittest.TestCase):
         ids = ("abcdef12" + "0" * 24, "abcdef12" + "1" * 24)
         raw = task.read_text()
         for session_id in ids:
-            raw = tasklib.append_time_entry(raw, {
+            raw = operations.append_time_entry(raw, {
                 "session_id": session_id, "start": "2026-01-01T10:00:00",
                 "end": "2026-01-01T10:05:00", "elapsed_seconds": 300,
             })
@@ -373,22 +371,23 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(self.run_mt("time", "add", "Removal validation failure", "5m").returncode, 0)
         session_id = str(tasklib.time_log_entries(task.read_text())[0]["session_id"])
         original = task.read_bytes()
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), \
-             mock.patch.object(tasklib, "run_validator", return_value=True), \
-             mock.patch.object(tasklib, "validate_data_root", side_effect=ValueError("forced post-write validation failure")), \
+        ws = tasklib.Workspace.at(self.root)
+        with mock.patch.object(transaction, "run_validator", return_value=True), \
+             mock.patch.object(transaction, "validate_data_root", side_effect=ValueError("forced post-write validation failure")), \
              mock.patch("builtins.print"):
-            result = tasklib.command_time_remove(argparse.Namespace(session_id=session_id))
+            result = tasklib.command_time_remove(argparse.Namespace(session_id=session_id), ws=ws)
         self.assertEqual(result, 1)
         self.assertEqual(task.read_bytes(), original)
 
     def test_lock_files_stay_in_repo_state_dir_across_demo_transition(self) -> None:
-        effective_policy = copy.deepcopy(tasklib.policy())
+        effective_policy = copy.deepcopy(store.policy())
+        original_validate_changes = tasklib.validate_item_changes
 
-        def validate_while_locked() -> bool:
+        def validate_while_locked(*args, **kwargs) -> None:
             with (self.root / ".mt" / "time-mutation.lock").open("a+") as lock_file:
                 with self.assertRaises(BlockingIOError):
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
+            original_validate_changes(*args, **kwargs)
 
         timer = {
             "demo-task": {
@@ -397,30 +396,27 @@ class TimeTrackingTests(unittest.TestCase):
                 "start_epoch": 1790337600,
             }
         }
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), mock.patch.object(
-            tasklib, "APP_ROOT", self.root
-        ), mock.patch.object(
-            tasklib, "_DEMO_STATE", None
-        ), mock.patch.object(tasklib, "policy", return_value=effective_policy), mock.patch.object(
-            tasklib, "run_validator", side_effect=validate_while_locked
+        ws = tasklib.Workspace.at(self.root, app_root=self.root)
+        with mock.patch.object(store, "policy", return_value=effective_policy), mock.patch.object(
+            tasklib, "validate_item_changes", side_effect=validate_while_locked
         ):
-            self.assertTrue(tasklib.demo_active())
-            demo_timer_path = tasklib.time_timer_path()
+            self.assertTrue(tasklib.demo_active(ws))
+            demo_timer_path = store.time_timer_path(ws)
             self.assertEqual(demo_timer_path, self.root / ".mt" / "demo" / "time-running")
-            tasklib.write_time_timers(timer)
-            with tasklib.time_mutation_lock():
+            transaction.write_time_timers(timer, ws=ws)
+            with tasklib.time_mutation_lock(ws):
                 pass
-            with tasklib.sync_serialization_lock():
+            with transaction.sync_serialization_lock(ws):
                 pass
 
-            created = tasklib.command_create(type("Args", (), {"text": ["First real task"]})())
+            created = tasklib.command_create(type("Args", (), {"text": ["First real task"]})(), ws=ws)
 
             self.assertEqual(created, 0)
-            self.assertFalse(tasklib.demo_active())
-            self.assertEqual(tasklib.time_timer_path(), self.root / ".mt" / "time-running")
-            with tasklib.time_mutation_lock():
+            self.assertFalse(tasklib.demo_active(ws))
+            self.assertEqual(store.time_timer_path(ws), self.root / ".mt" / "time-running")
+            with tasklib.time_mutation_lock(ws):
                 pass
-            with tasklib.sync_serialization_lock():
+            with transaction.sync_serialization_lock(ws):
                 pass
 
         lock_dir = self.root / ".mt"
@@ -464,7 +460,7 @@ class TimeTrackingTests(unittest.TestCase):
         try:
             os.environ["TZ"] = "America/New_York"
             time.tzset()
-            entry = tasklib.time_entry_from_timer(
+            entry = store.time_entry_from_timer(
                 {
                     "session_id": "a" * 32,
                     "start": tasklib.local_stamp(1710052200),
@@ -491,8 +487,10 @@ class TimeTrackingTests(unittest.TestCase):
 
         started = self.run_mt("time", "start", "Stop after timezone change", env=start_env)
         self.assertEqual(started.returncode, 0, started.stderr)
-        state = json.loads((self.root / ".mt" / "time-running").read_text(encoding="utf-8"))
-        time.sleep(1.05)
+        state_path = self.root / ".mt" / "time-running"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state[task.stem]["start_epoch"] -= 2
+        state_path.write_text(json.dumps(state), encoding="utf-8")
 
         stopped = self.run_mt("time", "stop", env=stop_env)
 
@@ -527,7 +525,7 @@ class TimeTrackingTests(unittest.TestCase):
 
     def test_saved_session_syncs_even_when_timer_cleanup_fails(self) -> None:
         self.initialize_git()
-        effective_policy = copy.deepcopy(tasklib.policy())
+        effective_policy = copy.deepcopy(store.policy())
         effective_policy.setdefault("rules", {})["auto_sync"] = True
         for cleanup_result in (False, OSError("timer cleanup failed")):
             with self.subTest(cleanup_result=cleanup_result):
@@ -535,22 +533,21 @@ class TimeTrackingTests(unittest.TestCase):
                 self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
 
                 def verify_sync(*_args: object, **_kwargs: object) -> int:
-                    self.assertFalse(getattr(tasklib._TIME_LOCK_STATE, "held", False))
+                    self.assertFalse(getattr(transaction._TIME_LOCK_STATE, "held", False))
                     self.assertIn("time_entries:", task.read_text())
                     return 0
 
                 args = argparse.Namespace(query=[task.stem], time_command="stop")
+                ws = tasklib.Workspace.at(self.root, demo=False)
                 with (
-                    mock.patch.object(tasklib, "REPO_ROOT", self.root),
-                    mock.patch.object(tasklib, "_DEMO_STATE", False),
-                    mock.patch.object(tasklib, "policy", return_value=effective_policy),
-                    mock.patch.object(tasklib, "clear_time_timer", **(
+                    mock.patch.object(store, "policy", return_value=effective_policy),
+                    mock.patch.object(transaction, "clear_time_timer", **(
                         {"side_effect": cleanup_result} if isinstance(cleanup_result, OSError)
                         else {"return_value": cleanup_result}
                     )),
-                    mock.patch.object(tasklib, "command_sync", side_effect=verify_sync) as sync,
+                    mock.patch.object(transaction, "command_sync", side_effect=verify_sync) as sync,
                 ):
-                    self.assertEqual(tasklib.command_time_end(args), 1)
+                    self.assertEqual(tasklib.command_time_end(args, ws=ws), 1)
                     sync.assert_called_once()
                 self.assertTrue((self.root / ".mt" / "time-running").is_file())
                 retried = self.run_mt("time", "stop", task.stem)
@@ -630,7 +627,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(self.run_mt("time", "start", "Move during timer stop").returncode, 0)
         status_ready = threading.Event()
         continue_move = threading.Event()
-        original_replace = tasklib.replace_frontmatter_field
+        original_replace = tasklib.card_format.replace_property
 
         def pause_after_status(raw: str, field: str, value: str) -> str:
             updated = original_replace(raw, field, value)
@@ -645,11 +642,10 @@ class TimeTrackingTests(unittest.TestCase):
             (),
             {"query": ["Move during timer stop"], "destination": "waiting", "match_mode": "exact", "comments": []},
         )()
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), mock.patch.object(
-            tasklib, "_DEMO_STATE", False
-        ), mock.patch.object(tasklib, "replace_frontmatter_field", side_effect=pause_after_status):
+        ws = tasklib.Workspace.at(self.root, demo=False)
+        with mock.patch.object(tasklib.card_format, "replace_property", side_effect=pause_after_status):
             with ThreadPoolExecutor(max_workers=2) as executor:
-                move_future = executor.submit(tasklib.command_move, move_args)
+                move_future = executor.submit(tasklib.command_move, move_args, ws=ws)
                 self.assertTrue(status_ready.wait(timeout=10))
                 stop_future = executor.submit(self.run_mt, "time", "stop")
                 time.sleep(0.2)
@@ -670,7 +666,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.add_task("Start during sync")
         sync_entered = threading.Event()
         release_sync = threading.Event()
-        effective_policy = copy.deepcopy(tasklib.policy())
+        effective_policy = copy.deepcopy(store.policy())
         effective_policy.setdefault("rules", {})["auto_sync"] = True
 
         def wait_for_sync(*_args: object, **_kwargs: object) -> int:
@@ -680,13 +676,12 @@ class TimeTrackingTests(unittest.TestCase):
             return 0
 
         args = type("TimeAddArgs", (), {"query": "Add before sync", "duration": "5m"})()
-        with mock.patch.object(tasklib, "REPO_ROOT", self.root), mock.patch.object(
-            tasklib, "_DEMO_STATE", False
-        ), mock.patch.object(tasklib, "policy", return_value=effective_policy), mock.patch.object(
-            tasklib, "command_sync", side_effect=wait_for_sync
+        ws = tasklib.Workspace.at(self.root, demo=False)
+        with mock.patch.object(store, "policy", return_value=effective_policy), mock.patch.object(
+            transaction, "command_sync", side_effect=wait_for_sync
         ):
             with ThreadPoolExecutor(max_workers=2) as executor:
-                add_future = executor.submit(tasklib.command_time_add, args)
+                add_future = executor.submit(tasklib.command_time_add, args, ws=ws)
                 self.assertTrue(sync_entered.wait(timeout=5), "auto-sync was not reached")
                 start_future = executor.submit(self.run_mt, "time", "start", "Start during sync")
                 try:

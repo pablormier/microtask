@@ -15,7 +15,9 @@ from test_validate import task_file
 
 SOURCE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE / "scripts"))
-import tasklib
+import cli as tasklib
+import store
+import transaction
 
 
 class ScopedValidationTests(unittest.TestCase):
@@ -33,8 +35,7 @@ class ScopedValidationTests(unittest.TestCase):
         self.root.joinpath(self.path).write_bytes(self.before)
 
     def validate_changes(self, changes, **kwargs):
-        with patch.object(tasklib, "REPO_ROOT", self.root):
-            tasklib.validate_item_changes(changes, source_root=self.root, **kwargs)
+        tasklib.validate_item_changes(changes, source_root=self.root, ws=tasklib.Workspace.at(self.root), **kwargs)
 
     def test_ordinary_edit_ignores_unrelated_invalid_card_but_full_audit_fails(self):
         broken = self.root / "cards/broken.md"
@@ -50,9 +51,13 @@ class ScopedValidationTests(unittest.TestCase):
         self.assertIn("broken.md", full.stderr)
 
     def test_invalid_candidate_is_rejected_without_copying_or_writing(self):
-        with patch.object(tasklib, "REPO_ROOT", self.root), patch.object(shutil, "copytree", side_effect=AssertionError("copied")):
+        with patch.object(shutil, "copytree", side_effect=AssertionError("copied")):
             with self.assertRaisesRegex(ValueError, "missing YAML frontmatter"):
-                tasklib.apply_item_transaction({self.path: b"invalid"}, source_root=self.root)
+                transaction.apply_item_transaction(
+                    {self.path: b"invalid"},
+                    source_root=self.root,
+                    ws=tasklib.Workspace.at(self.root),
+                )
         self.assertEqual(self.root.joinpath(self.path).read_bytes(), self.before)
 
     def test_new_duplicate_id_is_rejected(self):
@@ -93,9 +98,9 @@ class ScopedValidationTests(unittest.TestCase):
 
     def test_concurrent_edit_during_validation_is_preserved(self):
         concurrent = self.before + b"\nConcurrent content\n"
-        with patch.object(tasklib, "validate_item_changes", side_effect=lambda *a, **k: self.root.joinpath(self.path).write_bytes(concurrent)):
+        with patch.object(transaction, "validate_item_changes", side_effect=lambda *a, **k: self.root.joinpath(self.path).write_bytes(concurrent)):
             with self.assertRaisesRegex(ValueError, "item changed before transaction"):
-                tasklib.apply_item_transaction({self.path: self.before + b"\nProposed\n"}, source_root=self.root)
+                transaction.apply_item_transaction({self.path: self.before + b"\nProposed\n"}, source_root=self.root)
         self.assertEqual(self.root.joinpath(self.path).read_bytes(), concurrent)
 
     def test_validator_rejects_traversal_and_symlinks(self):

@@ -18,6 +18,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
 import drafts as draft_store  # noqa: E402
 import card_format  # noqa: E402
+import support  # noqa: E402
 
 
 EDITOR_STUB = '''#!/usr/bin/env python3
@@ -37,7 +38,7 @@ class DraftCliTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         self.env = os.environ.copy()
         self.editor = Path(self.temporary.name) / "editor"
@@ -49,10 +50,7 @@ class DraftCliTests(unittest.TestCase):
 
     def run_mt(self, *args: str, input_text: str | None = None,
                 env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.root / "mt"), *args], cwd=self.root, env=env or self.env,
-            input=input_text, text=True, capture_output=True, check=False,
-        )
+        return support.run_cli(self.root, *args, input_text=input_text, env=env or self.env)
 
     def git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

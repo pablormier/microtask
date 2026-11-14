@@ -252,10 +252,15 @@ def topic_tree(counts: dict[str, int], suggested: list[str] | tuple[str, ...] = 
     return [nodes[key] for key in sorted(nodes)]
 
 
-def validate_properties(properties: dict[str, object], *, kind: str | None = None) -> list[str]:
+def _validate_core_fields(
+    properties: dict[str, object],
+    *,
+    kind: str | None,
+    effective_kind: object,
+    stored_kind: object,
+) -> list[str]:
+    """Validate required identity, timestamp, title, kind, and priority properties."""
     errors: list[str] = []
-    stored_kind = properties.get("kind")
-    effective_kind = kind if kind is not None else stored_kind
     required = COMMON_REQUIRED + (("status", "type") if effective_kind == "task" else ())
     for field in required:
         if field not in properties or properties[field] is None:
@@ -282,6 +287,12 @@ def validate_properties(properties: dict[str, object], *, kind: str | None = Non
         errors.append("priority must be non-empty single-line text")
     if kind is not None and stored_kind != kind:
         errors.append(f"kind property must be {kind!r} for this card location")
+    return errors
+
+
+def _validate_organization_fields(properties: dict[str, object], *, effective_kind: object) -> list[str]:
+    """Validate project, topic, due, tags, task status/type, text blocks, flags, and completion."""
+    errors: list[str] = []
     project = properties.get("project")
     if "project" in properties and project is not None and (
         not isinstance(project, str) or not project.strip() or any(char in project for char in "\r\n\x00")
@@ -327,6 +338,16 @@ def validate_properties(properties: dict[str, object], *, kind: str | None = Non
     for field in BOOLEAN_METADATA:
         if field in properties and type(properties[field]) is not bool:
             errors.append(f"{field} must be true or false")
+    if "completed" in properties and properties["completed"] is not None and (
+        not isinstance(properties["completed"], str) or not is_metadata_time(properties["completed"])
+    ):
+        errors.append("completed must be an ISO date or local timestamp or null")
+    return errors
+
+
+def _validate_provenance_and_claims(properties: dict[str, object], *, stored_kind: object) -> list[str]:
+    """Validate capture/GitHub provenance, claim fields, and task-only field exclusions on notes."""
+    errors: list[str] = []
     if "capture_id" in properties:
         capture_id = properties["capture_id"]
         try:
@@ -363,10 +384,17 @@ def validate_properties(properties: dict[str, object], *, kind: str | None = Non
         for field in sorted(TASK_ONLY_FIELDS):
             if field in properties:
                 errors.append(f"notes cannot have task field {field}")
-    if "completed" in properties and properties["completed"] is not None and (
-        not isinstance(properties["completed"], str) or not is_metadata_time(properties["completed"])
-    ):
-        errors.append("completed must be an ISO date or local timestamp or null")
+    return errors
+
+
+def validate_properties(properties: dict[str, object], *, kind: str | None = None) -> list[str]:
+    stored_kind = properties.get("kind")
+    effective_kind = kind if kind is not None else stored_kind
+    errors = _validate_core_fields(
+        properties, kind=kind, effective_kind=effective_kind, stored_kind=stored_kind
+    )
+    errors.extend(_validate_organization_fields(properties, effective_kind=effective_kind))
+    errors.extend(_validate_provenance_and_claims(properties, stored_kind=stored_kind))
     errors.extend(validate_records(properties))
     return errors
 
@@ -405,6 +433,24 @@ def parse_document(raw: str, *, expected_kind: str | None = None) -> tuple[dict[
     return properties, body
 
 
+def time_entries_from(properties: dict[str, object]) -> list[dict[str, object]]:
+    """Validated time entries from already parsed card properties."""
+    entries = properties.get("time_entries", [])
+    if not isinstance(entries, list):
+        raise ValueError("time_entries must be a list")
+    errors = validate_records({"time_entries": entries})
+    if errors:
+        raise ValueError(errors[0])
+    return [dict(entry) for entry in entries if isinstance(entry, dict)]
+
+
+def time_log_entries(markdown: str | None) -> list[dict[str, object]]:
+    if not markdown:
+        return []
+    properties, _body = parse_document(markdown)
+    return time_entries_from(properties)
+
+
 def _ordered_properties(properties: dict[str, object]) -> dict[str, object]:
     result = {key: properties[key] for key in FIELD_ORDER if key in properties}
     result.update((key, value) for key, value in properties.items() if key not in result)
@@ -422,14 +468,6 @@ def dump_properties(properties: dict[str, object]) -> str:
 def render_document(properties: dict[str, object], body: str, *, expected_kind: str | None = None) -> str:
     require_valid_properties(properties, kind=expected_kind)
     return f"---\n{dump_properties(properties)}---\n{body}"
-
-
-def update_document(raw: str, *, properties: dict[str, object] | None = None,
-                    body: str | None = None, expected_kind: str | None = None) -> str:
-    old_properties, old_body = parse_document(raw, expected_kind=expected_kind)
-    return render_document(properties if properties is not None else old_properties,
-                           old_body if body is None else body,
-                           expected_kind=expected_kind)
 
 
 def content_hash(raw: str | bytes) -> str:

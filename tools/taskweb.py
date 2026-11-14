@@ -3,26 +3,32 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import date, datetime, time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
 import secrets
-import subprocess
 import sys
 import threading
-import uuid
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
 
+import card_format  # noqa: E402
 import card_query  # noqa: E402
-import tasklib  # noqa: E402
+import cli  # noqa: E402
 import drafts as draft_store  # noqa: E402
+import git_ops  # noqa: E402
+import operations  # noqa: E402
+import store  # noqa: E402
+import transaction  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 try:
     from .web_queries import collection_results
@@ -40,10 +46,38 @@ KATEX_JS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"
 KATEX_AUTO_RENDER_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"
 
 # Parsed cards reused across requests; every read re-checks each file's stat signature.
-CARD_CACHE = tasklib.CardCache()
+CARD_CACHE = store.CardCache()
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_INCLUDED_IDS = 8
+
+
+def current_workspace() -> Workspace:
+    return Workspace.resolve()
+
+
+def workspace_root() -> Path:
+    return current_workspace().root
+
+
+def application_version(app_root: Path = APP_ROOT) -> str:
+    """Return a fingerprint of the dashboard and core application files on disk."""
+    digest = hashlib.sha256()
+    paths: list[Path] = []
+    for folder in (app_root / "scripts", app_root / "tools"):
+        if folder.is_dir():
+            paths.extend(sorted(folder.rglob("*.py")))
+    web_dir = app_root / "tools" / "web"
+    if web_dir.is_dir():
+        paths.extend(sorted(path for path in web_dir.rglob("*") if path.is_file()))
+    for path in sorted(set(paths)):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        rel = str(path.relative_to(app_root))
+        digest.update(f"{rel}:{stat.st_mtime_ns}:{stat.st_size}\n".encode("utf-8"))
+    return digest.hexdigest()
 
 
 def load_css() -> str:
@@ -137,8 +171,8 @@ def extract_excerpt(text: str, max_len: int = 180) -> str:
     return excerpt
 
 
-def task_to_dict(task: tasklib.Card, reference_index: tasklib.ReferenceIndex | None = None, *, detail: bool = True, cfg: dict | None = None) -> dict:
-    cfg = cfg if cfg is not None else tasklib.policy()
+def task_to_dict(task: store.Card, reference_index: store.ReferenceIndex | None = None, *, detail: bool = True, cfg: dict | None = None) -> dict:
+    cfg = cfg if cfg is not None else store.policy()
     fm = task.frontmatter
     tags = fm.get("tags", [])
     body = task.body
@@ -157,29 +191,29 @@ def task_to_dict(task: tasklib.Card, reference_index: tasklib.ReferenceIndex | N
         "project": fm.get("project"),
         "topic": fm.get("topic"),
         "due": fm.get("due"),
-        "due_kind": tasklib.due_kind_value(fm),
+        "due_kind": store.due_kind_value(fm),
         "created": fm["created"],
         "updated": fm["updated"],
         "completed": fm.get("completed", ""),
         "claimed_by": fm.get("claimed_by"),
         "claimed_at": fm.get("claimed_at"),
-        "archived": tasklib.is_archived(task),
-        "hidden": tasklib.is_hidden(task),
+        "archived": store.is_archived(task),
+        "hidden": store.is_hidden(task),
         "tags": list(tags),
         "title": task.title,
         "next_action": task.next_action,
-        "needs_restart": tasklib.next_action_needs_restart_step(task),
-        "display_rank": tasklib.task_display_sort_key(task, rank),
+        "needs_restart": operations.next_action_needs_restart_step(task),
+        "display_rank": operations.task_display_sort_key(task, rank),
         "excerpt": extract_excerpt(body),
         "content_hash": hashlib.sha256(task.raw.encode("utf-8")).hexdigest(),
         "needs_review": fm.get("needs_review") is True,
-        "time_seconds": tasklib.saved_time_seconds(task) if task.kind == "task" else 0,
+        "time_seconds": store.saved_time_seconds(task) if task.kind == "task" else 0,
         "comment_count": len(comments) if isinstance(comments, list) else 0,
-        "path": str(task.path.relative_to(tasklib.REPO_ROOT)) if task.path.is_relative_to(tasklib.REPO_ROOT) else str(task.path),
+        "path": str(task.path.relative_to(workspace_root())) if task.path.is_relative_to(workspace_root()) else str(task.path),
         "base_uri": base_uri,
     }
     if detail:
-        references = tasklib.item_references(task, reference_index) if reference_index else []
+        references = store.item_references(task, reference_index) if reference_index else []
         result.update({
             "body": body,
             "processing_instructions": processing_instructions,
@@ -196,17 +230,17 @@ def task_to_dict(task: tasklib.Card, reference_index: tasklib.ReferenceIndex | N
     return result
 
 def dashboard_detail(identity: str) -> dict | None:
-    tasklib.pin_demo_state()
-    tasklib.maybe_seed_demo()
-    items = tasklib.discover(cache=CARD_CACHE)
+    store.pin_demo_state()
+    store.maybe_seed_demo()
+    items = store.discover(cache=CARD_CACHE)
     item = next((item for item in items if str(item.frontmatter.get("id") or item.path.stem) == identity), None)
-    return task_to_dict(item, tasklib.ReferenceIndex(items)) if item else None
+    return task_to_dict(item, store.ReferenceIndex(items)) if item else None
 
 
 
-def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = None, cfg: dict | None = None) -> dict:
-    cfg = cfg if cfg is not None else tasklib.policy()
-    default_status, default_priority, default_type = tasklib.task_defaults(cfg)
+def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None, cfg: dict | None = None) -> dict:
+    cfg = cfg if cfg is not None else store.policy()
+    default_status, default_priority, default_type = operations.task_defaults(cfg)
     statuses = list(cfg.get("statuses", {}))
     configured_status_labels = cfg.get("statuses", {})
     if not isinstance(configured_status_labels, dict):
@@ -227,9 +261,9 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
     rules = cfg.get("rules", {})
     raw_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
     max_doing = int(str(raw_limit)) if raw_limit is not None and str(raw_limit).isdigit() else 1
-    timers = tasklib.read_time_timers()
+    timers = transaction.read_time_timers()
     timers = {
-        task_id: {**timer, "saved": tasklib.timer_session_saved(task_id, timer)}
+        task_id: {**timer, "saved": store.timer_session_saved(task_id, timer)}
         for task_id, timer in timers.items()
     }
     item_values = items or []
@@ -245,9 +279,9 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
             if item.frontmatter.get(field):
                 name = str(item.frontmatter[field])
                 usage[field][name] = usage[field].get(name, 0) + 1
-    marker = tasklib.view_marker()
+    marker = store.view_marker()
     return {
-        "workspace_key": hashlib.sha256(str(tasklib.REPO_ROOT.resolve()).encode("utf-8")).hexdigest()[:16],
+        "workspace_key": hashlib.sha256(str(workspace_root().resolve()).encode("utf-8")).hexdigest()[:16],
         "status_labels": status_labels,
         "view_labels": view_labels,
         "priority_order": list(cfg.get("priorities", {}).keys()),
@@ -259,7 +293,7 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
         "task_due_kinds": cfg.get("due_kinds", {}),
         "suggested_tags": cfg.get("suggested_tags", []),
         "workspace_projects": sorted({str(item.frontmatter["project"]) for item in item_values if item.frontmatter.get("project")}),
-        "topic_tree": tasklib.card_format.topic_tree(usage["topic"], tasklib.suggested_topics(cfg)),
+        "topic_tree": card_format.topic_tree(usage["topic"], operations.suggested_topics(cfg)),
         "workspace_tags": sorted(workspace_tags),
         "workspace_usage": usage,
         "max_doing_tasks": max_doing,
@@ -267,7 +301,7 @@ def dashboard_meta(*, api_token: str = "", items: list[tasklib.Card] | None = No
         "show_deadline_progress": bool(rules.get("show_deadline_progress", True)),
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
         "api_token": api_token,
-        "demo": tasklib.demo_active(),
+        "demo": store.demo_active(),
         "view": ({"name": marker["name"], "source": marker["source"]} if marker else None),
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
@@ -285,7 +319,7 @@ def request_query(values: object) -> card_query.Query:
     if values is not None and not isinstance(values, dict):
         raise card_query.QueryError("query must be an object")
     query = card_query.query_from_mapping(values or {})
-    card_query.validate(query, statuses=tasklib.statuses(), priorities=list(tasklib.policy().get("priorities", {})))
+    card_query.validate(query, statuses=store.statuses(), priorities=list(store.policy().get("priorities", {})))
     return query
 
 
@@ -296,12 +330,12 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
     ``include`` IDs (the open card and its navigation trail), which are echoed back.
     Workspace-wide figures are in ``meta``.
     """
-    tasklib.pin_demo_state()
-    tasklib.maybe_seed_demo()
-    cfg = tasklib.policy()
+    store.pin_demo_state()
+    store.maybe_seed_demo()
+    cfg = store.policy()
     query = query or card_query.DEFAULT
     statuses = list(cfg.get("statuses", {}))
-    tasks = tasklib.discover(cache=CARD_CACHE)
+    tasks = store.discover(cache=CARD_CACHE)
     ordered = sorted(
         tasks,
         key=lambda t: statuses.index(t.frontmatter.get("status") or "")
@@ -310,14 +344,14 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
     )
     meta = dashboard_meta(api_token=api_token, items=tasks, cfg=cfg)
     now = datetime.now()
-    meta["focus"] = tasklib.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
+    meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
     summaries = [task_to_dict(task, detail=False, cfg=cfg) for task in ordered]
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
     collections = collection_results(
-        ordered, query, now=now, open_statuses=tasklib.open_statuses(),
-        done_cutoff=card_query.default_done_cutoff(query, tasklib.done_window(), date.today()),
-        display_rank=lambda card: tasklib.task_display_sort_key(card, rank))
-    drafts = draft_store.list_drafts(tasklib.REPO_ROOT)
+        ordered, query, now=now, open_statuses=store.open_statuses(),
+        done_cutoff=card_query.default_done_cutoff(query, store.done_window(), date.today()),
+        display_rank=lambda card: operations.task_display_sort_key(card, rank))
+    drafts = draft_store.list_drafts(workspace_root())
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
     draft_targets = {draft.get("target") for draft in drafts}
@@ -377,14 +411,9 @@ def build_html(config: dict) -> str:
 def bootstrap_config(token: str) -> dict:
     return {
         "api_token": token,
-        "workspace_key": hashlib.sha256(str(tasklib.REPO_ROOT.resolve()).encode("utf-8")).hexdigest()[:16],
+        "workspace_key": hashlib.sha256(str(workspace_root().resolve()).encode("utf-8")).hexdigest()[:16],
     }
 
-
-
-def command_env() -> dict[str, str]:
-    """Run dashboard writes without auto-sync, so the reply does not wait on the network."""
-    return {**tasklib.workspace_env(), "MT_DEFER_SYNC": "1"}
 
 
 class BackgroundSync:
@@ -401,7 +430,7 @@ class BackgroundSync:
         self.warning = ""
 
     def request(self) -> None:
-        if not tasklib.policy().get("rules", {}).get("auto_sync", False):
+        if not store.policy().get("rules", {}).get("auto_sync", False):
             return
         with self.lock:
             if self.thread is not None:
@@ -429,20 +458,19 @@ class BackgroundSync:
 
 def sync_once() -> str:
     """Sync the workspace and return a warning, or an empty string on success."""
-    status = tasklib.git_ops.workspace_status(tasklib.REPO_ROOT)
+    ws = current_workspace()
+    status = git_ops.workspace_status(ws.root)
     if status.state in {"missing", "uninitialized"}:
-        return tasklib.auto_sync_unavailable_message(status)
-    result = subprocess.run(
-        [str(APP_ROOT / "mt"), "sync"],
-        cwd=tasklib.REPO_ROOT, env=tasklib.workspace_env(),
-        check=False, capture_output=True, text=True,
-    )
-    if result.returncode == 0:
+        return transaction.auto_sync_unavailable_message(status, ws)
+    output = io.StringIO()
+    errors = io.StringIO()
+    with redirect_stdout(output), redirect_stderr(errors):
+        returncode = transaction.command_sync(argparse.Namespace(message=None), ws=ws)
+    if returncode == 0:
         return ""
-    # Drop the CLI's workspace banner; the board already shows which workspace it is.
-    errors = [line for line in result.stderr.splitlines()
-              if not line.startswith(("Workspace: ", "Application: "))]
-    return "\n".join([*errors, result.stdout]).strip() or "automatic sync failed"
+    error_lines = [line for line in errors.getvalue().splitlines()
+                   if not line.startswith(("Workspace: ", "Application: "))]
+    return "\n".join([*error_lines, output.getvalue()]).strip() or "automatic sync failed"
 
 
 # Draft autosaves change only drafts/, which sync does not need to publish on every keystroke.
@@ -454,6 +482,12 @@ class TaskWebServer(ThreadingHTTPServer):
         super().__init__(address, TaskWebHandler)
         self.token = token
         self.sync = BackgroundSync()
+        self.app_version = application_version(APP_ROOT)
+
+    def restart_notice(self) -> str:
+        if application_version(APP_ROOT) != self.app_version:
+            return "Application updated on disk; restart the dashboard to use the new version."
+        return ""
 
 
 class TaskWebHandler(BaseHTTPRequestHandler):
@@ -507,6 +541,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 include = params.pop("include", None)
                 payload = dashboard_payload(api_token=self.server.token, include=include, query=request_query(params))
                 payload["sync_warning"] = self.server.sync.warning
+                payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
                 payload["query_aliased"] = card_query.uses_aliases(params)
             except card_query.QueryError as error:
@@ -519,7 +554,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/drafts":
             try:
-                self.send_json(HTTPStatus.OK, {"drafts": draft_store.list_drafts(tasklib.REPO_ROOT)})
+                self.send_json(HTTPStatus.OK, {"drafts": draft_store.list_drafts(workspace_root())})
             except (OSError, ValueError) as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
@@ -553,35 +588,37 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.server.sync.request()
             # Actions return receipts; build the queried collection once, after success.
             payload = {**dashboard_payload(api_token=self.server.token, query=query, include=body.get("include")),
-                       "sync_warning": self.server.sync.warning, **payload}
+                       "sync_warning": self.server.sync.warning,
+                       "restart_notice": self.server.restart_notice(),
+                       **payload}
         self.send_json(status, payload)
 
 
 def item_by_ref(ref: object) -> dict | None:
-    if not isinstance(ref, str) or not tasklib.SHORT_REF_RE.fullmatch(ref):
+    if not isinstance(ref, str) or not store.SHORT_REF_RE.fullmatch(ref):
         return None
-    tasklib.pin_demo_state()
-    tasklib.maybe_seed_demo()
-    items = tasklib.items_by_ref(ref)
+    store.pin_demo_state()
+    store.maybe_seed_demo()
+    items = store.items_by_ref(ref)
     item = items[0] if len(items) == 1 and f"@{items[0].short_ref}" == ref else None
     return task_to_dict(item, detail=False) if item else None
 
 
-def run_mt_command(command: list[str], token: str, message: str) -> tuple[HTTPStatus, dict]:
-    result = subprocess.run(
-        [str(APP_ROOT / "mt"), *command],
-        cwd=tasklib.REPO_ROOT, env=command_env(),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        output = (result.stderr or result.stdout or "command failed").strip()
-        return HTTPStatus.BAD_REQUEST, {"error": output}
-    payload = {}
-    payload["message"] = message
-    payload["command_output"] = (result.stdout or "").strip()
+def _run_operation(action, message: str, *, include_saved_ref: bool = False) -> tuple[HTTPStatus, dict]:
+    try:
+        result = action(current_workspace())
+    except store.ConflictError as error:
+        return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
+    except store.TaskError as error:
+        return HTTPStatus.BAD_REQUEST, {"error": str(error)}
+    payload: dict[str, object] = {"message": message}
+    if include_saved_ref:
+        payload["saved_ref"] = result.receipt.get("ref")
     return HTTPStatus.OK, payload
+
+
+def _valid_sha256(value: object) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
 
 def valid_utf8(value: str) -> bool:
@@ -592,71 +629,33 @@ def valid_utf8(value: str) -> bool:
     return True
 
 
-def cli_conflict(output: str) -> bool:
-    return bool(re.search(
-        r"\b(conflict|changed since|content changed|expected updated|stale|baseline|draft not found|draft was removed)\b",
-        output, re.IGNORECASE,
-    ))
-
-
-def run_mt_receipt_command(
-    command: list[str],
-    token: str,
-    message: str,
-    *,
-    input_text: str | None = None,
-) -> tuple[HTTPStatus, dict]:
-    result = subprocess.run(
-        [str(APP_ROOT / "mt"), *command],
-        cwd=tasklib.REPO_ROOT, env=command_env(),
-        check=False,
-        capture_output=True,
-        input=input_text.encode("utf-8") if input_text is not None else None,
-    )
-    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
-    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
-    output = stdout.strip()
-    receipt: dict = {}
-    try:
-        parsed = json.loads(output)
-        if isinstance(parsed, dict):
-            receipt = parsed
-    except json.JSONDecodeError:
-        pass
-
-    if (result.returncode == 0 and isinstance(receipt.get("ref"), str)
-            and isinstance(receipt.get("path"), str)
-            and isinstance(receipt.get("content_hash"), str)):
-        payload = {}
-        payload["message"] = message
-        payload["saved_ref"] = receipt.get("ref")
-        return HTTPStatus.OK, payload
-
-    error = (stderr or stdout or "command failed").strip()
-    if cli_conflict(error):
-        return HTTPStatus.CONFLICT, {"error": error, "conflict": True}
-    return HTTPStatus.BAD_REQUEST, {"error": error}
-
-
 def handle_review(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     """Clear needs_review on any card kind, guarded by the loaded content hash."""
     expected_hash = body.get("expected_hash")
-    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+    if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     if expected_hash != item.get("content_hash"):
         return HTTPStatus.CONFLICT, {"error": "card changed since it was loaded; refresh and retry", "conflict": True}
     if not item.get("needs_review"):
         return HTTPStatus.OK, {"message": "Already reviewed", "saved_ref": item["ref"]}
-    return run_mt_receipt_command(
-        ["edit", item["ref"], "--set", "needs_review=false", "--expected-hash", expected_hash, "--json"],
-        token, "Marked reviewed",
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws,
+            item["ref"],
+            expected_hash=expected_hash,
+            assignments=["needs_review=false"],
+            match_mode="exact",
+            sync=False,
+        ),
+        "Marked reviewed",
+        include_saved_ref=True,
     )
 
 
 def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     """Toggle one task-list checkbox in the card body, guarded by the loaded content hash."""
     expected_hash = body.get("expected_hash")
-    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+    if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     index, count, checked = body.get("index"), body.get("count"), body.get("checked")
     for name, value in (("index", index), ("count", count)):
@@ -666,14 +665,23 @@ def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dic
         return HTTPStatus.BAD_REQUEST, {"error": "checked must be true or false"}
     if expected_hash != item.get("content_hash"):
         return HTTPStatus.CONFLICT, {"error": "card changed since it was loaded; refresh and retry", "conflict": True}
-    card = tasklib.items_by_ref(item["ref"])[0]
+    card = store.items_by_ref(item["ref"])[0]
     try:
-        new_body = tasklib.card_format.toggle_task_checkbox(card.body, index, count, checked)
+        new_body = card_format.toggle_task_checkbox(card.body, index, count, checked)
     except ValueError as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
-    return run_mt_receipt_command(
-        ["edit", item["ref"], "--body", "--file", "-", "--expected-hash", expected_hash, "--json"],
-        token, "Checklist updated", input_text=new_body,
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws,
+            item["ref"],
+            expected_hash=expected_hash,
+            body_mode="replace",
+            body_text=new_body,
+            match_mode="exact",
+            sync=False,
+        ),
+        "Checklist updated",
+        include_saved_ref=True,
     )
 
 
@@ -683,11 +691,9 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0:
         return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be a non-negative integer"}
     expected_hash = body.get("expected_hash")
-    if expected_revision > 0 and (
-        not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
-    ):
+    if expected_revision > 0 and not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash when updating a draft"}
-    if not isinstance(body.get("body"), str) or not valid_utf8(body["body"]):
+    if not isinstance(body.get("body"), str):
         return HTTPStatus.BAD_REQUEST, {"error": "body must be valid UTF-8 text"}
     kind = body.get("kind")
     mode = body.get("mode")
@@ -695,7 +701,10 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
         return HTTPStatus.BAD_REQUEST, {"error": "kind must be note or task"}
     if not isinstance(mode, str) or mode not in {"new", "edit"}:
         return HTTPStatus.BAD_REQUEST, {"error": "mode must be new or edit"}
-    fields: dict[str, object] = {"kind": kind, "mode": mode, "title": body.get("title", "")}
+    title = body.get("title", "")
+    if not isinstance(title, str) or not valid_utf8(title):
+        return HTTPStatus.BAD_REQUEST, {"error": "title must be valid UTF-8 text"}
+    fields: dict[str, object] = {"kind": kind, "mode": mode, "title": title}
     for field in ("status", "priority", "type", "project", "topic", "tags", "due", "due_kind"):
         if field not in body:
             continue
@@ -709,73 +718,48 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
             return HTTPStatus.BAD_REQUEST, {"error": f"{field} must be valid UTF-8 text"}
         fields[field] = value
     if "instructions" in body:
-        if not isinstance(body["instructions"], str) or not valid_utf8(body["instructions"]):
-            return HTTPStatus.BAD_REQUEST, {"error": "instructions must be valid UTF-8 text"}
         fields["instructions"] = body["instructions"]
     if mode == "new":
-        capture_id = body.get("capture_id")
-        created = body.get("created")
-        try:
-            parsed = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
-        except ValueError:
-            parsed = None
-        if parsed is None or str(parsed) != capture_id.lower():
-            return HTTPStatus.BAD_REQUEST, {"error": "capture_id must be a canonical UUID"}
-        if not isinstance(created, str) or not tasklib.is_timestamp(created):
-            return HTTPStatus.BAD_REQUEST, {"error": "created must be a local ISO timestamp with seconds"}
-        fields.update(capture_id=capture_id, created=created)
-    else:
-        if expected_revision == 0:
-            target_ref = body.get("target_ref")
-            item = item_by_ref(target_ref)
-            if item is None or item["kind"] != kind:
-                return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
-            item_path = tasklib.REPO_ROOT / str(item["path"])
-            if item_path.is_symlink() or not item_path.is_file():
-                return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
-            supplied_hash = body.get("base_hash")
-            if supplied_hash is None:
-                supplied_hash = draft_store.UNVERIFIED_BASE_HASH
-            if not isinstance(supplied_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", supplied_hash):
-                return HTTPStatus.BAD_REQUEST, {"error": "base_hash must be a SHA-256 hash"}
-            supplied_updated = body.get("base_updated", "")
-            if not isinstance(supplied_updated, str):
-                return HTTPStatus.BAD_REQUEST, {"error": "base_updated must be text"}
-            fields.update(
-                target=str(item["path"]),
-                base_hash=supplied_hash,
-                base_updated=supplied_updated,
-            )
+        fields.update(capture_id=body.get("capture_id"), created=body.get("created"))
+    elif mode == "edit" and expected_revision == 0:
+        item = item_by_ref(body.get("target_ref"))
+        if item is None or item["kind"] != kind:
+            return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
+        item_path = workspace_root() / str(item["path"])
+        if item_path.is_symlink() or not item_path.is_file():
+            return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
+        supplied_hash = body.get("base_hash")
+        if supplied_hash is None:
+            supplied_hash = draft_store.UNVERIFIED_BASE_HASH
+        if not _valid_sha256(supplied_hash):
+            return HTTPStatus.BAD_REQUEST, {"error": "base_hash must be a SHA-256 hash"}
+        supplied_updated = body.get("base_updated", "")
+        if not isinstance(supplied_updated, str):
+            return HTTPStatus.BAD_REQUEST, {"error": "base_updated must be text"}
+        fields.update(target=str(item["path"]), base_hash=supplied_hash, base_updated=supplied_updated)
     origin = body.get("origin")
     if origin is not None:
         if not isinstance(origin, str) or len(origin) > 512:
             return HTTPStatus.BAD_REQUEST, {"error": "origin must be a short string"}
         fields["origin"] = origin
-    if not isinstance(body.get("title", ""), str) or not valid_utf8(body.get("title", "")):
-        return HTTPStatus.BAD_REQUEST, {"error": "title must be valid UTF-8 text"}
-    if "title" in body and any(character in body["title"] for character in "\r\n"):
-        return HTTPStatus.BAD_REQUEST, {"error": "title must be single-line"}
-    if (mode == "new" and expected_revision == 0 and not body.get("title", "").strip()
+    if (mode == "new" and expected_revision == 0 and not title.strip()
             and not body["body"].strip() and not str(body.get("instructions") or "").strip()):
         return HTTPStatus.BAD_REQUEST, {"error": "new drafts require a non-empty title or text"}
     try:
         draft = draft_store.save(
-            tasklib.REPO_ROOT,
+            workspace_root(),
             draft_id=draft_id if isinstance(draft_id, str) else None,
             fields=fields,
             body=body["body"],
             expected_revision=expected_revision,
-            now=tasklib.now_stamp(),
+            now=store.now_stamp(),
             expected_content_hash=expected_hash if expected_revision > 0 else None,
         )
     except draft_store.DraftConflict as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except (OSError, ValueError) as error:
         return HTTPStatus.BAD_REQUEST, {"error": str(error)}
-    payload = {}
-    payload["message"] = "Draft saved"
-    payload["saved_draft"] = draft
-    return HTTPStatus.OK, payload
+    return HTTPStatus.OK, {"message": "Draft saved", "saved_draft": draft}
 
 
 def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
@@ -784,10 +768,10 @@ def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if not isinstance(revision, int) or isinstance(revision, bool):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be an integer"}
     expected_hash = body.get("expected_hash")
-    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+    if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     try:
-        removed = draft_store.discard(tasklib.REPO_ROOT, str(draft_id), revision, expected_hash)
+        removed = draft_store.discard(workspace_root(), str(draft_id), revision, expected_hash)
     except draft_store.DraftConflict as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except (OSError, ValueError) as error:
@@ -805,169 +789,252 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if not isinstance(revision, int) or isinstance(revision, bool):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be an integer"}
     expected_hash = body.get("expected_hash")
-    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+    if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
-    result = subprocess.run(
-        [str(APP_ROOT / "mt"), "draft", "save", str(draft_id),
-         "--expected-revision", str(revision), "--expected-hash", expected_hash, "--json"],
-        cwd=tasklib.REPO_ROOT, env=command_env(), check=False, capture_output=True, text=True,
+    return _run_operation(
+        lambda ws: operations.op_draft_save(
+            ws,
+            str(draft_id),
+            expected_revision=revision,
+            expected_hash=expected_hash,
+            sync=False,
+        ),
+        "Draft applied",
+        include_saved_ref=True,
     )
-    try:
-        receipt = json.loads(result.stdout.strip())
-    except json.JSONDecodeError:
-        receipt = {}
-    if (result.returncode != 0 or not isinstance(receipt.get("ref"), str)
-            or not isinstance(receipt.get("path"), str)
-            or not isinstance(receipt.get("content_hash"), str)):
-        output = (result.stderr or result.stdout or "could not apply draft").strip()
-        status = HTTPStatus.CONFLICT if cli_conflict(output) else HTTPStatus.BAD_REQUEST
-        return status, {"error": output, **({"conflict": True} if status == HTTPStatus.CONFLICT else {})}
-    payload = {}
-    payload["message"] = "Draft applied"
-    payload["saved_ref"] = receipt.get("ref")
-    return HTTPStatus.OK, payload
 
 
-def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, dict]:
-    if path == "/api/draft-save":
-        return handle_draft_save(body, token)
-    if path == "/api/draft-discard":
-        return handle_draft_discard(body, token)
-    if path == "/api/draft-finish":
-        return handle_draft_finish(body, token)
+def handle_card_metadata(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    expected_hash = body.get("expected_hash")
+    patch = body.get("patch")
+    if not _valid_sha256(expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    if not isinstance(patch, dict) or not patch:
+        return HTTPStatus.BAD_REQUEST, {"error": "metadata patch must be a non-empty object"}
+    return _run_operation(
+        lambda ws: operations.op_card_metadata(
+            ws,
+            item["ref"],
+            patch,
+            expected_hash=expected_hash,
+            kind=item["kind"],
+            match_mode="exact",
+            sync=False,
+        ),
+        "Properties saved",
+        include_saved_ref=True,
+    )
 
-    item = item_by_ref(body.get("ref"))
-    if item is None:
-        return HTTPStatus.BAD_REQUEST, {"error": "unknown item ref"}
 
-    if path == "/api/card-metadata":
-        expected_hash = body.get("expected_hash")
-        patch = body.get("patch")
-        if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
-            return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
-        if not isinstance(patch, dict) or not patch:
-            return HTTPStatus.BAD_REQUEST, {"error": "metadata patch must be a non-empty object"}
-        return run_mt_receipt_command(
-            ["card-metadata", item["ref"], "--kind", item["kind"], "--expected-hash", expected_hash,
-             "--patch", json.dumps(patch, ensure_ascii=False), "--json"],
-            token, "Properties saved",
-        )
+def handle_move(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    destination = body.get("status")
+    if item["kind"] != "task" or item["status"] == "done":
+        return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can move"}
+    open_statuses = [status for status in store.statuses() if status != "done"]
+    if destination not in open_statuses:
+        return HTTPStatus.BAD_REQUEST, {"error": "invalid destination status"}
+    label = store.policy().get("statuses", {}).get(str(destination)) or destination
+    return _run_operation(
+        lambda ws: operations.op_move(
+            ws, item["ref"], str(destination), match_mode="exact", sync=False
+        ),
+        f"Moved to {label}",
+    )
 
-    if path == "/api/checkbox":
-        return handle_checkbox(item, body, token)
 
-    if path == "/api/review":
-        return handle_review(item, body, token)
+def handle_comment(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return HTTPStatus.BAD_REQUEST, {"error": "comment requires text"}
+    return _run_operation(
+        lambda ws: operations.op_comment(
+            ws, item["ref"], [message], match_mode="exact", sync=False
+        ),
+        "Comment added",
+    )
 
-    if path == "/api/move":
-        destination = body.get("status")
-        if item["kind"] != "task" or item["status"] == "done":
-            return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can move"}
-        open_statuses = [status for status in tasklib.statuses() if status != "done"]
-        if destination not in open_statuses:
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid destination status"}
-        label = tasklib.policy().get("statuses", {}).get(str(destination)) or destination
-        return run_mt_command(["move", item["ref"], str(destination)], token, f"Moved to {label}")
 
-    if path == "/api/comment":
-        message = body.get("message")
-        if not isinstance(message, str) or not message.strip():
-            return HTTPStatus.BAD_REQUEST, {"error": "comment requires text"}
-        return run_mt_command(["comment", item["ref"], "-m", message], token, "Comment added")
+def handle_time_start(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    if item["kind"] != "task" or item["status"] == "done":
+        return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can start a timer"}
+    return _run_operation(
+        lambda ws: operations.op_time_start(ws, item["ref"], sync=False),
+        "Timer started",
+    )
 
-    if path == "/api/time-start":
-        if item["kind"] != "task" or item["status"] == "done":
-            return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can start a timer"}
-        return run_mt_command(["time", "start", item["ref"]], token, "Timer started")
 
-    if path == "/api/time-stop":
-        if item["kind"] != "task":
-            return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
-        command = ["time", "stop", item["ref"]]
-        ends = {key: body.get(key) for key in ("at", "duration") if body.get(key) not in (None, "")}
-        if len(ends) > 1:
-            return HTTPStatus.BAD_REQUEST, {"error": "give either at or duration, not both"}
-        for key, value in ends.items():
-            if not isinstance(value, str) or not value.strip():
-                return HTTPStatus.BAD_REQUEST, {"error": f"{key} must be text"}
-            command.append(f"--{key}={value.strip()}")
-        return run_mt_command(command, token, "Timer stopped and saved")
+def handle_time_stop(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    if item["kind"] != "task":
+        return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
+    ends = {key: body.get(key) for key in ("at", "duration") if body.get(key) not in (None, "")}
+    if len(ends) > 1:
+        return HTTPStatus.BAD_REQUEST, {"error": "give either at or duration, not both"}
+    cleaned_ends: dict[str, str] = {}
+    for key, value in ends.items():
+        if not isinstance(value, str) or not value.strip():
+            return HTTPStatus.BAD_REQUEST, {"error": f"{key} must be text"}
+        cleaned_ends[key] = value.strip()
+    return _run_operation(
+        lambda ws: operations.op_time_end(
+            ws,
+            query=item["ref"],
+            action="stop",
+            at=cleaned_ends.get("at"),
+            duration=cleaned_ends.get("duration"),
+            sync=False,
+        ),
+        "Timer stopped and saved",
+    )
 
-    if path == "/api/time-cancel":
-        if item["kind"] != "task":
-            return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
-        return run_mt_command(["time", "cancel", item["ref"]], token, "Timer discarded; no time recorded")
 
-    if path == "/api/done":
-        if item["kind"] != "task" or item["status"] == "done":
-            return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can be marked done"}
-        command = ["done", item["ref"]]
-        comment = body.get("comment")
-        if isinstance(comment, str) and comment.strip():
-            command.extend(["--comment", comment])
-        return run_mt_command(command, token, "Marked done")
+def handle_time_cancel(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    if item["kind"] != "task":
+        return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
+    return _run_operation(
+        lambda ws: operations.op_time_end(ws, query=item["ref"], action="cancel", sync=False),
+        "Timer discarded; no time recorded",
+    )
 
-    if path in {"/api/archive", "/api/hidden"}:
-        field = "archived" if path == "/api/archive" else "hidden"
+
+def handle_done(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    if item["kind"] != "task" or item["status"] == "done":
+        return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can be marked done"}
+    comment = body.get("comment")
+    comments = [comment] if isinstance(comment, str) and comment.strip() else ()
+    return _run_operation(
+        lambda ws: operations.op_complete(
+            ws, item["ref"], comments=comments, match_mode="exact", sync=False
+        ),
+        "Marked done",
+    )
+
+
+def handle_flag_update(field: str, message: str):
+    def _handler(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
         flag = body.get(field)
         if not isinstance(flag, bool):
             return HTTPStatus.BAD_REQUEST, {"error": f"{field} must be true or false"}
         value = "true" if flag else "false"
-        message = "Archive updated" if field == "archived" else "Visibility updated"
-        return run_mt_command(["edit", item["ref"], "--set", f"{field}={value}"], token, message)
-
-    if path == "/api/priority":
-        priority = body.get("priority")
-        allowed_priorities = list(tasklib.policy().get("priorities", {}).keys())
-        if not isinstance(priority, str) or priority not in allowed_priorities:
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid priority"}
-        if priority == item.get("priority"):
-            return HTTPStatus.BAD_REQUEST, {"error": "priority unchanged"}
-        return run_mt_command(["edit", item["ref"], "--set", f"priority={priority}"], token, f"Priority set to {priority}")
-
-    if path == "/api/due-set":
-        due = body.get("due")
-        due_time = body.get("due_time")
-        due_kind = body.get("due_kind")
-        try:
-            parsed = date.fromisoformat(due) if isinstance(due, str) else None
-        except ValueError:
-            parsed = None
-        if parsed is None or parsed.isoformat() != due:
-            return HTTPStatus.BAD_REQUEST, {"error": "due must be a YYYY-MM-DD date"}
-        if due_time:
-            try:
-                parsed_time = time.fromisoformat(due_time) if isinstance(due_time, str) else None
-            except ValueError:
-                parsed_time = None
-            if parsed_time is None:
-                return HTTPStatus.BAD_REQUEST, {"error": "due_time must be an HH:MM time"}
-            value = f"{due}T{parsed_time.strftime('%H:%M:%S')}"
-            message = f"Deadline set to {due} {parsed_time.strftime('%H:%M')}"
-        else:
-            value = due
-            message = f"Deadline set to {due}"
-        allowed_kinds = list(tasklib.policy().get("due_kinds", {}).keys())
-        if due_kind not in allowed_kinds:
-            return HTTPStatus.BAD_REQUEST, {"error": "invalid due kind"}
-        return run_mt_command(
-            ["edit", item["ref"], "--set", f"due={value}", "--set", f"due_kind={due_kind}"],
-            token,
+        return _run_operation(
+            lambda ws: operations.op_edit(
+                ws, item["ref"], assignments=[f"{field}={value}"], match_mode="exact", sync=False
+            ),
             message,
         )
 
-    if path == "/api/due-clear":
-        if not item.get("due"):
-            return HTTPStatus.BAD_REQUEST, {"error": "item has no due date"}
-        return run_mt_command(["edit", item["ref"], "--set", "due=null", "--set", "due_kind=null"], token, "Deadline removed")
+    return _handler
 
-    return HTTPStatus.NOT_FOUND, {"error": "not found"}
+
+def handle_priority(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    priority = body.get("priority")
+    allowed_priorities = list(store.policy().get("priorities", {}).keys())
+    if not isinstance(priority, str) or priority not in allowed_priorities:
+        return HTTPStatus.BAD_REQUEST, {"error": "invalid priority"}
+    if priority == item.get("priority"):
+        return HTTPStatus.BAD_REQUEST, {"error": "priority unchanged"}
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws, item["ref"], assignments=[f"priority={priority}"], match_mode="exact", sync=False
+        ),
+        f"Priority set to {priority}",
+    )
+
+
+def handle_due_set(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    due = body.get("due")
+    due_time = body.get("due_time")
+    due_kind = body.get("due_kind")
+    try:
+        parsed = date.fromisoformat(due) if isinstance(due, str) else None
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.isoformat() != due:
+        return HTTPStatus.BAD_REQUEST, {"error": "due must be a YYYY-MM-DD date"}
+    if due_time:
+        try:
+            parsed_time = time.fromisoformat(due_time) if isinstance(due_time, str) else None
+        except ValueError:
+            parsed_time = None
+        if parsed_time is None:
+            return HTTPStatus.BAD_REQUEST, {"error": "due_time must be an HH:MM time"}
+        value = f"{due}T{parsed_time.strftime('%H:%M:%S')}"
+        message = f"Deadline set to {due} {parsed_time.strftime('%H:%M')}"
+    else:
+        value = due
+        message = f"Deadline set to {due}"
+    allowed_kinds = list(store.policy().get("due_kinds", {}).keys())
+    if due_kind not in allowed_kinds:
+        return HTTPStatus.BAD_REQUEST, {"error": "invalid due kind"}
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws,
+            item["ref"],
+            assignments=[f"due={value}", f"due_kind={due_kind}"],
+            match_mode="exact",
+            sync=False,
+        ),
+        message,
+    )
+
+
+def handle_due_clear(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    if not item.get("due"):
+        return HTTPStatus.BAD_REQUEST, {"error": "item has no due date"}
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws,
+            item["ref"],
+            assignments=["due=null", "due_kind=null"],
+            match_mode="exact",
+            sync=False,
+        ),
+        "Deadline removed",
+    )
+
+
+DRAFT_ACTION_HANDLERS = {
+    "/api/draft-save": handle_draft_save,
+    "/api/draft-discard": handle_draft_discard,
+    "/api/draft-finish": handle_draft_finish,
+}
+
+ITEM_ACTION_HANDLERS = {
+    "/api/card-metadata": handle_card_metadata,
+    "/api/checkbox": handle_checkbox,
+    "/api/review": handle_review,
+    "/api/move": handle_move,
+    "/api/comment": handle_comment,
+    "/api/time-start": handle_time_start,
+    "/api/time-stop": handle_time_stop,
+    "/api/time-cancel": handle_time_cancel,
+    "/api/done": handle_done,
+    "/api/archive": handle_flag_update("archived", "Archive updated"),
+    "/api/hidden": handle_flag_update("hidden", "Visibility updated"),
+    "/api/priority": handle_priority,
+    "/api/due-set": handle_due_set,
+    "/api/due-clear": handle_due_clear,
+}
+
+
+def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    draft_handler = DRAFT_ACTION_HANDLERS.get(path)
+    if draft_handler is not None:
+        return draft_handler(body, token)
+
+    item_handler = ITEM_ACTION_HANDLERS.get(path)
+    if item_handler is None:
+        return HTTPStatus.NOT_FOUND, {"error": "not found"}
+
+    item = item_by_ref(body.get("ref"))
+    if item is None:
+        return HTTPStatus.BAD_REQUEST, {"error": "unknown item ref"}
+    return item_handler(item, body, token)
 
 
 def board_filters(args: argparse.Namespace) -> dict:
     """The board filters given on the command line (--project, --topic, ...), in canonical form."""
     query = card_query.query_from_args(args)
-    card_query.validate(query, statuses=tasklib.statuses(), priorities=list(tasklib.policy().get("priorities", {})))
+    card_query.validate(query, statuses=store.statuses(), priorities=list(store.policy().get("priorities", {})))
     return card_query.query_to_mapping(query)
 
 
@@ -988,7 +1055,7 @@ def serve_dashboard(host: str, port: int, *, no_open: bool, filters: dict | None
     actual_host, actual_port = server.server_address
     url = dashboard_url(actual_host, actual_port, filters)
     if not no_open:
-        tasklib.open_in_browser(url)
+        cli.open_in_browser(url)
     print(url, flush=True)
     try:
         server.serve_forever()
@@ -1003,7 +1070,7 @@ def serve_dashboard(host: str, port: int, *, no_open: bool, filters: dict | None
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the local web dashboard.")
-    tasklib.add_web_arguments(parser)
+    cli.add_web_arguments(parser)
     return parser.parse_args(argv)
 
 

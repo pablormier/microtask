@@ -17,6 +17,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
 import card_format
+import support  # noqa: E402
 
 
 class FocusTests(unittest.TestCase):
@@ -26,20 +27,14 @@ class FocusTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "examples", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"),
         )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def run_mt(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.root / "mt"), *args],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        return support.run_cli(self.root, *args)
 
     def add_ready_task(
         self,

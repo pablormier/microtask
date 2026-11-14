@@ -3,7 +3,7 @@
 The CLI, the dashboard server, and saved bulk-edit plans translate their input
 into a `Query` and use the cards `select` returns. Nothing else matches cards
 against filter criteria. Standard library only; policy values come in as
-arguments so this module never imports tasklib.
+arguments so this module never imports store or cli.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import difflib
 import os
 import re
 from dataclasses import dataclass, fields, replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Mapping
 
 import card_format

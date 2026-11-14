@@ -47,7 +47,7 @@ class TriageCheckTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         policy = self.root / "mt-policy.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
@@ -343,7 +343,7 @@ class TriageCheckTests(unittest.TestCase):
                 exported = self.policy_json()
                 self.assertEqual(exported.returncode, 0, exported.stderr)
                 self.assertEqual(json.loads(exported.stdout)["default_username"], expected)
-        for value in ('""', '"   "', "true", "", '"bad\x00name"'):
+        for value in ('""', '"   "', "true", "", r'"bad\0name"'):
             with self.subTest(value=value):
                 local.write_text(f"default_username: {value}\n", encoding="utf-8")
                 result = self.validate()

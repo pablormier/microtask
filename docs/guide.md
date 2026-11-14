@@ -151,7 +151,10 @@ mt done @4e91a7c2 --note "Appointment booked"
 shows a board you can group by status, priority, project, topic, tag, and more, plus Focus, Notes, Drafts,
 Archive, and Deadlines views. You can edit card content and properties, comment,
 and track time there. It edits the same files as the CLI, and nothing leaves
-your machine. `mt show REF` opens a read-only preview of a single card.
+your machine. `mt show REF` opens a read-only preview of a single card. If you run
+`mt update` while a dashboard is open, the running server keeps using the code
+it started with and shows a notice on the board; restart `mt web` to pick up the
+updated version.
 
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where

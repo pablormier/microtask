@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "tests"))
 from card_files import card_files  # noqa: E402
 import card_format  # noqa: E402
+import support  # noqa: E402
 
 
 EDITOR_STUB = r'''#!/usr/bin/env python3
@@ -45,7 +46,7 @@ class NoteCaptureTests(unittest.TestCase):
         temporary = Path(self.temporary.name)
         self.root = temporary / "repo"
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(
-            ".git", ".mt", "__pycache__", ".DS_Store"
+            ".git", ".mt", ".DS_Store"
         ))
         self.editor = temporary / "editor"
         self.editor.write_text(EDITOR_STUB, encoding="utf-8")
@@ -60,9 +61,7 @@ class NoteCaptureTests(unittest.TestCase):
 
     def run_mt(self, *args: str, input_bytes: bytes | None = None,
                env: dict[str, str] | None = None) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root,
-                              env=env or self.env, input=input_bytes,
-                              capture_output=True, check=False)
+        return support.run_cli(self.root, *args, input_bytes=input_bytes, env=env or self.env, text=False)
 
     def run_mt_terminal(self, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
         import pty

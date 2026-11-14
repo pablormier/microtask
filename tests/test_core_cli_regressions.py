@@ -19,7 +19,11 @@ SOURCE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
-import tasklib
+import cli as tasklib
+import operations
+import store
+import support
+import transaction
 
 
 class DeterministicCLIRegressionTests(unittest.TestCase):
@@ -29,7 +33,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
         self.env = os.environ.copy()
 
     def tearDown(self) -> None:
@@ -63,7 +67,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             task = tasklib.Card.read(Path(result.stdout.strip()))
             self.assertEqual(task.frontmatter["status"], status)
             self.assertEqual(task.next_action, "")
-            self.assertFalse(tasklib.next_action_needs_restart_step(task))
+            self.assertFalse(operations.next_action_needs_restart_step(task))
             if status == "doing":
                 self.assertEqual(task.frontmatter["claimed_by"], "agent:add")
                 self.assertTrue(task.frontmatter["claimed_at"])
@@ -124,8 +128,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
     def run_mt(self, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=self.env,
-                              text=True, input=input_text, capture_output=True, check=False)
+        return support.run_cli(self.root, *args, input_text=input_text, env=self.env)
 
     def test_scratch_allocates_unique_directories_without_creating_cards(self) -> None:
         plain = self.run_mt("scratch")
@@ -661,17 +664,21 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         before = path.read_bytes()
         relative = path.relative_to(self.root).as_posix()
         changed = before.replace(b"title: Original title", b"title: Changed title", 1)
-        with patch.object(tasklib, "REPO_ROOT", self.root), \
-             patch.object(tasklib, "validate_data_root", side_effect=ValueError("live validation failed")):
+        with patch.object(transaction, "validate_data_root", side_effect=ValueError("live validation failed")):
             with self.assertRaisesRegex(ValueError, "live validation failed"):
-                tasklib.apply_item_transaction({relative: changed}, expected={relative: before}, source_root=self.root)
+                transaction.apply_item_transaction(
+                    {relative: changed},
+                    expected={relative: before},
+                    source_root=self.root,
+                    ws=tasklib.Workspace.at(self.root, demo=False),
+                )
         self.assertEqual(path.read_bytes(), before)
 
     def test_managed_temp_directory_is_removed_when_validation_raises(self) -> None:
         script = (
             "import sys\n"
             "sys.path.insert(0, 'scripts')\n"
-            "import tasklib\n"
+            "import cli as tasklib\n"
             "try:\n"
             "    with tasklib.managed_temp_directory('failure-') as directory:\n"
             "        open(directory + '/probe', 'w').write('temporary')\n"
@@ -704,9 +711,9 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         visible = self.write_task("2026-06-20-090000-visible", "Visibility real work")
         tracking = self.write_task("2026-06-21-090000-tracking", "Visibility countdown",
                                    due="2026-01-01", priority="urgent")
-        original_body = tasklib.parse_frontmatter(tracking.read_text())[1]
+        original_body = store.parse_frontmatter(tracking.read_text())[1]
         self.assertEqual(self.run_mt("edit", tracking.stem, "--set", "hidden=true").returncode, 0)
-        self.assertEqual(tasklib.parse_frontmatter(tracking.read_text())[1], original_body)
+        self.assertEqual(store.parse_frontmatter(tracking.read_text())[1], original_body)
         self.assertEqual(self.run_mt("note", "Visibility holiday date").returncode, 0)
         note = card_files(self.root, "note")[0]
         self.assertEqual(self.run_mt("edit", note.stem, "--set", "hidden=true").returncode, 0)
@@ -993,15 +1000,14 @@ class BulkEditTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
         self.env = os.environ.copy()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def run_mt(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=self.env,
-                              text=True, capture_output=True, check=False)
+        return support.run_cli(self.root, *args, env=self.env)
 
     def write_task(self, item_id: str, title: str, *, status: str = "active", tags: str = "[]",
                    archived: bool = False) -> Path:
@@ -1183,9 +1189,10 @@ class BulkEditTests(unittest.TestCase):
         plan_path = self.save_plan(plan)
         before = {first: first.read_bytes(), second: second.read_bytes()}
         arguments = argparse.Namespace(apply_plan=str(plan_path), as_json=False)
-        with patch.object(tasklib, "REPO_ROOT", self.root), patch.object(tasklib, "_DEMO_STATE", False), \
-             patch.object(tasklib, "validate_data_root", side_effect=ValueError("forced validation failure")):
-            result = tasklib._command_bulk_edit_apply(arguments)
+        with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
+            result = tasklib._command_bulk_edit_apply(
+                arguments, ws=tasklib.Workspace.at(self.root, demo=False)
+            )
         self.assertEqual(result, 1)
         self.assertEqual({path: path.read_bytes() for path in before}, before)
         self.assertEqual(self.run_mt("validate").returncode, 0)

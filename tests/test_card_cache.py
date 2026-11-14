@@ -10,7 +10,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-import tasklib  # noqa: E402
+import cli as tasklib
+import store
+import transaction  # noqa: E402
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = SOURCE_ROOT / "examples" / "cards"
@@ -27,22 +29,22 @@ class CardCacheTests(unittest.TestCase):
         self.root.mkdir()
         for name in (TASK, OTHER_TASK, NOTE):
             shutil.copy2(EXAMPLES / name, self.root / name)
-        self.cache = tasklib.CardCache()
+        self.cache = store.CardCache()
 
-    def assert_equivalent(self) -> list[tasklib.Card]:
-        cached = tasklib.read_cards(self.root, cache=self.cache)
-        self.assertEqual(cached, tasklib.read_cards(self.root))
+    def assert_equivalent(self) -> list[store.Card]:
+        cached = store.read_cards(self.root, cache=self.cache)
+        self.assertEqual(cached, store.read_cards(self.root))
         return cached
 
     def count_parses(self, action) -> int:
-        with mock.patch.object(tasklib.Card, "read", wraps=tasklib.Card.read) as read:
+        with mock.patch.object(store.Card, "read", wraps=store.Card.read) as read:
             action()
         return read.call_count
 
     def test_unchanged_files_are_not_parsed_again(self) -> None:
         first = self.assert_equivalent()
         second = []
-        parses = self.count_parses(lambda: second.extend(tasklib.read_cards(self.root, cache=self.cache)))
+        parses = self.count_parses(lambda: second.extend(store.read_cards(self.root, cache=self.cache)))
         self.assertEqual(parses, 0)
         self.assertEqual(len(second), 3)
         self.assertTrue(all(a is b for a, b in zip(first, second)))
@@ -54,9 +56,9 @@ class CardCacheTests(unittest.TestCase):
         replacement.write_text(path.read_text(encoding="utf-8").replace("Fix login timeout bug", "Fix the login timeout"),
                                encoding="utf-8")
         os.replace(replacement, path)
-        self.assertEqual(self.count_parses(lambda: tasklib.read_cards(self.root, cache=self.cache)), 1)
+        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
         self.assert_equivalent()
-        titles = [card.title for card in tasklib.read_cards(self.root, cache=self.cache)]
+        titles = [card.title for card in store.read_cards(self.root, cache=self.cache)]
         self.assertIn("Fix the login timeout", titles)
 
     def test_in_place_rewrite_with_restored_mtime_is_detected(self) -> None:
@@ -73,9 +75,9 @@ class CardCacheTests(unittest.TestCase):
             self.fail("test setup did not restore mtime, size and inode")
         if after.st_ctime_ns == before.st_ctime_ns:
             self.skipTest("this filesystem's ctime did not change on an in-place write")
-        self.assertEqual(self.count_parses(lambda: tasklib.read_cards(self.root, cache=self.cache)), 1)
+        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
         self.assert_equivalent()
-        self.assertIn("Fix login timeout bag", [card.title for card in tasklib.read_cards(self.root, cache=self.cache)])
+        self.assertIn("Fix login timeout bag", [card.title for card in store.read_cards(self.root, cache=self.cache)])
 
     def test_deleted_cards_disappear_and_new_cards_appear(self) -> None:
         self.assert_equivalent()
@@ -90,7 +92,7 @@ class CardCacheTests(unittest.TestCase):
         other = Path(self.temporary.name) / "other"
         other.mkdir()
         shutil.copy2(EXAMPLES / TASK, other / TASK)
-        tasklib.read_cards(other, cache=self.cache)
+        store.read_cards(other, cache=self.cache)
         self.assert_equivalent()
         self.assertIn(other / TASK, self.cache.entries)
 
@@ -100,9 +102,9 @@ class CardCacheTests(unittest.TestCase):
         good = path.read_text(encoding="utf-8")
         path.write_text("no frontmatter here\n", encoding="utf-8")
         with self.assertRaises(ValueError) as uncached:
-            tasklib.read_cards(self.root)
+            store.read_cards(self.root)
         with self.assertRaises(ValueError) as cached:
-            tasklib.read_cards(self.root, cache=self.cache)
+            store.read_cards(self.root, cache=self.cache)
         self.assertEqual(str(cached.exception), str(uncached.exception))
         self.assertNotIn(path, self.cache.entries)
         path.write_text(good, encoding="utf-8")
@@ -110,18 +112,18 @@ class CardCacheTests(unittest.TestCase):
 
     def test_status_policy_is_checked_on_every_read(self) -> None:
         self.assert_equivalent()
-        allowed = [name for name in tasklib.statuses() if name != "active"]
-        with mock.patch.object(tasklib, "statuses", return_value=allowed):
+        allowed = [name for name in store.statuses() if name != "active"]
+        with mock.patch.object(store, "statuses", return_value=allowed):
             with self.assertRaises(ValueError) as uncached:
-                tasklib.read_cards(self.root)
+                store.read_cards(self.root)
             with self.assertRaises(ValueError) as cached:
-                tasklib.read_cards(self.root, cache=self.cache)
+                store.read_cards(self.root, cache=self.cache)
         self.assertEqual(str(cached.exception), str(uncached.exception))
 
     def test_kind_filter_does_not_evict_other_cards(self) -> None:
-        notes = tasklib.read_cards(self.root, "note", cache=self.cache)
+        notes = store.read_cards(self.root, "note", cache=self.cache)
         self.assertEqual([card.path.name for card in notes], [NOTE])
-        read_all = lambda: tasklib.read_cards(self.root, cache=self.cache)
+        read_all = lambda: store.read_cards(self.root, cache=self.cache)
         self.assertEqual(self.count_parses(read_all), 2)
         self.assert_equivalent()
         self.assertEqual(self.count_parses(read_all), 0)

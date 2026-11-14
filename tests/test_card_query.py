@@ -17,7 +17,10 @@ SOURCE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import card_query  # noqa: E402
-import tasklib  # noqa: E402
+import cli as tasklib
+import operations
+import store
+import transaction  # noqa: E402
 from card_fakes import FakeCard  # noqa: E402
 from card_query import Query, QueryError  # noqa: E402
 
@@ -166,7 +169,7 @@ class FocusDueTests(unittest.TestCase):
         for card in cards:
             card.path = Path(f"{card.frontmatter['id']}.md")
         rank = {"low": 2, "medium": 1, "high": 0}
-        reasons = {task.frontmatter["id"]: reason for task, reason in tasklib.ranked_focus_candidates(cards, rank)}
+        reasons = {task.frontmatter["id"]: reason for task, reason in operations.ranked_focus_candidates(cards, rank)}
 
         def due(mode):
             return set(ids(card_query.select(cards, Query(due=(mode,)), now=now)))
@@ -312,7 +315,7 @@ class WorkspaceTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
 
     def mt(self, *args, env=None, check=True):
         result = subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=env, text=True,

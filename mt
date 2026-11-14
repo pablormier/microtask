@@ -10,4 +10,4 @@ if [[ "${1:-}" == "update" ]]; then
   shift
   exec python3 "$repo_root/scripts/update.py" "$@"
 fi
-exec python3 "$repo_root/scripts/tasklib.py" "$@"
+exec python3 "$repo_root/scripts/mt_main.py" "$@"

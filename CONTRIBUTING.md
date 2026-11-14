@@ -13,6 +13,17 @@ Prefer small, explicit code and fewer concepts.
   property edits separate from body operations. Do not reserve Markdown
   headings, encode capture wrappers, or introduce alternate runtime
   representations.
+- Module ownership in `scripts/`:
+  - `workspace.py`: explicit workspace paths, active/demo root resolution, and `Workspace`.
+  - `store.py`: card reading/discovery, policy, timers, focus state, and typed `TaskError`s.
+  - `validation.py`: card/workspace validation (`audit_workspace` and scoped write validation).
+  - `transaction.py`: file locking (`time_mutation_lock`), atomic multi-file writes, and `mt sync`.
+  - `operations.py`: the core operations API — **the only write path** for cards and timers.
+  - `cli.py`: CLI argument parsing, formatting, and interactive commands.
+- Do not spawn a subprocess unless it runs another program or another version
+  (`git`, `gh`, the user's editor, browser, `mt update`, `install.sh`, or
+  `os.execve` into another workspace's `mt`). Internal commands, validation, and
+  the web dashboard call the Python API in-process.
 - `next_action` and `processing_instructions` are optional properties.
   `templates/` contains generated references for contributors, not operational
   inputs.

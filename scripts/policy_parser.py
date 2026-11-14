@@ -9,6 +9,7 @@ import os
 import re
 
 import card_format
+from vendor import yaml
 
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -50,90 +51,53 @@ def validate_status_policy(cfg: dict) -> None:
         raise ValueError("\n".join(errors))
 
 
-def _strip_comment(line: str) -> str:
-    """Remove a YAML comment outside a quoted scalar."""
-    quote: str | None = None
-    escaped = False
-    for index, char in enumerate(line):
-        if quote == '"':
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-        elif quote == "'":
-            if char == quote:
-                quote = None
-        elif char in ("'", '"'):
-            quote = char
-        elif char == "#" and (index == 0 or line[index - 1].isspace()):
-            return line[:index]
-    return line
+class _PolicyLoader(yaml.SafeLoader):
+    pass
 
 
-def parse_scalar(raw: str):
-    value = raw.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-        quoted = value[0]
-        value = value[1:-1]
-        if quoted == "'":
-            return value.replace("''", "'")
-        return value.replace(r'\"', '"').replace(r'\\', '\\')
-    if value.lower() == "true":
-        return True
-    if value.lower() == "false":
-        return False
-    if value.lower() == "null":
-        return None
-    return value
+# Keep numbers and dates as strings (matching mt-policy.yaml's string rule values).
+_PolicyLoader.yaml_implicit_resolvers = {
+    initial: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag not in {"tag:yaml.org,2002:int", "tag:yaml.org,2002:float", "tag:yaml.org,2002:timestamp"}
+    ]
+    for initial, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def _construct_policy_mapping(loader: _PolicyLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    loader.flatten_mapping(node)
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"duplicate policy status ID '{key}'" if isinstance(key, str) else f"duplicate policy key {key!r}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+def _construct_policy_null(loader: _PolicyLoader, node: yaml.ScalarNode) -> str | None:
+    if node.value == "" and node.style is None:
+        return ""
+    return None
+
+
+_PolicyLoader.add_constructor("tag:yaml.org,2002:map", _construct_policy_mapping)
+_PolicyLoader.add_constructor("tag:yaml.org,2002:null", _construct_policy_null)
+
 
 def parse_policy_yaml(content: str) -> dict:
-    """A simple YAML parser tailored for our flat/nested mt-policy.yaml schema."""
-    data = {}
-    current_key = None
-    current_dict = None
-    
-    for line in content.splitlines():
-        # Remove comments and trailing whitespace
-        line_no_comment = _strip_comment(line)
-        stripped = line_no_comment.strip()
-        if not stripped:
-            continue
-        
-        # Determine indentation level
-        indent = len(line_no_comment) - len(line_no_comment.lstrip())
-        
-        if indent == 0:
-            if ':' in stripped:
-                key, val = stripped.split(':', 1)
-                key = key.strip()
-                val = val.strip()
-                if val:
-                    data[key] = parse_scalar(val)
-                    current_key = None
-                else:
-                    if key not in data or not isinstance(data[key], dict):
-                        data[key] = {}
-                    current_key = key
-                    current_dict = data[key]
-        elif indent > 0:
-            if current_key is not None:
-                if stripped.startswith('-'):
-                    item = parse_scalar(stripped[1:])
-                    if not isinstance(current_dict, list):
-                        data[current_key] = []
-                        current_dict = data[current_key]
-                    current_dict.append(item)
-                elif ':' in stripped:
-                    k, v = stripped.split(':', 1)
-                    k = k.strip()
-                    v = v.strip()
-                    if isinstance(current_dict, dict):
-                        if current_key == "statuses" and k in current_dict:
-                            raise ValueError(f"duplicate policy status ID '{k}'")
-                        current_dict[k] = parse_scalar(v)
-    return data
+    """Parse mt-policy.yaml using vendored PyYAML with string-preserved numbers/dates."""
+    try:
+        parsed = yaml.load(content, Loader=_PolicyLoader)
+    except yaml.YAMLError as error:
+        raise ValueError(f"invalid policy YAML: {error}") from error
+    if parsed is None:
+        return {}
+    if not isinstance(parsed, dict):
+        raise ValueError("policy YAML must be a mapping")
+    return parsed
 
 def workspace_root() -> Path:
     """Folder holding the cards and policy: MT_WORKSPACE when set, else the application's own."""

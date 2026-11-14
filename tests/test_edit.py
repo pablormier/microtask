@@ -10,8 +10,10 @@ import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import card_format
+import support
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,7 +23,7 @@ class EditTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "workspace"
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(
-            ".git", ".mt", "__pycache__", ".DS_Store"
+            ".git", ".mt", ".DS_Store"
         ))
         self.env = {**os.environ, "MT_USERNAME": "edit-test", "MT_AUTO_SYNC": "false"}
 
@@ -29,8 +31,7 @@ class EditTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_mt(self, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=self.env,
-                              input=input_text, text=True, capture_output=True, check=False)
+        return support.run_cli(self.root, *args, input_text=input_text, env=self.env)
 
     def json(self, *args: str, input_text: str | None = None) -> dict:
         result = self.run_mt(*args, input_text=input_text)

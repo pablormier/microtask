@@ -21,7 +21,7 @@ class RepositorySelectorTests(unittest.TestCase):
         self.home = Path(self.temporary.name).resolve()
         self.launcher = self.home / "launcher"
         self.target = self.home / "target workspace"
-        ignored = shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store")
+        ignored = shutil.ignore_patterns(".git", ".mt", ".DS_Store")
         shutil.copytree(SOURCE_ROOT, self.launcher, ignore=ignored)
         shutil.copytree(SOURCE_ROOT, self.target, ignore=ignored)
         self.env = os.environ.copy()
@@ -237,7 +237,7 @@ class RepositorySelectorTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             second,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         self.assertEqual(self.run_mt("repo", "add", "zeta", str(second)).returncode, 0)
         self.assertEqual(self.run_mt("repo", "add", "alpha", str(self.target)).returncode, 0)
@@ -266,7 +266,7 @@ class RepositorySelectorTests(unittest.TestCase):
         self.assertIn("workspace does not exist", invalid.stderr)
 
     def test_dispatch_forwards_capture_commands_unchanged(self) -> None:
-        stub = self.target / "scripts" / "tasklib.py"
+        stub = self.target / "scripts" / "cli.py"
         stub.write_text(
             "#!/usr/bin/env python3\n"
             "import json\n"

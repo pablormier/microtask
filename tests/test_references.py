@@ -8,7 +8,9 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import card_format
 import card_references
-import tasklib
+import cli as tasklib
+import store
+import transaction
 
 
 class ReferenceTests(unittest.TestCase):
@@ -69,7 +71,7 @@ Afterwards @abe.
         header, _ = card_format.parse_frontmatter(raw)
         note = tasklib.Card(Path("cards/capture.md"), raw, header, body, properties)
         target = SimpleNamespace(kind="task", short_ref="abcdef12", title="Target", frontmatter={"id": "target"})
-        references = tasklib.item_references(note, tasklib.ReferenceIndex([target, note]))
+        references = store.item_references(note, tasklib.ReferenceIndex([target, note]))
         self.assertEqual([ref['ref'] for ref in references], ["@abcdef12", "@fed", "@abc123"])
         self.assertEqual([ref['state'] for ref in references], ["resolved", "missing", "missing"])
 

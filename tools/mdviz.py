@@ -14,7 +14,8 @@ import tempfile
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
 
-import tasklib  # noqa: E402
+import card_format  # noqa: E402
+import cli  # noqa: E402
 
 
 MARKED_CDN = "https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
@@ -136,11 +137,11 @@ def default_output_path(source: Path) -> Path:
 
 
 def build_html(source: Path, text: str) -> str:
-    header, body = tasklib.card_format.parse_frontmatter(text)
-    properties = tasklib.card_format.parse_yaml(header) if header is not None else {}
+    header, body = card_format.parse_frontmatter(text)
+    properties = card_format.parse_yaml(header) if header is not None else {}
     is_card = properties.get("kind") in {"task", "note"}
     if is_card:
-        properties, body = tasklib.card_format.parse_document(text)
+        properties, body = card_format.parse_document(text)
     base_uri = source.resolve().parent.as_uri() + "/"
     card = {"body": body, "base_uri": base_uri}
     if is_card:
@@ -186,7 +187,7 @@ def main(argv: list[str]) -> int:
         print(f"error: failed to write preview: {error}", file=sys.stderr)
         return 1
     if not args.no_open:
-        tasklib.open_in_browser(output.resolve().as_uri())
+        cli.open_in_browser(output.resolve().as_uri())
     print(output)
     return 0
 

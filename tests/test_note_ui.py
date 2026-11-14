@@ -1505,16 +1505,15 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
 
     def test_reference_spans_cover_ordinary_body_and_ignore_fenced_examples(self) -> None:
         import tools.taskweb as taskweb
-        tasklib = taskweb.tasklib
         def note(item_id, title, body):
-            raw=tasklib.render_new_card('note',item_id,title,body_text=body)
-            frontmatter, markdown=tasklib.parse_frontmatter(raw)
-            return tasklib.Card(Path('/tmp/'+item_id+'.md'),raw,frontmatter,markdown,tasklib.parse_yaml(frontmatter))
+            raw=taskweb.operations.render_new_card('note',item_id,title,body_text=body)
+            frontmatter, markdown=taskweb.store.parse_frontmatter(raw)
+            return taskweb.store.Card(Path('/tmp/'+item_id+'.md'),raw,frontmatter,markdown,taskweb.store.parse_yaml(frontmatter))
         target=note('target','Target','Source.')
         ref='@'+target.short_ref
         body=f'## Notes\n\nLiteral reference {ref}\n\n```microtask-capture\nExample {ref}\n```'
         item=note('testnote1','Review',body)
-        detail=taskweb.task_to_dict(item,tasklib.ReferenceIndex([item,target]))
+        detail=taskweb.task_to_dict(item,taskweb.store.ReferenceIndex([item,target]))
         self.assertEqual(detail['body'],body)
         spans=detail['reference_spans']['body']
         self.assertEqual(len(spans),1)

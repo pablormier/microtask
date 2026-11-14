@@ -19,7 +19,7 @@ class UpdateTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.upstream,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         self.git(self.upstream, "init", "-b", "main")
         self.configure(self.upstream)
@@ -155,12 +155,12 @@ class UpdateTests(unittest.TestCase):
         self.assertNotEqual((self.workspace / "README.md").read_text(), "# New upstream\n")
 
     def test_update_repairs_broken_parser_without_loading_it(self) -> None:
-        tasklib = self.workspace / "scripts" / "tasklib.py"
+        tasklib = self.workspace / "scripts" / "cli_parser.py"
         tasklib.write_text(tasklib.read_text().replace(
             "    info.set_defaults(func=command_info)",
             "    info.set_defaults(func=command_triage_snapshot)",
         ), encoding="utf-8")
-        self.git(self.workspace, "add", "scripts/tasklib.py")
+        self.git(self.workspace, "add", "scripts/cli_parser.py")
         self.git(self.workspace, "commit", "-m", "Broken local parser")
         broken = subprocess.run([str(self.workspace / "mt"), "help"], cwd=self.workspace,
                                 text=True, capture_output=True, check=False)
@@ -169,44 +169,44 @@ class UpdateTests(unittest.TestCase):
         result = self.run_update()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(tasklib.read_bytes(), (self.upstream / "scripts" / "tasklib.py").read_bytes())
+        self.assertEqual(tasklib.read_bytes(), (self.upstream / "scripts" / "cli_parser.py").read_bytes())
         self.assertEqual(self.run_update("--check").returncode, 0)
         self.assertEqual(self.git(self.workspace, "status", "--porcelain").stdout, "")
 
     def test_failed_candidate_rolls_back_application_and_history(self) -> None:
-        tasklib = self.upstream / "scripts" / "tasklib.py"
+        tasklib = self.upstream / "scripts" / "cli.py"
         tasklib.write_text(tasklib.read_text() + "\nthis is invalid Python\n", encoding="utf-8")
-        self.git(self.upstream, "add", "scripts/tasklib.py")
+        self.git(self.upstream, "add", "scripts/cli.py")
         self.git(self.upstream, "commit", "-m", "Broken application")
         before = self.git(self.workspace, "rev-parse", "HEAD").stdout.strip()
-        original = (self.workspace / "scripts" / "tasklib.py").read_bytes()
+        original = (self.workspace / "scripts" / "cli.py").read_bytes()
 
         result = self.run_update()
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("candidate failed", result.stderr)
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").stdout.strip(), before)
-        self.assertEqual((self.workspace / "scripts" / "tasklib.py").read_bytes(), original)
+        self.assertEqual((self.workspace / "scripts" / "cli.py").read_bytes(), original)
         self.assertEqual(self.git(self.workspace, "status", "--porcelain").stdout, "")
 
     def test_failed_validation_rolls_back_application_and_history(self) -> None:
-        validator = self.upstream / "scripts" / "validate"
+        validator = self.upstream / "scripts" / "validation.py"
         validator.write_text(validator.read_text().replace(
-            '"""Validate the microtask workspace',
-            'raise SystemExit(1)\n"""Validate the microtask workspace',
+            '    """Validate every card and draft in root against policy."""',
+            '    """Validate every card and draft in root against policy."""\n    raise SystemExit(1)',
             1,
         ), encoding="utf-8")
-        self.git(self.upstream, "add", "scripts/validate")
+        self.git(self.upstream, "add", "scripts/validation.py")
         self.git(self.upstream, "commit", "-m", "Reject candidate")
         before = self.git(self.workspace, "rev-parse", "HEAD").stdout.strip()
-        original = (self.workspace / "scripts" / "validate").read_bytes()
+        original = (self.workspace / "scripts" / "validation.py").read_bytes()
 
         result = self.run_update()
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("candidate failed validate", result.stderr)
         self.assertEqual(self.git(self.workspace, "rev-parse", "HEAD").stdout.strip(), before)
-        self.assertEqual((self.workspace / "scripts" / "validate").read_bytes(), original)
+        self.assertEqual((self.workspace / "scripts" / "validation.py").read_bytes(), original)
         self.assertEqual(self.git(self.workspace, "status", "--porcelain").stdout, "")
 
     def test_policy_only_upstream_change_finishes_merge_from_other_directory(self) -> None:

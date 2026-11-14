@@ -15,6 +15,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
 import card_format
+import support  # noqa: E402
 GH_STUB = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -48,7 +49,7 @@ class ImportGithubTests(unittest.TestCase):
         temp = Path(self.temporary.name)
         self.root = temp / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
-                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", "__pycache__", ".DS_Store"))
+                        ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
         self.bin = temp / "bin"
         self.bin.mkdir()
         gh = self.bin / "gh"
@@ -74,8 +75,7 @@ class ImportGithubTests(unittest.TestCase):
         self.state_path.write_text(json.dumps({"repo": "acme/tasks", "issues": issues}), encoding="utf-8")
 
     def run_mt(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root,
-                              env=self.env if env is None else env, text=True, capture_output=True)
+        return support.run_cli(self.root, *args, env=self.env if env is None else env)
 
     def git(self, cwd: Path, *args: str) -> str:
         result = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True)

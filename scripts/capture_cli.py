@@ -1,4 +1,4 @@
-"""Small, dependency-free terminal capture form. Writes belong to tasklib."""
+"""Small, dependency-free terminal capture form. Writes belong to operations."""
 from __future__ import annotations
 
 import os

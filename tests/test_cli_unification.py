@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOURCE_ROOT / "tests"))
+import support  # noqa: E402
 
 
 class CLIUnificationTests(unittest.TestCase):
@@ -16,12 +19,12 @@ class CLIUnificationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
-        shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"))
+        shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
         policy = self.root / "mt-policy.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def run_mt(self, *args, input_bytes=None):
-        return subprocess.run([str(self.root / "mt"), *args], cwd=self.root, input=input_bytes, capture_output=True)
+        return support.run_cli(self.root, *args, input_bytes=input_bytes, text=False)
 
     def json(self, result):
         self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))

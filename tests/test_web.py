@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -80,7 +82,7 @@ class WebDashboardTests(unittest.TestCase):
             fields["completed"] = completed
         if due is not None:
             fields.update(due=due, due_kind=due_kind)
-        path.write_text(taskweb.tasklib.card_format.render_document(fields, "Test content.\n\n## Notes\n\n" + extra_body + '\n## Extra context\n\n<svg onload=alert(1)></script><script>alert("xss")</script>'), encoding="utf-8")
+        path.write_text(taskweb.card_format.render_document(fields, "Test content.\n\n## Notes\n\n" + extra_body + '\n## Extra context\n\n<svg onload=alert(1)></script><script>alert("xss")</script>'), encoding="utf-8")
         return path
 
     def write_note(
@@ -98,7 +100,7 @@ class WebDashboardTests(unittest.TestCase):
         fields = {"id": note_id, "title": title, "kind": "note", "priority": priority,
                   "created": "2026-01-01", "updated": "2026-01-01", "archived": archived,
                   "needs_review": needs_review}
-        path.write_text(taskweb.tasklib.card_format.render_document(fields, content), encoding="utf-8")
+        path.write_text(taskweb.card_format.render_document(fields, content), encoding="utf-8")
         return path
 
     def render_dashboard(self) -> subprocess.CompletedProcess[str]:
@@ -195,7 +197,7 @@ from pathlib import Path
 sys.path.insert(0, 'tools')
 import taskweb
 path = Path(sys.argv[1])
-note = taskweb.tasklib.Card.read(path)
+note = taskweb.store.Card.read(path)
 expected = hashlib.sha256(note.raw.encode('utf-8')).hexdigest()
 path.write_bytes(note.raw.replace('Some **bold** note content.', 'Concurrent edit').encode('utf-8'))
 payload = taskweb.task_to_dict(note)
@@ -430,11 +432,11 @@ view_labels:
         self.assertFalse(note["needs_review"])
 
     def test_note_detail_keeps_guidance_property_separate_from_body(self):
-        fields, body = taskweb.tasklib.card_format.parse_document(self.note.read_text())
+        fields, body = taskweb.card_format.parse_document(self.note.read_text())
         fields["processing_instructions"] = "Review this note.\n\n## Content\n\n```python\nunfinished"
-        self.note.write_text(taskweb.tasklib.card_format.render_document(fields, body))
-        item = taskweb.tasklib.Card.read(self.note)
-        payload = taskweb.task_to_dict(item, taskweb.tasklib.ReferenceIndex([item]))
+        self.note.write_text(taskweb.card_format.render_document(fields, body))
+        item = taskweb.store.Card.read(self.note)
+        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item]))
         self.assertEqual(payload["body"], body)
         self.assertEqual(payload["processing_instructions"], fields["processing_instructions"])
         self.assertNotIn("sections", payload)
@@ -445,17 +447,17 @@ view_labels:
         data = json.loads(self.detail_json())
         task = next(item for item in data if item["kind"] == "task")
         self.assertTrue(task["excerpt"].startswith("Test content."))
-        self.assertEqual(task["body"], taskweb.tasklib.card_format.parse_document((self.root / task["path"]).read_text())[1])
+        self.assertEqual(task["body"], taskweb.card_format.parse_document((self.root / task["path"]).read_text())[1])
 
     def test_task_detail_exposes_one_body_and_independent_markdown_properties(self):
-        item = taskweb.tasklib.Card.read(self.tasks[0])
-        target = taskweb.tasklib.Card.read(self.note)
+        item = taskweb.store.Card.read(self.tasks[0])
+        target = taskweb.store.Card.read(self.note)
         fields = dict(item.frontmatter)
         body = f"Keep **Markdown** and link @{target.short_ref}.\n\n```python\n## Notes\nunfinished"
         fields["next_action"] = f"Read **details** in @{target.short_ref}"
-        self.tasks[0].write_text(taskweb.tasklib.card_format.render_document(fields, body))
-        item = taskweb.tasklib.Card.read(self.tasks[0])
-        payload = taskweb.task_to_dict(item, taskweb.tasklib.ReferenceIndex([item, target]))
+        self.tasks[0].write_text(taskweb.card_format.render_document(fields, body))
+        item = taskweb.store.Card.read(self.tasks[0])
+        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item, target]))
         self.assertEqual(payload["body"], body)
         self.assertEqual(payload["next_action"], fields["next_action"])
         self.assertNotIn("sections", payload)
@@ -506,9 +508,9 @@ view_labels:
     def test_dashboard_includes_saved_time_totals(self) -> None:
         task = self.tasks[0]
         raw = task.read_text(encoding="utf-8")
-        fields, body = taskweb.tasklib.card_format.parse_document(raw)
+        fields, body = taskweb.card_format.parse_document(raw)
         fields["time_entries"] = [{"session_id":"a"*32, "start":"2026-01-01T10:00:00", "end":"2026-01-01T10:02:05", "elapsed_seconds":125}]
-        raw = taskweb.tasklib.card_format.render_document(fields, body)
+        raw = taskweb.card_format.render_document(fields, body)
         task.write_text(raw, encoding="utf-8")
 
         self.render_dashboard()
@@ -979,14 +981,14 @@ view_labels:
         spec.loader.exec_module(taskweb)
         args = taskweb.parse_args(["--project", "Big project", "--project", "Other", "--topic", "work/infra",
                                    "--updated-before", "1y", "--needs-review"])
-        year_ago = taskweb.tasklib.card_format.relative_date("1y", date.today()).isoformat()
+        year_ago = taskweb.card_format.relative_date("1y", date.today()).isoformat()
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(args)),
                          "http://127.0.0.1:8123/?project=Big+project&project=Other&topic=work%2Finfra"
                          f"&needs_review=true&updated_before={year_ago}")
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
 
     def test_mt_web_passes_each_repeated_filter_to_the_dashboard(self) -> None:
-        tasklib = taskweb.tasklib
+        tasklib = taskweb.cli
         args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.object(tasklib.subprocess, "run") as run:
             tasklib.command_web(args)
@@ -1055,7 +1057,7 @@ view_labels:
             summary = next(card for card in response["tasks"] if card["id"] == path.stem)
             detail = self.get_card(url, summary)
             self.assertIn(body, detail["body"])
-            self.assertEqual(detail["body"], taskweb.tasklib.card_format.parse_document(path.read_text())[1])
+            self.assertEqual(detail["body"], taskweb.card_format.parse_document(path.read_text())[1])
             self.assertEqual(detail["content_hash"], summary["content_hash"])
             self.assertEqual(detail["references"][0]["target"]["id"], self.note.stem)
             self.assertTrue(detail["reference_spans"]["body"])
@@ -1200,7 +1202,10 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             )
             self.assertEqual(status, 200, started_payload)
             self.assertIn(active["id"], started_payload["meta"]["time_running"])
-            time.sleep(1.05)
+            timer_file = self.root / ".mt" / "time-running"
+            timers_data = json.loads(timer_file.read_text(encoding="utf-8"))
+            timers_data[active["id"]]["start_epoch"] -= 2
+            timer_file.write_text(json.dumps(timers_data), encoding="utf-8")
             status, second_started = self.post_json(
                 url + "api/time-start", token, {"ref": inbox["ref"]}
             )
@@ -1228,7 +1233,10 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
 
             status, _ = self.post_json(url + "api/time-start", token, {"ref": doing["ref"]})
             self.assertEqual(status, 200)
-            time.sleep(1.05)
+            timer_file = self.root / ".mt" / "time-running"
+            timers_data = json.loads(timer_file.read_text(encoding="utf-8"))
+            timers_data[doing["id"]]["start_epoch"] -= 2
+            timer_file.write_text(json.dumps(timers_data), encoding="utf-8")
             status, both_ends = self.post_json(
                 url + "api/time-stop", token, {"ref": doing["ref"], "at": "10:00", "duration": "1s"}
             )
@@ -1271,7 +1279,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             commented_note = self.get_card(url, next(item for item in commented_payload["tasks"] if item["id"] == note["id"]))
             self.assertEqual(commented_note["comments"][0]["text"], "Reviewed from the web UI\nNeeds follow-up")
             note_text = (self.root / "cards" / f"{note['id']}.md").read_text(encoding="utf-8")
-            fields, body = taskweb.tasklib.card_format.parse_document(note_text)
+            fields, body = taskweb.card_format.parse_document(note_text)
             self.assertEqual(fields["comments"][0]["text"], "Reviewed from the web UI\nNeeds follow-up")
             self.assertNotIn("Reviewed from the web UI", body)
 
@@ -1374,7 +1382,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertIsNone(cleared["due"])
             self.assertIsNone(cleared["due_kind"])
             task_text = (self.root / "cards" / f"{due_task['id']}.md").read_text(encoding="utf-8")
-            properties = taskweb.tasklib.card_format.parse_document(task_text)[0]
+            properties = taskweb.card_format.parse_document(task_text)[0]
             self.assertIsNone(properties.get("due"))
             self.assertIsNone(properties.get("due_kind"))
 
@@ -1568,9 +1576,9 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         self.assertEqual(unassigned["priority"], "none")
 
     def test_notes_with_invalid_priority_are_rejected(self):
-        fields, body = taskweb.tasklib.card_format.parse_document(self.note.read_text())
+        fields, body = taskweb.card_format.parse_document(self.note.read_text())
         fields["priority"] = None
-        self.note.write_text("---\n" + taskweb.tasklib.card_format.dump_properties(fields) + "---\n" + body)
+        self.note.write_text("---\n" + taskweb.card_format.dump_properties(fields) + "---\n" + body)
         result = self.render_dashboard()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("priority", result.stderr)
@@ -1830,7 +1838,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertEqual(note["ref"], payload["saved_ref"])
             self.assertEqual(note["body"], created["body"])
             saved_raw = (self.root / note["path"]).read_text(encoding="utf-8")
-            self.assertEqual(taskweb.tasklib.card_format.parse_document(saved_raw)[0]["processing_instructions"],
+            self.assertEqual(taskweb.card_format.parse_document(saved_raw)[0]["processing_instructions"],
                 created["instructions"])
         finally:
             self.stop_interactive_web(process)
@@ -1875,9 +1883,9 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.stop_interactive_web(process)
 
     def test_body_draft_cannot_replace_processing_instructions_property(self):
-        fields, body = taskweb.tasklib.card_format.parse_document(self.note.read_text())
+        fields, body = taskweb.card_format.parse_document(self.note.read_text())
         fields["processing_instructions"] = "Keep source wording."
-        self.note.write_text(taskweb.tasklib.card_format.render_document(fields, body))
+        self.note.write_text(taskweb.card_format.render_document(fields, body))
         process, url = self.start_interactive_web()
         try:
             initial = self.get_json(url + "api/items")
@@ -1892,7 +1900,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             draft = response["saved_draft"]
             status, response = self.post_json(url + "api/draft-finish", token, {"id":draft["id"], "expected_revision":draft["revision"], "expected_hash":draft["content_hash"]})
             self.assertEqual(status, 200, response)
-            actual, body = taskweb.tasklib.card_format.parse_document(self.note.read_text())
+            actual, body = taskweb.card_format.parse_document(self.note.read_text())
             self.assertEqual(actual["processing_instructions"], "Keep source wording.")
             self.assertEqual(body, request["body"])
         finally:
@@ -2029,7 +2037,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertEqual(fresh["type"], "decision")
             self.assertEqual(fresh["tags"], ["code", "custom-tag"])
             saved = path.read_bytes()
-            self.assertEqual(taskweb.tasklib.card_format.parse_document(saved.decode())[0]["claimed_by"], "web-test")
+            self.assertEqual(taskweb.card_format.parse_document(saved.decode())[0]["claimed_by"], "web-test")
             self.assertEqual(saved.decode("utf-8").split("---\n", 2)[-1], original_body)
 
             status, stale = self.post_json(url + "api/card-metadata", token, {
@@ -2261,6 +2269,76 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertFalse(result["needs_review"])
             stored = note_path.read_text(encoding="utf-8")
             self.assertIn("needs_review: false", stored)
+        finally:
+            self.stop_interactive_web(process)
+
+    def test_restart_notice_appears_when_application_files_change_on_disk(self) -> None:
+        self.write_task("active", "2026-06-22-091000-restart-check", "Restart notice check", "Body")
+        versions = iter(["v1", "v1", "v2", "v2"])
+        with mock.patch.object(taskweb, "application_version", side_effect=lambda *_: next(versions)), \
+             mock.patch.dict(os.environ, {"MT_WORKSPACE": str(self.root)}):
+            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                host, port = server.server_address
+                url = f"http://{host}:{port}/"
+                initial = self.get_json(url + "api/items")
+                self.assertEqual(initial["restart_notice"], "")
+                ref = initial["tasks"][0]["ref"]
+
+                refreshed = self.get_json(url + "api/items")
+                self.assertIn("restart the dashboard", refreshed["restart_notice"])
+
+                status, updated = self.post_json(
+                    url + "api/comment", "test-token", {"ref": ref, "message": "After update"},
+                )
+                self.assertEqual(status, 200, updated)
+                self.assertIn("restart the dashboard", updated["restart_notice"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_concurrent_dashboard_and_cli_writes_serialize_without_corruption(self) -> None:
+        task_path = self.write_task("active", "2026-06-22-092000-concurrent-card", "Concurrent writes", "Body")
+        process, url = self.start_interactive_web()
+        try:
+            initial = self.get_json(url + "api/items")
+            token = initial["meta"]["api_token"]
+            ref = next(item["ref"] for item in initial["tasks"] if item["id"] == task_path.stem)
+            barrier = threading.Barrier(12)
+
+            def web_comment(index: int) -> tuple[int, dict]:
+                barrier.wait(timeout=5)
+                return self.post_json(url + "api/comment", token, {"ref": ref, "message": f"web-{index}"})
+
+            def cli_comment(index: int) -> subprocess.CompletedProcess[str]:
+                barrier.wait(timeout=5)
+                return subprocess.run(
+                    [str(self.root / "mt"), "comment", ref, "-m", f"cli-{index}"],
+                    cwd=self.root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+                web_futures = [pool.submit(web_comment, idx) for idx in range(6)]
+                cli_futures = [pool.submit(cli_comment, idx) for idx in range(6)]
+                for future in web_futures:
+                    status, payload = future.result(timeout=15)
+                    self.assertEqual(status, 200, payload)
+                for future in cli_futures:
+                    result = future.result(timeout=15)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+            card = taskweb.store.Card.read(task_path)
+            comments = [entry["text"] for entry in card.frontmatter.get("comments", [])]
+            for idx in range(6):
+                self.assertIn(f"web-{idx}", comments)
+                self.assertIn(f"cli-{idx}", comments)
+            self.assertEqual(len(comments), 12)
         finally:
             self.stop_interactive_web(process)
 

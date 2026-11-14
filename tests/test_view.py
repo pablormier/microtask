@@ -14,11 +14,14 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from web_fixture import render_dashboard
+import support
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
-import tasklib  # noqa: E402
+import cli as tasklib
+import store
+import transaction  # noqa: E402
 
 
 class MaterializedViewTests(unittest.TestCase):
@@ -27,7 +30,7 @@ class MaterializedViewTests(unittest.TestCase):
         self.home = Path(self.temporary.name).resolve()
         self.root = self.home / "workspace"
         ignored = shutil.ignore_patterns(
-            ".git", ".mt", "examples", "__pycache__", "*.pyc", ".DS_Store", "*.swp"
+            ".git", ".mt", "examples", ".DS_Store", "*.swp"
         )
         shutil.copytree(SOURCE_ROOT, self.root, ignore=ignored)
         (self.root / "cards").mkdir(exist_ok=True)
@@ -38,15 +41,7 @@ class MaterializedViewTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def run_mt(self, *arguments: str, root: Path | None = None) -> subprocess.CompletedProcess[str]:
-        workspace = root or self.root
-        return subprocess.run(
-            [str(workspace / "mt"), *arguments],
-            cwd=workspace,
-            env=self.env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        return support.run_cli(root or self.root, *arguments, env=self.env)
 
     def hide_git(self) -> None:
         binary = self.home / "without-git"
@@ -335,24 +330,22 @@ class MaterializedViewTests(unittest.TestCase):
                 "path": "cards/one.md",
                 "content_hash": hashlib.sha256(b"original").hexdigest(),
             }
-            with (
-                patch.object(tasklib, "REPO_ROOT", root),
-                patch.object(tasklib, "cards_root", return_value=cards),
-            ):
-                self.assertEqual(tasklib.validated_view_items([record])[0][2], b"original")
+            ws = tasklib.Workspace.at(root)
+            with patch.object(store, "cards_root", return_value=cards):
+                self.assertEqual(tasklib.validated_view_items([record], ws=ws)[0][2], b"original")
                 card.write_bytes(b"changed")
                 with self.assertRaisesRegex(ValueError, "changed during view creation"):
-                    tasklib.validated_view_items([record])
+                    tasklib.validated_view_items([record], ws=ws)
                 escaped = {**record, "path": "../outside.md"}
                 with self.assertRaisesRegex(ValueError, "unsafe card path"):
-                    tasklib.validated_view_items([escaped])
+                    tasklib.validated_view_items([escaped], ws=ws)
 
     def test_repo_selector_runs_view_commands_inside_selected_workspace(self) -> None:
         target = self.home / "target"
         shutil.copytree(
             SOURCE_ROOT,
             target,
-            ignore=shutil.ignore_patterns(".git", ".mt", "examples", "__pycache__", "*.pyc", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"),
         )
         (target / "cards").mkdir(exist_ok=True)
         task = target / "cards" / "selected.md"

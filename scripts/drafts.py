@@ -3,12 +3,10 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
 import uuid
-from datetime import datetime
 
 import card_format
 
@@ -19,7 +17,6 @@ FIELDS = (
     "base_hash", "base_updated", "capture_id", "origin", "status", "priority",
     "type", "project", "topic", "tags", "due", "due_kind", "instructions",
 )
-TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
 # Older recovery copies may not contain the target version they were opened
 # against. This reserved digest makes their edit drafts explicitly unbased.
 UNVERIFIED_BASE_HASH = "0" * 64
@@ -109,12 +106,8 @@ def read_path(path: Path) -> dict[str, object]:
         raise ValueError(f"malformed draft title: {path}")
     for field in ("created", "updated"):
         value = metadata.get(field)
-        if not isinstance(value, str) or not TIMESTAMP_RE.fullmatch(value):
+        if not isinstance(value, str) or not card_format.is_timestamp(value):
             raise ValueError(f"malformed draft {field}: {path}")
-        try:
-            datetime.fromisoformat(value)
-        except ValueError as error:
-            raise ValueError(f"malformed draft {field}: {path}") from error
     mode = metadata["mode"]
     kind = metadata["kind"]
     if mode == "new":
@@ -220,12 +213,8 @@ def save(
                 parsed_capture_id = None
             if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
                 raise ValueError("new note draft capture ID must be a canonical UUID")
-            if not isinstance(created_value, str) or not TIMESTAMP_RE.fullmatch(created_value):
-                raise ValueError("new capture draft created time must be a local ISO timestamp with seconds")
-            try:
-                datetime.fromisoformat(created_value)
-            except ValueError as error:
-                raise ValueError("new capture draft created time is invalid") from error
+            if not isinstance(created_value, str) or not card_format.is_timestamp(created_value):
+                raise ValueError("new capture draft created time must be a valid local ISO timestamp with seconds")
         else:
             target = fields.get("target", previous.get("target") if previous else None)
             base_hash = fields.get("base_hash", previous.get("base_hash") if previous else None)
@@ -289,15 +278,6 @@ def discard(
         return True
     finally:
         unlock(lock_handle)
-
-
-def import_source(root: Path, *, origin: str, fields: dict[str, object], body: str, now: str) -> dict[str, object]:
-    """Import once by origin. The original recovery source stays in place."""
-    for draft in list_drafts(root):
-        if draft.get("origin") == origin:
-            return draft
-    return save(root, draft_id=None, fields={**fields, "origin": origin}, body=body,
-                expected_revision=0, now=now)
 
 
 def read(root: Path, draft_id: str) -> dict[str, object]:

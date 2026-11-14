@@ -18,7 +18,10 @@ SOURCE_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 from card_files import card_files  # noqa: E402
-import tasklib
+import cli as tasklib
+import store
+import support
+import transaction
 
 
 class SyncTests(unittest.TestCase):
@@ -30,7 +33,7 @@ class SyncTests(unittest.TestCase):
         shutil.copytree(
             SOURCE_ROOT,
             self.root,
-            ignore=shutil.ignore_patterns(".git", ".mt", "__pycache__", ".DS_Store"),
+            ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
         self.git(self.origin.parent, "init", "--bare", str(self.origin))
         self.git(self.root, "init", "-b", "main")
@@ -54,14 +57,7 @@ class SyncTests(unittest.TestCase):
         )
 
     def run_mt(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.root / "mt"), *args],
-            cwd=self.root,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        return support.run_cli(self.root, *args, env=env)
 
     def enable_auto_sync(self) -> None:
         policy = self.root / "mt-policy.yaml"
@@ -174,7 +170,7 @@ class SyncTests(unittest.TestCase):
         self.assert_published_mutation("comment", note.stem, "-m", "Discussed findings.")
 
         self.assert_published_mutation("edit", note.stem, "--title", "Revised reference")
-        self.assertEqual(tasklib.parse_yaml(tasklib.parse_frontmatter(self.git(self.root, "show", f"origin/main:cards/{note.name}").stdout)[0])["title"], "Revised reference")
+        self.assertEqual(store.parse_yaml(store.parse_frontmatter(self.git(self.root, "show", f"origin/main:cards/{note.name}").stdout)[0])["title"], "Revised reference")
         self.assert_published_mutation("convert", note.stem, "task")
         self.assertIn("kind: task", note.read_text(encoding="utf-8"))
         self.assert_published_mutation("convert", note.stem, "note")
@@ -191,8 +187,8 @@ class SyncTests(unittest.TestCase):
         self.assert_published_mutation("edit", task.stem, "--set", "next_action=Verify the result.")
         self.assert_published_mutation("move", task.stem, "doing", "--by", "agent:test")
         doing = self.root / "cards" / task.name
-        frontmatter, _body = tasklib.parse_frontmatter(doing.read_text())
-        self.assertEqual(tasklib.parse_yaml(frontmatter)["claimed_by"], "agent:test")
+        frontmatter, _body = store.parse_frontmatter(doing.read_text())
+        self.assertEqual(store.parse_yaml(frontmatter)["claimed_by"], "agent:test")
 
         before = self.git(self.root, "rev-parse", "HEAD").stdout.strip()
         original = doing.read_bytes()
@@ -307,8 +303,8 @@ class SyncTests(unittest.TestCase):
         self.assertIn(f"status: {local_status}", task.read_text())
         self.assertNotIn("<<<<<<<", task.read_text())
         if local_status == "doing":
-            frontmatter, _body = tasklib.parse_frontmatter(task.read_text())
-            self.assertEqual(tasklib.parse_yaml(frontmatter)["claimed_by"], "agent:local")
+            frontmatter, _body = store.parse_frontmatter(task.read_text())
+            self.assertEqual(store.parse_yaml(frontmatter)["claimed_by"], "agent:local")
 
     def test_sync_stops_before_conflicting_metadata_status_transitions(self) -> None:
         self.assert_lifecycle_conflict("waiting", "active")
@@ -407,7 +403,7 @@ Review remote task.
         self.assertEqual(after, before)
 
     def test_concurrent_sync_commands_are_serialized(self) -> None:
-        original_git_text = tasklib.git_text
+        original_git_text = transaction.git_text
         first_fetch = threading.Event()
         second_fetch = threading.Event()
         release_fetch = threading.Event()
@@ -415,7 +411,7 @@ Review remote task.
         fetch_count = 0
         results: list[int] = []
 
-        def gated_git_text(*arguments: str) -> subprocess.CompletedProcess[str]:
+        def gated_git_text(*arguments: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
             nonlocal fetch_count
             if arguments == ("fetch", "origin"):
                 with fetch_lock:
@@ -427,17 +423,16 @@ Review remote task.
                         raise TimeoutError("test did not release the first sync fetch")
                 else:
                     second_fetch.set()
-            return original_git_text(*arguments)
+            return original_git_text(*arguments, **kwargs)
 
-        original_validator = tasklib.run_validator
+        original_validator = transaction.run_validator
+        ws = tasklib.Workspace.at(self.root, demo=False)
         with (
-            patch.object(tasklib, "REPO_ROOT", self.root),
-            patch.object(tasklib, "_DEMO_STATE", False),
-            patch.object(tasklib, "git_text", gated_git_text),
-            patch.object(tasklib, "run_validator", original_validator),
+            patch.object(transaction, "git_text", gated_git_text),
+            patch.object(transaction, "run_validator", original_validator),
         ):
             first = threading.Thread(
-                target=lambda: results.append(tasklib.command_sync(argparse.Namespace(message=None)))
+                target=lambda: results.append(tasklib.command_sync(argparse.Namespace(message=None), ws=ws))
             )
             first.start()
             self.assertTrue(first_fetch.wait(10), "first sync did not reach fetch")
@@ -446,7 +441,7 @@ Review remote task.
 
             def run_second_sync() -> None:
                 second_started.set()
-                results.append(tasklib.command_sync(argparse.Namespace(message=None)))
+                results.append(tasklib.command_sync(argparse.Namespace(message=None), ws=ws))
 
             second = threading.Thread(target=run_second_sync)
             second.start()
@@ -462,38 +457,37 @@ Review remote task.
         self.assertEqual(fetch_count, 2)
 
     def test_task_change_during_fetch_aborts_sync_before_merge(self) -> None:
-        original_git_text = tasklib.git_text
+        original_git_text = transaction.git_text
         fetch_started = threading.Event()
         release_fetch = threading.Event()
         merge_commands: list[tuple[str, ...]] = []
         results: list[int] = []
 
-        def gated_git_text(*arguments: str) -> subprocess.CompletedProcess[str]:
+        def gated_git_text(*arguments: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
             if arguments == ("fetch", "origin"):
                 fetch_started.set()
                 if not release_fetch.wait(10):
                     raise TimeoutError("test did not release sync fetch")
             if arguments and arguments[0] in {"merge", "merge-tree"}:
                 merge_commands.append(arguments)
-            return original_git_text(*arguments)
+            return original_git_text(*arguments, **kwargs)
 
-        original_validator = tasklib.run_validator
+        original_validator = transaction.run_validator
         stdout = io.StringIO()
         stderr = io.StringIO()
+        ws = tasklib.Workspace.at(self.root, demo=False)
         with (
-            patch.object(tasklib, "REPO_ROOT", self.root),
-            patch.object(tasklib, "_DEMO_STATE", False),
-            patch.object(tasklib, "git_text", gated_git_text),
-            patch.object(tasklib, "run_validator", original_validator),
+            patch.object(transaction, "git_text", gated_git_text),
+            patch.object(transaction, "run_validator", original_validator),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
         ):
             sync = threading.Thread(
-                target=lambda: results.append(tasklib.command_sync(argparse.Namespace(message=None)))
+                target=lambda: results.append(tasklib.command_sync(argparse.Namespace(message=None), ws=ws))
             )
             sync.start()
             self.assertTrue(fetch_started.wait(10), "sync did not reach fetch")
-            created = tasklib.command_create(argparse.Namespace(text=["Created during fetch"]))
+            created = tasklib.command_create(argparse.Namespace(text=["Created during fetch"]), ws=ws)
             self.assertEqual(created, 0)
             release_fetch.set()
             sync.join(10)

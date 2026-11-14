@@ -10,6 +10,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+import git_ops
+
 
 ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = "refs/remotes/upstream/main"
@@ -24,7 +26,7 @@ class UpdateError(Exception):
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=ROOT, text=True, capture_output=True, check=False)
+    return git_ops.run_git(ROOT, *args)
 
 
 def checked_git(*args: str) -> str:
@@ -226,6 +228,7 @@ def main(argv: list[str] | None = None) -> int:
                         print(f"Application files changed: {len(change_list)}")
                         for change in change_list:
                             print(f"  {describe_change(change)}")
+                        print("If the web dashboard is running, restart it to use the updated code.")
                     elif upstream_commits:
                         print(f"Update complete: applied {upstream_commits} upstream "
                               f"commit{'s' if upstream_commits != 1 else ''} ({target[:12]}).")
