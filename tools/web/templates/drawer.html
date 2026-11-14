@@ -151,7 +151,7 @@
                   </div>
                 </template>
                 <template x-if="!hoverCard?.next_action && hoverCard?.excerpt">
-                  <div class="mt-card-popover-excerpt" x-text="cleanExcerpt(hoverCard?.excerpt)"></div>
+                  <div class="mt-card-popover-excerpt" x-text="hoverCard?.excerpt"></div>
                 </template>
                 <div class="mt-card-popover-meta" x-show="hoverCard?.project || hoverCard?.topic || hoverCard?.due || (hoverCard?.tags && hoverCard?.tags.length)">
                   <span class="mt-card-popover-meta-item" x-show="hoverCard?.project" x-text="'Project: ' + hoverCard?.project"></span>

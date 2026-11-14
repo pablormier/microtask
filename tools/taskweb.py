@@ -88,6 +88,8 @@ def load_css() -> str:
         "board.css",
         "views.css",
         "detail.css",
+        "composer.css",
+        "popover.css",
     ]
     return "\n".join((WEB_DIR / "styles" / f).read_text(encoding="utf-8") for f in css_files)
 
@@ -97,10 +99,14 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
         "markdown.js",
         "card_helpers.js",
         "picker.js",
+        "metadata_editor.js",
         "draft_store.js",
         "capture_composer.js",
         "property_editor.js",
         "content_editor.js",
+        "filters_query.js",
+        "draft_coordinator.js",
+        "card_detail.js",
         "board.js",
     ]
     return "\n".join((web_dir / "js" / f).read_text(encoding="utf-8") for f in js_files)
@@ -401,7 +407,7 @@ def build_html(config: dict) -> str:
         "{nonce}": nonce,
         "{app_script}": js,
     })
-    pending = ("{ref}", "{config_json}")
+    pending = ("{config_json}",)
     leftover = [m for m in re.findall(r"\{[a-z_]+\}", page) if m not in pending]
     if leftover:
         raise ValueError(f"unreplaced placeholders in dashboard HTML: {leftover}")

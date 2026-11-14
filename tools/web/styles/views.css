@@ -328,8 +328,6 @@ textarea.mt-field.mt-task-draft-body { min-height: 48vh; font-family: var(--mt-f
   .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   .mt-groups:not(.is-horizontal, .is-flat) .mt-column { flex-basis: calc(100vw - 3.5rem); min-width: calc(100vw - 3.5rem); scroll-snap-align: start; }
-}
-@media (max-width: 38rem) {
   .mt-deadline-list { padding: var(--mt-space-3); }
   .mt-deadline-row { grid-template-columns: minmax(0, 1fr); }
   .mt-deadline-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: var(--mt-space-2); }

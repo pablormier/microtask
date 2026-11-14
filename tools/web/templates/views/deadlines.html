@@ -45,7 +45,7 @@
                       <span class="mt-badge mt-status-badge" :class="statusBadgeClass(row.item.status)" x-show="row.item.kind === 'task' && row.item.status" x-text="statusText(row.item.status)"></span>
                       <span class="mt-badge mt-badge-square mt-due-kind" x-show="settings.deadlines.group !== 'due_kind'" :class="hasDeadlineDue(row.item) ? 'is-hard' : 'is-soft'" x-text="row.item.due_kind"></span>
                     </div>
-                    <span class="mt-deadline-desc" x-show="row.item.excerpt" x-text="cleanExcerpt(row.item.excerpt)"></span>
+                    <span class="mt-deadline-desc" x-show="row.item.excerpt" x-text="row.item.excerpt"></span>
                   </div>
                   <div class="mt-deadline-summary">
                     <span class="mt-badge mt-due" :class="dueClass(row.item)" :title="timeLeft(row.item)" x-text="deadlineTimeLeft(row.item)"></span>

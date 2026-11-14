@@ -35,7 +35,7 @@
                   <div class="mt-next" x-text="task.next_action"></div>
                 </template>
                 <template x-if="!task.next_action && task.excerpt">
-                  <div class="mt-next" x-text="cleanExcerpt(task.excerpt)"></div>
+                  <div class="mt-next" x-text="task.excerpt"></div>
                 </template>
                 <template x-if="task.kind === 'task' && hasTrackedTime(task)">
                   <div class="mt-time-line" x-text="savedTimeLabel(task)"></div>

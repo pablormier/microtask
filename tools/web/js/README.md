@@ -17,13 +17,16 @@ tests use that same loader.
 - `picker.js`: state and keyboard navigation for searchable option lists, shared
   by the card editor (project, topic, tags) and the toolbar filter chips. The host
   supplies `pickerRows`, `choosePickerRow`, `pickerMulti` and `pickerSelected`.
+- `metadata_editor.js`: shared `cardMetadataEditor` Alpine component used by
+  both capture and card detail.
 - `property_editor.js`: selected-card property values, dirty baseline, conflict
   state, validation and patch creation.
 - `content_editor.js`: inline content input, local persistence, preview, save
   state and editor errors.
-- `board.js`: Alpine components, selection, browser interactions and payload
-  application. Templates bind directly to each editor's state and actions;
-  `captureContext`, `propertyContext` and `contentContext` provide the adapters.
+- `filters_query.js`: toolbar filter facets, URL query sync, and collection query builder.
+- `draft_coordinator.js`: draft store wiring, editor context adapters, and draft recovery orchestration.
+- `card_detail.js`: card detail selection, history navigation, preview rendering, hover popovers, and dialog focus trapping.
+- `board.js`: Alpine `taskBoard()` component, lifecycle, polling, grouping, and payload application.
 
 Keep policy and clock access at the component boundary. Metadata initialization
 and reset share `normalizeMetadataValue`; it copies tags so editors cannot

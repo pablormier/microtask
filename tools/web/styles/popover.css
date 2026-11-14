@@ -1,0 +1,95 @@
+/* Card Reference Preview Popover */
+.mt-card-popover {
+  position: fixed;
+  z-index: 60;
+  width: 20.5rem;
+  max-width: calc(100vw - 24px);
+  padding: 10px 12px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface-raised);
+  box-shadow: var(--mt-shadow-dialog);
+  color: var(--mt-text);
+  font-family: var(--mt-font-family-sans);
+  pointer-events: auto;
+  line-height: 1.35;
+}
+
+.mt-card-popover-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mt-card-popover-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.mt-card-popover-header .mt-ref {
+  font-weight: 700;
+}
+
+.mt-card-popover-title {
+  margin: 2px 0;
+  color: var(--mt-text);
+  font-size: var(--mt-font-size-sm);
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+
+.mt-card-popover-next,
+.mt-card-popover-excerpt {
+  margin-top: 2px;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-sm);
+  line-height: 1.35;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mt-card-popover-label {
+  font-weight: 650;
+  color: var(--mt-text);
+}
+
+.mt-card-popover-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--mt-border);
+  font-size: var(--mt-font-size-xs);
+  color: var(--mt-text-muted);
+}
+
+.mt-card-popover-meta-item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.mt-content-load-status { color: var(--mt-text-muted); }
+.mt-content-load-error {
+  padding: var(--mt-space-3);
+  border: 1px solid var(--mt-danger-border);
+  border-radius: var(--mt-radius-sm);
+  background: var(--mt-danger-surface);
+  color: var(--mt-danger);
+}
+.mt-content-load-error p { margin: 0 0 var(--mt-space-3); }
+/* Timer menu: trim a forgotten timer to a duration, or discard it. */
+.mt-timer-menu .mt-card-menu-items { min-width: 220px; }
+.mt-timer-trim { display: flex; align-items: flex-end; gap: 6px; margin: 0; padding: 4px 6px 6px; border-bottom: 1px solid var(--mt-border); }
+.mt-timer-trim-label { display: grid; flex: 1; gap: 4px; margin: 0; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
+.mt-timer-trim-label .mt-field { margin: 0; }
+.mt-timer-trim .mt-button { flex: none; }
+.mt-card-menu-items > button.mt-timer-discard { color: var(--mt-danger, var(--mt-text)); }

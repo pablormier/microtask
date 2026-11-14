@@ -8,6 +8,62 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
   function setStatus(value) {
     onStatus(value);
   }
+  function draftBodyText(draft) {
+    return String(draft && (draft.body == null ? draft.text || "" : draft.body));
+  }
+  function applySavedFields(target, saved, { body, title, kind, metadata }) {
+    target.revision = saved.revision;
+    target.updated = saved.updated;
+    target.content_hash = saved.content_hash;
+    target._serverSaved = true;
+    target._savedBody = body;
+    target._savedTitle = title;
+    target._savedKind = kind;
+    target._savedMetadata = metadata;
+  }
+  function buildSavePayload(draft, { id, expectedRevision, expectedHash, captureId, created, targetRef }) {
+    const body = draftBodyText(draft);
+    const title = String(draft.title || "");
+    const payload = {
+      id,
+      expected_revision: expectedRevision,
+      kind: draft.kind || "note",
+      mode: draft.mode,
+      title,
+      body,
+      ...(draft.origin ? { origin: draft.origin } : {}),
+    };
+    if (draft.mode === "new") {
+      payload.capture_id = captureId;
+      payload.created = created;
+      Object.assign(payload, captureFields(draft));
+    } else if (expectedRevision === 0) {
+      payload.target_ref = targetRef;
+      payload.base_hash = draft.base_hash || "0".repeat(64);
+      payload.base_updated = draft.base_updated || "";
+    }
+    if (expectedRevision > 0) payload.expected_hash = expectedHash;
+    return payload;
+  }
+  async function runDraftAction(store, endpoint, draft, { ignoreTargetConflict = false } = {}) {
+    if (!draft || draft._orphanedLocal || !await store.flush(draft)) return null;
+    const id = draft.id || draft.draftId;
+    try {
+      const result = await store.post(endpoint, {
+        id,
+        expected_revision: Number(draft.revision || 0),
+        expected_hash: draft.content_hash,
+      });
+      store.drafts = store.drafts.filter(item => item.id !== id);
+      store.markClosed(draft);
+      return result;
+    } catch (error) {
+      if ((error.conflict || error.missing) && !(ignoreTargetConflict && error.targetConflict)) {
+        store.markForRecovery(draft);
+      }
+      throw error;
+    }
+  }
   return {
     drafts: initialDrafts.slice(),
 
@@ -39,7 +95,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         const localId = local && (local.id || local.draftId) || key.slice(prefix.length);
         if (!local || !localId || !local.kind || !local.mode) continue;
         if (local.mode === "edit" && local.origin !== "card-body") continue;
-        const body = String(local.body == null ? local.text || "" : local.body);
+        const body = draftBodyText(local);
         const current = this.drafts.find(draft => draft.id === localId);
         const title = String(local.title || "");
         const sameText = current && current.kind === (local.kind || "note") && current.mode === (local.mode || "new") &&
@@ -61,33 +117,26 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
           try { localStorage.setItem(key, JSON.stringify(local)); } catch (_) {}
           continue;
         }
-        const payload = {
-          id: localId, expected_revision: revision, kind: local.kind, mode: local.mode,
-          title, body, ...(local.origin ? { origin: local.origin } : {}),
-        };
-        Object.assign(payload, captureFields(local));
-        if (local.mode === "new") {
-          payload.capture_id = local.capture_id || local.captureId;
-          payload.created = local.created || local.createdAt;
-        } else if (revision === 0) {
+        let targetRef;
+        if (local.mode !== "new" && revision === 0) {
           const target = findTarget(local.ref, local.target);
           if (!target) continue;
-          payload.target_ref = target.ref;
-          payload.base_hash = local.base_hash || "0".repeat(64);
-          payload.base_updated = local.base_updated || "";
+          targetRef = target.ref;
         }
-        if (revision > 0) payload.expected_hash = current.content_hash;
+        const payload = buildSavePayload(local, {
+          id: localId,
+          expectedRevision: revision,
+          expectedHash: current && current.content_hash,
+          captureId: local.capture_id || local.captureId,
+          created: local.created || local.createdAt,
+          targetRef,
+        });
         try {
           const result = await this.post("/api/draft-save", payload);
           this.upsert(result.saved_draft);
-          local.revision = result.saved_draft.revision;
-          local.updated = result.saved_draft.updated;
-          local.content_hash = result.saved_draft.content_hash;
-          local._serverSaved = true;
-          local._savedBody = body;
-          local._savedTitle = String(local.title || "");
-          local._savedKind = local.kind || "note";
-          local._savedMetadata = this.metadataSnapshot(local);
+          applySavedFields(local, result.saved_draft, {
+            body, title, kind: payload.kind, metadata: this.metadataSnapshot(local),
+          });
           try { localStorage.setItem(key, JSON.stringify(local)); } catch (_) {}
           setStatus("Saved in workspace");
         } catch (_) {
@@ -130,8 +179,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
           });
           continue;
         }
-        const dismissed = this.wasDismissed(id);
-        const wasSaved = Boolean(local._serverSaved) || Number(local.revision || 0) > 0 || dismissed;
+        const wasSaved = Boolean(local._serverSaved) || Number(local.revision || 0) > 0;
         this.drafts.push({
           ...local, id, body, title,
           revision: Number(local.revision || 0),
@@ -221,17 +269,6 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       } catch (_) { return false; }
     },
 
-    clearLocal(draft, tombstone, requireTombstone = false) {
-      const key = this.storageKey(draft.workspaceKey, draft.draftId);
-      try { localStorage.setItem(key, JSON.stringify(tombstone)); } catch (_) {
-        if (requireTombstone) return false;
-      }
-      try {
-        localStorage.removeItem(key);
-        return true;
-      } catch (_) { return false; }
-    },
-
     markClosed(draft) {
       const id = draft && (draft.storageId || draft.sourceId || draft.id || draft.draftId);
       if (!id || !context().workspaceKey) return;
@@ -300,23 +337,20 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
 
     async recover(draft, newId, created) {
       const sourceId = draft.sourceId || draft.storageId || draft.id;
-      const payload = {
-        id: newId, expected_revision: 0, kind: draft.kind, mode: draft.mode,
-        title: String(draft.title || ""), body: String(draft.body == null ? draft.text || "" : draft.body),
-        ...(draft.origin ? { origin: draft.origin } : {}),
-        ...captureFields(draft),
-      };
-      if (draft.mode === "new") {
-        // Divergent text must not share an already-promoted capture's identity.
-        payload.capture_id = newId;
-        payload.created = draft.created || draft.createdAt || created;
-      } else {
+      let targetRef;
+      if (draft.mode !== "new") {
         const target = findTarget(null, draft.target) || findTarget(draft.ref);
         if (!target) throw new Error("The original item is unavailable. Keep this local copy and reconcile it manually.");
-        payload.target_ref = target.ref;
-        payload.base_hash = draft.base_hash || "0".repeat(64);
-        payload.base_updated = draft.base_updated || "";
+        targetRef = target.ref;
       }
+      const payload = buildSavePayload(draft, {
+        id: newId,
+        expectedRevision: 0,
+        // Divergent text must not share an already-promoted capture's identity.
+        captureId: newId,
+        created: draft.created || draft.createdAt || created,
+        targetRef,
+      });
       const result = await this.post("/api/draft-save", payload);
       this.markClosed({ ...draft, sourceId });
       this.removeRecovery(sourceId, draft);
@@ -325,36 +359,12 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       return result.saved_draft;
     },
 
-    async finish(draft) {
-      if (!draft || draft._orphanedLocal || !await this.flush(draft)) return null;
-      try {
-        const result = await this.post("/api/draft-finish", {
-          id: draft.id || draft.draftId, expected_revision: Number(draft.revision || 0),
-          expected_hash: draft.content_hash,
-        });
-        this.drafts = this.drafts.filter(item => item.id !== (draft.id || draft.draftId));
-        this.markClosed(draft);
-        return result;
-      } catch (error) {
-        if ((error.conflict || error.missing) && !error.targetConflict) this.markForRecovery(draft);
-        throw error;
-      }
+    finish(draft) {
+      return runDraftAction(this, "/api/draft-finish", draft, { ignoreTargetConflict: true });
     },
 
-    async discard(draft) {
-      if (!draft || draft._orphanedLocal || !await this.flush(draft)) return null;
-      try {
-        const result = await this.post("/api/draft-discard", {
-          id: draft.id || draft.draftId, expected_revision: Number(draft.revision || 0),
-          expected_hash: draft.content_hash,
-        });
-        this.drafts = this.drafts.filter(item => item.id !== (draft.id || draft.draftId));
-        this.markClosed(draft);
-        return result;
-      } catch (error) {
-        if (error.conflict || error.missing) this.markForRecovery(draft);
-        throw error;
-      }
+    discard(draft) {
+      return runDraftAction(this, "/api/draft-discard", draft);
     },
 
     schedule(draft, delay = 450) {
@@ -388,42 +398,25 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         }
         return true;
       }
-      const body = String(draft.body == null ? draft.text || "" : draft.body);
+      if (draft.mode === "new" && this.isEmpty(draft)) return false;
+      const body = draftBodyText(draft);
       const title = String(draft.title || "");
-      const payload = {
+      const expectedRevision = Number(draft.revision || 0);
+      const payload = buildSavePayload(draft, {
         id: draftId,
-        expected_revision: Number(draft.revision || 0),
-        kind: draft.kind || "note",
-        mode: draft.mode,
-        title,
-        body,
-        ...(draft.origin ? { origin: draft.origin } : {}),
-      };
-      if (draft.mode === "new") {
-        if (this.isEmpty(draft)) return false;
-        payload.capture_id = draft.capture_id || draft.captureId;
-        payload.created = draft.created || draft.createdAt;
-        Object.assign(payload, captureFields(draft));
-      } else if (Number(draft.revision || 0) === 0) {
-        payload.target_ref = draft.ref || (findTarget(null, draft.target) || {}).ref;
-        payload.base_hash = draft.base_hash || "0".repeat(64);
-        payload.base_updated = draft.base_updated || "";
-      }
-      if (Number(draft.revision || 0) > 0) payload.expected_hash = draft.content_hash;
+        expectedRevision,
+        expectedHash: draft.content_hash,
+        captureId: draft.capture_id || draft.captureId,
+        created: draft.created || draft.createdAt,
+        targetRef: draft.ref || (findTarget(null, draft.target) || {}).ref,
+      });
       const savedKind = payload.kind;
       const savedMetadata = this.metadataSnapshot({ ...payload, kind: savedKind });
       const request = (async () => {
         try {
           const result = await this.post("/api/draft-save", payload);
           const saved = result.saved_draft;
-          draft.revision = saved.revision;
-          draft.updated = saved.updated;
-          draft.content_hash = saved.content_hash;
-          draft._serverSaved = true;
-          draft._savedBody = body;
-          draft._savedTitle = title;
-          draft._savedKind = savedKind;
-          draft._savedMetadata = savedMetadata;
+          applySavedFields(draft, saved, { body, title, kind: savedKind, metadata: savedMetadata });
           this.upsert(saved);
           setStatus("Saved in workspace");
           this.saveLocal(draft);

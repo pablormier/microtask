@@ -170,3 +170,32 @@ function usageChoices(names, usage) {
   return names.map(name => ({ kind: "option", name, label: name, count: usage[name] || 0 }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
+
+function cardDueState(task, now) {
+  if (!task || !task.due) return "none";
+  const d = parseCardDueDate(task.due);
+  const diff = cardDueDayDifference(d, now);
+  if (d.getTime() < now) return "overdue";
+  if (diff === 0) return "today";
+  if (diff <= 7) return "next7";
+  return "future";
+}
+
+function formatDeadlineTimeLeft(dueValue, now) {
+  const due = parseCardDueDate(dueValue);
+  const days = cardDueDayDifference(due, now);
+  if (due.getTime() < now) {
+    return days < 0 ? Math.abs(days) + "d overdue" : "Overdue";
+  }
+  if (days === 0) return "Due today";
+  if (days === 1) return "Due tomorrow";
+  return days + " days left";
+}
+
+function formatProgressPercentLabel(pct) {
+  return pct >= 99.995 ? "100%" : pct.toFixed(2) + "%";
+}
+
+function cardPriorityClass(priority) {
+  return "priority-" + String(priority || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+}
