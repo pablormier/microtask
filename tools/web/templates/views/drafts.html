@@ -59,7 +59,7 @@
             <p class="mt-composer-recovery-warning" x-show="selectedWorkspaceDraft._orphanedLocal">This local copy no longer matches the workspace draft. Recover it as a separate draft or dismiss the local copy.</p>
             <p class="mt-composer-recovery-warning" x-show="draftNeedsReconciliation(selectedWorkspaceDraft)">This edit has no verified target baseline and needs manual reconciliation before it can be applied.</p>
             <label class="mt-task-draft-label" for="mt-task-draft-body">Task Markdown</label>
-            <textarea id="mt-task-draft-body" class="mt-field mt-composer-body mt-task-draft-body"
+            <textarea id="mt-task-draft-body" x-ref="taskDraftBody" class="mt-field mt-composer-body mt-task-draft-body"
                       x-model="selectedWorkspaceDraft.body" @input="persistSelectedDraft()"
                       :disabled="draftBusy" aria-label="Task Markdown"></textarea>
             <p class="mt-draft-workspace-status" role="status" aria-live="polite"

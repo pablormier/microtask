@@ -42,7 +42,7 @@ function createDraftCoordinator() {
         finishWorkspaceDraft: draft => this.finishWorkspaceDraft(draft),
         nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => {
-          const input = document.getElementById("mt-composer-body");
+          const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
           if (input) input.focus();
         }),
         confirm: message => typeof window !== "undefined" && typeof window.confirm === "function"
@@ -202,7 +202,7 @@ function createDraftCoordinator() {
         };
         this.captureComposer.open = true;
         this.$nextTick(() => {
-          const input = document.getElementById("mt-composer-body");
+          const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
           if (input) input.focus();
         });
         if (this.draftChangedFromSaved(this.captureComposer.draft)) {
@@ -222,7 +222,7 @@ function createDraftCoordinator() {
       this.taskDraftOpen = true;
       this.mode = "drafts";
       this.$nextTick(() => {
-        const input = document.getElementById("mt-task-draft-body");
+        const input = (this.$refs && this.$refs.taskDraftBody) || document.getElementById("mt-task-draft-body");
         if (input) input.focus();
       });
       if (this.draftChangedFromSaved(this.selectedWorkspaceDraft)) {
@@ -305,7 +305,7 @@ function createDraftCoordinator() {
         this.contentEditor.draft = null;
         this.contentEditor.text = "";
         this.contentEditor.error = "";
-        this.$nextTick(() => this.$refs.detailDialog?.querySelector('.mt-content-edit')?.focus());
+        this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
       }
       this.draftWorkspaceStatus = "Local recovery copy dismissed";
     },
@@ -378,7 +378,7 @@ function createDraftCoordinator() {
         if (draft === this.contentEditor.draft) {
           this.contentEditor.draft = null;
           this.contentEditor.text = "";
-          this.$nextTick(() => this.$refs.detailDialog?.querySelector('.mt-content-edit')?.focus());
+          this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
         } else if (draft === this.captureComposer.draft || (this.captureComposer.draft && this.captureComposer.draft.draftId === draft.id)) {
           const wasEdit = draft.mode === "edit";
           this.captureComposer.draft = null;

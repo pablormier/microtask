@@ -45,7 +45,7 @@
               <section class="mt-detail-content" aria-label="Card content">
                 <header class="mt-content-header">
                   <h3>Content</h3>
-                  <button type="button" class="mt-button mt-button-compact mt-content-edit" x-show="!contentEditor.draft" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
+                  <button type="button" class="mt-button mt-button-compact mt-content-edit" x-ref="contentEditButton" x-show="!contentEditor.draft" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
                 </header>
                 <p class="mt-content-load-status" role="status" x-show="detailLoading">Loading card content…</p>
                 <div class="mt-content-load-error" role="alert" x-show="detailError">

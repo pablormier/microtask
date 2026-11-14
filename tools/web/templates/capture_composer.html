@@ -39,7 +39,7 @@
                 <button type="button" class="mt-button mt-button-compact mt-button-quiet mt-composer-template" @click="captureComposer.applyMeetingTemplate(captureContext())"
                         x-show="captureComposer.draft && captureComposer.draft?.mode === 'new' && captureComposer.draft?.kind === 'note'" :disabled="captureComposer.saving">Insert meeting template</button>
               </div>
-              <textarea id="mt-composer-body" class="mt-field mt-composer-body" x-model="captureComposer.draft.text"
+              <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.text"
                         @input="captureComposer.persist(captureContext())" :disabled="captureComposer.saving"
                         :placeholder="!captureComposer.draft ? '' : (captureComposer.draft?.mode === 'edit' ? '' : (captureComposer.draft?.kind === 'task' ? 'What do you want to accomplish?' : 'Write a thought, observation, or meeting note…'))"
                         aria-label="Capture text"></textarea>

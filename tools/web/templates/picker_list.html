@@ -1,0 +1,13 @@
+          <ul class="mt-picker-list" role="listbox" :id="prefix + '-{field}-options'" x-show="pickerOpen('{field}')" x-cloak>
+            <template x-for="(row, index) in pickerRows('{field}')" :key="row.kind + ':' + row.name">
+              <li class="mt-picker-option" role="option" :id="prefix + '-{field}-option-' + index"
+                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
+                  {depth_style}:aria-selected="{selected_expr}"
+                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('{field}', row)">
+                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
+                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : {label_expr})"></span>
+                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
+              </li>
+            </template>
+            <li class="mt-picker-empty" x-show="!pickerRows('{field}').length">{empty_text}</li>
+          </ul>

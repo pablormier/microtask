@@ -69,20 +69,7 @@
                  @keydown.arrow-down.prevent="movePicker('project', 1)" @keydown.arrow-up.prevent="movePicker('project', -1)"
                  @keydown.enter="pickerEnter('project', $event)"
                  @keydown.escape="if (pickerOpen('project')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
-          <ul class="mt-picker-list" role="listbox" :id="prefix + '-project-options'" x-show="pickerOpen('project')" x-cloak>
-            <template x-for="(row, index) in pickerRows('project')" :key="row.kind + ':' + row.name">
-              <li class="mt-picker-option" role="option" :id="prefix + '-project-option-' + index"
-                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
-                  :aria-selected="String(row.kind === 'option' && row.name === value.project)"
-                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('project', row)">
-                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
-                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.name)"></span>
-                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
-              </li>
-            </template>
-            <li class="mt-picker-empty" x-show="!pickerRows('project').length">No projects yet. Type to create one.</li>
-          </ul>
-        </div>
+{picker_list_project}        </div>
         <small class="mt-metadata-field-error" x-show="fieldErrors.project" x-text="fieldErrors.project"></small>
       </div>
       <div class="mt-card-metadata-field">
@@ -97,21 +84,7 @@
                  @keydown.arrow-down.prevent="movePicker('topic', 1)" @keydown.arrow-up.prevent="movePicker('topic', -1)"
                  @keydown.enter="pickerEnter('topic', $event)"
                  @keydown.escape="if (pickerOpen('topic')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
-          <ul class="mt-picker-list" role="listbox" :id="prefix + '-topic-options'" x-show="pickerOpen('topic')" x-cloak>
-            <template x-for="(row, index) in pickerRows('topic')" :key="row.kind + ':' + row.name">
-              <li class="mt-picker-option" role="option" :id="prefix + '-topic-option-' + index"
-                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
-                  :style="row.depth ? { paddingLeft: (8 + row.depth * 14) + 'px' } : null"
-                  :aria-selected="String(row.kind === 'option' && row.name === value.topic)"
-                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('topic', row)">
-                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
-                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.label)"></span>
-                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
-              </li>
-            </template>
-            <li class="mt-picker-empty" x-show="!pickerRows('topic').length">No topics yet. Type a path such as learning/rust.</li>
-          </ul>
-        </div>
+{picker_list_topic}        </div>
         <small class="mt-metadata-field-error" x-show="fieldErrors.topic" x-text="fieldErrors.topic"></small>
       </div>
       <div class="mt-card-metadata-field mt-card-metadata-tags">
@@ -134,20 +107,7 @@
                    @keydown.backspace="if (!$event.target.value && value.tags.length) removeTag(value.tags[value.tags.length - 1])"
                    @keydown.escape="if (pickerOpen('tags')) { $event.preventDefault(); $event.stopPropagation(); closePicker(); }">
           </div>
-          <ul class="mt-picker-list" role="listbox" :id="prefix + '-tags-options'" x-show="pickerOpen('tags')" x-cloak>
-            <template x-for="(row, index) in pickerRows('tags')" :key="row.kind + ':' + row.name">
-              <li class="mt-picker-option" role="option" :id="prefix + '-tags-option-' + index"
-                  :class="{ 'is-active': picker.navigated && index === picker.active, 'is-create': row.kind === 'create', 'is-clear': row.kind === 'clear' }"
-                  :aria-selected="String(row.kind === 'option' && false)"
-                  @mousedown.prevent @mousemove="picker.active = index; picker.navigated = true" @click="choosePickerRow('tags', row)">
-                <span class="mt-picker-check"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>
-                <span class="mt-picker-name" x-text="row.kind === 'create' ? 'Create “' + row.name + '”' : (row.kind === 'clear' ? 'Clear' : row.name)"></span>
-                <span class="mt-picker-count" x-show="row.count" x-text="row.count" :title="row.count === 1 ? 'Used on 1 card' : 'Used on ' + row.count + ' cards'"></span>
-              </li>
-            </template>
-            <li class="mt-picker-empty" x-show="!pickerRows('tags').length">Type to add a tag.</li>
-          </ul>
-        </div>
+{picker_list_tags}        </div>
         <small class="mt-metadata-field-error" x-show="fieldErrors.tags" x-text="fieldErrors.tags"></small>
       </div>
     </div>
