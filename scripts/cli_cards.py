@@ -873,7 +873,7 @@ def _run_card_query(args: argparse.Namespace, *, search: bool, ws: Workspace | N
 
     if getattr(args, "compact", False):
         for item in selected:
-            print(json.dumps(item_compact_json_record(item, ws=resolved), ensure_ascii=False))
+            print(json.dumps(item_compact_json_record(item), ensure_ascii=False))
         return 0
     if args.full:
         print(json.dumps([item_read_record(item, ws=resolved) for item in selected], ensure_ascii=False))

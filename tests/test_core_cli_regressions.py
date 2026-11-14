@@ -533,6 +533,14 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                                  "Newest task")
                 none = self.run_mt(*base, "--status", "done", "--full")
                 self.assertEqual(json.loads(none.stdout), [])
+                compact = self.run_mt(*base, "--limit", "2", "--compact")
+                self.assertEqual(compact.returncode, 0, compact.stderr)
+                compact_records = [json.loads(line) for line in compact.stdout.splitlines()]
+                self.assertEqual([r["title"] for r in compact_records], ["Old task", "Recent task"])
+                self.assertEqual([r["ref"] for r in compact_records], refs)
+                self.assertTrue({"ref", "id", "kind", "title", "status", "priority", "project", "topic", "due", "tags"}.issubset(
+                    compact_records[0]
+                ))
                 conflict = self.run_mt(*base, "--full", "--compact")
                 self.assertEqual(conflict.returncode, 2)
                 self.assertIn("not allowed with argument", conflict.stderr)
