@@ -71,10 +71,11 @@ outline for the review content. Omit irrelevant or empty subsections and do
 not fabricate bibliographic details.
 
 Save approved review content through `./mt note --title "Paper review: TITLE"
---file -`, supplying the body on stdin. Append context with `./mt edit REF
---body --append --file -` when needed. Use UTF-8 files in the run
-directory and pass their paths with `--file` only when a draft needs inspection,
-revision, or reuse.
+--tag paper-review --file -`, supplying the body on stdin (include any
+additional `--tag`, `--topic`, or `--project` options agreed with the user).
+Append context with `./mt edit REF --body --append --file -` when needed. Use
+UTF-8 files in the run directory and pass their paths with `--file` only when a
+draft needs inspection, revision, or reuse.
 
 Keep the original user request and supplied context verbatim.
 Follow the operating skill's input rules; the CLI supplies the card structure.
