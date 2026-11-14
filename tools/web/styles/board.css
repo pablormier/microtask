@@ -60,6 +60,12 @@
   justify-content: space-between;
   gap: var(--mt-space-2);
 }
+.mt-card-header-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .mt-card-header .mt-priority { flex-shrink: 0; }
 .mt-ref {
   color: var(--mt-text-muted);

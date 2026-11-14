@@ -596,6 +596,25 @@ view_labels:
         self.assertIn('if (months >= 1) parts.push(months + "mo");', rendered)
         self.assertIn('if (weeks >= 1) parts.push(weeks + "w");', rendered)
 
+    def test_cards_render_minimal_deadline_progress_bar(self) -> None:
+        self.write_task(
+            "active",
+            "2026-01-06-120000-progress-window",
+            "Windowed task",
+            "progress window",
+            due="2026-08-10",
+            due_kind="deadline",
+        )
+        self.render_dashboard()
+        rendered = self.output.read_text(encoding="utf-8")
+        self.assertIn('x-if="showCardDeadlineProgress(task)"', rendered)
+        self.assertIn("mt-progress-ring", rendered)
+        self.assertIn("mt-progress-ring-fill", rendered)
+        self.assertIn(':title="deadlineProgressTitle(task)"', rendered)
+        self.assertIn("stroke-dashoffset:' + (100 - deadlineProgressPercent(task)) + ';--mt-deadline-elapsed:' + deadlineProgressPercent(task) + '%'", rendered)
+        self.assertIn('role="progressbar" :aria-label="\'Time elapsed toward \' + task.title"', rendered)
+        self.assertIn("return Boolean(this.showDeadlineProgress && task && task.due && task.status !== \"done\");", rendered)
+
     def test_deadlines_view_hides_year_progress_bar_via_local_config(self) -> None:
         (self.root / "mt-policy.local.yaml").write_text(
             "rules:\n  show_year_progress: false\n",

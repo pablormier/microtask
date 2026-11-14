@@ -792,12 +792,20 @@ function taskBoard() {
       return pct >= 99.995 ? "100%" : pct.toFixed(2) + "%";
     },
 
+    deadlineProgressTitle(item) {
+      return this.deadlineProgressLabel(item) + " · " + this.deadlineTimeLeft(item);
+    },
+
     isHardKind(kind) {
       return kind === "deadline";
     },
 
     hasDeadlineDue(task) {
       return this.isHardKind(task && task.due_kind);
+    },
+
+    showCardDeadlineProgress(task) {
+      return Boolean(this.showDeadlineProgress && task && task.due && task.status !== "done");
     },
 
     // ---------------------------------------------------------------------------

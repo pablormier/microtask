@@ -2,7 +2,17 @@
                        :class="cardClass(task)"
                        @click="select(task, $event)" @keydown.enter.stop.prevent="select(task, $event)" @keydown.space.stop.prevent="select(task, $event)">
                 <div class="mt-card-header">
-                  <div class="mt-ref" x-text="task.ref"></div>
+                  <div class="mt-card-header-start">
+                    <div class="mt-ref" x-text="task.ref"></div>
+                    <template x-if="showCardDeadlineProgress(task)">
+                      <span class="mt-progress-ring" :title="deadlineProgressTitle(task)" role="progressbar" :aria-label="'Time elapsed toward ' + task.title" :aria-valuenow="deadlineProgressPercent(task)" aria-valuemin="0" aria-valuemax="100">
+                        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                          <circle class="mt-progress-ring-track" cx="10" cy="10" r="7.5"/>
+                          <circle class="mt-progress-ring-fill" cx="10" cy="10" r="7.5" pathLength="100" :style="'stroke-dashoffset:' + (100 - deadlineProgressPercent(task)) + ';--mt-deadline-elapsed:' + deadlineProgressPercent(task) + '%'"/>
+                        </svg>
+                      </span>
+                    </template>
+                  </div>
                   <div class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" x-text="task.priority"></div>
                 </div>
                 <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-show="showCardStatus(task) && task.status" x-text="statusText(task.status)"></span>

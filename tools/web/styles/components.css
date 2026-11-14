@@ -540,6 +540,32 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
 .mt-extra-summary:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 2px; }
 .mt-progress-track { height: 3px; border-radius: var(--mt-radius-pill); background: var(--mt-surface-inset); overflow: hidden; }
 .mt-progress-fill { height: 100%; border-radius: inherit; background: var(--mt-progress-gradient); transition: width 1s linear; }
+.mt-progress-ring {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+}
+.mt-progress-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.mt-progress-ring-track,
+.mt-progress-ring-fill {
+  fill: none;
+  stroke-width: 2.5;
+}
+.mt-progress-ring-track { stroke: var(--mt-surface-inset); }
+.mt-progress-ring-fill {
+  stroke: color-mix(in srgb, var(--mt-accent), var(--mt-danger) var(--mt-deadline-elapsed, 0%));
+  stroke-dasharray: 100;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
 .mt-composer-action-status, .mt-sync-warning { color: var(--mt-text-muted); }
 .mt-composer-action-status.is-error { color: var(--mt-danger); }
 .mt-card:focus-visible, .mt-deadline-row:focus-visible, .mt-deadline-progress:focus-visible {
