@@ -97,7 +97,11 @@ function renderMarkdown(task, source) {
   if (typeof window !== "undefined" && window.renderMathInElement &&
       typeof document !== "undefined" && typeof document.createElement === "function") {
     const container = document.createElement("div");
-    container.innerHTML = sanitized;
+    if (typeof Element !== "undefined" && "setHTML" in Element.prototype) {
+      container.setHTML(sanitized);
+    } else {
+      container.innerHTML = sanitized;
+    }
     window.renderMathInElement(container, {
       delimiters: [
         { left: "$$", right: "$$", display: true },
