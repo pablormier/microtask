@@ -315,8 +315,6 @@ button.mt-draft-row:disabled { opacity: .58; cursor: not-allowed; box-shadow: no
   font-variant-numeric: tabular-nums;
   font-weight: 750;
 }
-textarea.mt-field.mt-task-draft-body { min-height: 48vh; font-family: var(--mt-font-family-mono); font-size: var(--mt-font-size-sm); }
-.mt-task-draft-label { margin: 8px 0 5px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-weight: 650; }
 .mt-card-date { display: block; margin-top: 4px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 70rem) {
@@ -335,5 +333,4 @@ textarea.mt-field.mt-task-draft-body { min-height: 48vh; font-family: var(--mt-f
   .mt-draft-search { flex-basis: 100%; margin-left: 0; }
   button.mt-draft-row { align-items: stretch; flex-direction: column; gap: 8px; padding: 10px 11px; }
   .mt-draft-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; justify-items: start; }
-  .mt-task-draft-body { min-height: 42vh; }
 }

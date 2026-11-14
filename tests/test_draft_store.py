@@ -4,7 +4,11 @@ import subprocess
 import unittest
 
 
-SOURCE = Path(__file__).resolve().parents[1] / "tools/web/js/draft_store.js"
+ROOT = Path(__file__).resolve().parents[1]
+SOURCES = [
+    ROOT / "tools/web/js/card_helpers.js",
+    ROOT / "tools/web/js/draft_store.js",
+]
 HARNESS = r"""
 const assert = require('assert/strict');
 const entries = new Map();
@@ -44,7 +48,7 @@ class DraftStoreTests(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is unavailable")
-        script = SOURCE.read_text() + HARNESS + "\n(async () => {\n" + scenario + "\n})().catch(error => {console.error(error);process.exitCode=1;});"
+        script = "\n".join(path.read_text() for path in SOURCES) + HARNESS + "\n(async () => {\n" + scenario + "\n})().catch(error => {console.error(error);process.exitCode=1;});"
         result = subprocess.run([node], input=script, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 

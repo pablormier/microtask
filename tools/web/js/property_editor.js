@@ -13,16 +13,10 @@ function createPropertyEditor() {
     hydrated: false,
 
     values(task, defaults) {
+      const core = normalizeMetadataValue(task, { task_defaults: defaults });
       return {
         title: task && task.title || "",
-        status: task && task.status || defaults.status,
-        priority: task && task.priority || defaults.priority,
-        type: task && task.type || defaults.type,
-        project: task && task.project || "",
-        topic: task && task.topic || "",
-        tags: task && Array.isArray(task.tags) ? task.tags.slice() : [],
-        due: task && task.due || null,
-        due_kind: task && task.due_kind || null,
+        ...core,
         next_action: task && task.next_action || "",
         processing_instructions: task && task.processing_instructions || "",
       };
@@ -30,15 +24,11 @@ function createPropertyEditor() {
 
     comparable(value) {
       const source = value || {};
+      const core = metadataCoreObject(source);
+      delete core.status;
       return JSON.stringify({
         title: source.title || "",
-        priority: source.priority || null,
-        type: source.type || null,
-        project: source.project || null,
-        topic: source.topic || null,
-        tags: Array.isArray(source.tags) ? source.tags : [],
-        due: source.due || null,
-        due_kind: source.due_kind || null,
+        ...core,
         next_action: source.next_action || "",
         processing_instructions: source.processing_instructions || "",
       });

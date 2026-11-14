@@ -35,15 +35,12 @@ function createCaptureComposer() {
     },
 
     newTaskOptions(ctx) {
-      const statuses = ctx.taskStatuses;
       // A board filtered to one project or topic files new cards there too.
       const scope = ctx.scopeDefaults || {};
-      return {
-        status: statuses.includes(ctx.taskDefaults.status) ? ctx.taskDefaults.status : (statuses[0] || "inbox"),
-        priority: ctx.taskDefaults.priority,
-        type: ctx.taskDefaults.type,
-        project: scope.project || "", topic: scope.topic || "", tags: [], due: null, due_kind: null,
-      };
+      return normalizeMetadataValue(
+        { project: scope.project || "", topic: scope.topic || "" },
+        { task_statuses: ctx.taskStatuses, task_defaults: ctx.taskDefaults },
+      );
     },
 
     setKind(ctx, kind) {

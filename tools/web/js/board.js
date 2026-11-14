@@ -86,8 +86,6 @@ function taskBoard() {
     get drafts() { return this.getDraftStore().drafts; },
     set drafts(value) { this.getDraftStore().drafts = value; },
     draftSearch: "",
-    selectedWorkspaceDraft: null,
-    taskDraftOpen: false,
     draftWorkspaceStatus: "",
     draftBusy: false,
     syncWarning: "",

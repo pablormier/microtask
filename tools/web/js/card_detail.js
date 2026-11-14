@@ -5,10 +5,6 @@ function createDetailController() {
       this.trapDialogFocus(event, this.$refs.composerDialog);
     },
 
-    trapTaskDraftFocus(event) {
-      this.trapDialogFocus(event, this.$refs.taskDraftDialog);
-    },
-
     trapDetailFocus(event) {
       this.trapDialogFocus(event, this.$refs.detailDialog);
     },

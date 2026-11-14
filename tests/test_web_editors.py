@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
+    ROOT / "tools/web/js/card_helpers.js",
     ROOT / "tools/web/js/capture_composer.js",
     ROOT / "tools/web/js/property_editor.js",
     ROOT / "tools/web/js/content_editor.js",

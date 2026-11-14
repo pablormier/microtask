@@ -230,18 +230,11 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       if (draft && draft.mode === "edit") return "";
       const options = draft && draft.taskOptions && typeof draft.taskOptions === "object"
         ? draft.taskOptions : draft || {};
-      const hasTaskFields = ["status", "priority", "type", "project", "topic", "tags", "due", "due_kind"]
+      const hasTaskFields = METADATA_FIELDS
         .some(field => Object.prototype.hasOwnProperty.call(options, field));
       if (!hasTaskFields) return "";
       return JSON.stringify({
-        status: options.status || null,
-        priority: options.priority || null,
-        type: options.type || null,
-        project: options.project || null,
-        topic: options.topic || null,
-        tags: Array.isArray(options.tags) ? options.tags : [],
-        due: options.due || null,
-        due_kind: options.due_kind || null,
+        ...metadataCoreObject(options),
         instructions: String(draft && draft.instructions || ""),
       });
     },

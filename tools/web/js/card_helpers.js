@@ -112,10 +112,31 @@ function elapsedPercentage(start, end, now) {
   return Math.max(0, Math.min(100, ((current - s) / (e - s)) * 100));
 }
 
+const METADATA_FIELDS = ["status", "priority", "type", "project", "topic", "tags", "due", "due_kind"];
+
+function metadataCoreObject(source) {
+  const input = source && typeof source === "object" ? source : {};
+  return {
+    status: input.status || null,
+    priority: input.priority || null,
+    type: input.type || null,
+    project: input.project || null,
+    topic: input.topic || null,
+    tags: Array.isArray(input.tags) ? input.tags.slice() : [],
+    due: input.due || null,
+    due_kind: input.due_kind || null,
+  };
+}
+
 function normalizeMetadataValue(initial, config) {
   const source = initial && typeof initial === "object" ? initial : {};
+  const statuses = Array.isArray(config.task_statuses) ? config.task_statuses : [];
+  const defaultStatus = config.task_defaults?.status;
+  const fallbackStatus = statuses.length
+    ? (statuses.includes(defaultStatus) ? defaultStatus : statuses[0])
+    : (defaultStatus || "inbox");
   return {
-    status: source.status || config.task_defaults?.status || (config.task_statuses || [])[0] || "inbox",
+    status: source.status || fallbackStatus,
     priority: source.priority || config.task_defaults?.priority || "none",
     type: source.type || config.task_defaults?.type || "task",
     project: source.project || "",

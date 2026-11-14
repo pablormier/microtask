@@ -178,74 +178,54 @@ function createDraftCoordinator() {
         }
       }
       this.draftWorkspaceStatus = "Saved in workspace";
-      if (draft.kind === "note" || draft.mode === "new") {
-        const target = this.tasks.find(item => item.path === draft.target);
-        const body = String(draft.body || "");
-        this.captureComposer.draft = {
-          version: 1, workspaceKey: this.workspaceKey, mode: draft.mode,
-          kind: draft.kind || "note",
-          taskOptions: this.taskOptionsFromDraft(draft),
-          captureId: String(draft.capture_id || ""), createdAt: String(draft.created || ""),
-          title: String(draft.title || ""), text: body,
-          instructions: String(draft.instructions || ""), ref: target ? target.ref : "",
-          originalText: body, draftId: draft.sourceId || draft.id, revision: Number(draft.revision),
-          content_hash: draft.content_hash || "", _serverSaved: Boolean(draft._serverSaved || Number(draft.revision) > 0),
-          _orphanedLocal: Boolean(draft._orphanedLocal), sourceId: draft.sourceId || draft.id,
-          base_hash: draft.base_hash || "",
-          base_updated: draft.base_updated || "",
-          _savedBody: Object.prototype.hasOwnProperty.call(draft, "_savedBody") ? draft._savedBody : body,
-          _savedTitle: Object.prototype.hasOwnProperty.call(draft, "_savedTitle") ? draft._savedTitle : String(draft.title || ""),
-          _savedKind: Object.prototype.hasOwnProperty.call(draft, "_savedKind") ? draft._savedKind : (draft.kind || "note"),
-          _savedMetadata: Object.prototype.hasOwnProperty.call(draft, "_savedMetadata")
-            ? draft._savedMetadata
-            : this.draftMetadataSnapshot({ taskOptions: this.taskOptionsFromDraft(draft) }),
-        };
-        this.captureComposer.open = true;
-        this.$nextTick(() => {
-          const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
-          if (input) input.focus();
-        });
-        if (this.draftChangedFromSaved(this.captureComposer.draft)) {
-          this.scheduleDraftSave(this.captureComposer.draft, 0);
-        }
-        return;
-      }
-      this.selectedWorkspaceDraft = {
-        ...draft,
-        id: draft.sourceId || draft.id,
-        _savedBody: Object.prototype.hasOwnProperty.call(draft, "_savedBody") ? draft._savedBody : String(draft.body || ""),
+      const target = this.tasks.find(item => item.path === draft.target);
+      const body = String(draft.body || "");
+      this.captureComposer.draft = {
+        version: 1, workspaceKey: this.workspaceKey, mode: draft.mode,
+        kind: draft.kind || "note",
+        taskOptions: this.taskOptionsFromDraft(draft),
+        captureId: String(draft.capture_id || ""), createdAt: String(draft.created || ""),
+        title: String(draft.title || ""), text: body,
+        instructions: String(draft.instructions || ""), ref: target ? target.ref : "",
+        originalText: body, draftId: draft.sourceId || draft.id, revision: Number(draft.revision),
+        content_hash: draft.content_hash || "", _serverSaved: Boolean(draft._serverSaved || Number(draft.revision) > 0),
+        _orphanedLocal: Boolean(draft._orphanedLocal), sourceId: draft.sourceId || draft.id,
+        base_hash: draft.base_hash || "",
+        base_updated: draft.base_updated || "",
+        _savedBody: Object.prototype.hasOwnProperty.call(draft, "_savedBody") ? draft._savedBody : body,
         _savedTitle: Object.prototype.hasOwnProperty.call(draft, "_savedTitle") ? draft._savedTitle : String(draft.title || ""),
-          _savedKind: Object.prototype.hasOwnProperty.call(draft, "_savedKind") ? draft._savedKind : (draft.kind || "task"),
-          _savedMetadata: Object.prototype.hasOwnProperty.call(draft, "_savedMetadata")
-            ? draft._savedMetadata : this.draftMetadataSnapshot(draft),
+        _savedKind: Object.prototype.hasOwnProperty.call(draft, "_savedKind") ? draft._savedKind : (draft.kind || "note"),
+        _savedMetadata: Object.prototype.hasOwnProperty.call(draft, "_savedMetadata")
+          ? draft._savedMetadata
+          : this.draftMetadataSnapshot({ taskOptions: this.taskOptionsFromDraft(draft) }),
       };
-      this.taskDraftOpen = true;
-      this.mode = "drafts";
+      this.captureComposer.open = true;
       this.$nextTick(() => {
-        const input = (this.$refs && this.$refs.taskDraftBody) || document.getElementById("mt-task-draft-body");
+        const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
         if (input) input.focus();
       });
-      if (this.draftChangedFromSaved(this.selectedWorkspaceDraft)) {
-        this.scheduleDraftSave(this.selectedWorkspaceDraft, 0);
+      if (this.draftChangedFromSaved(this.captureComposer.draft)) {
+        this.scheduleDraftSave(this.captureComposer.draft, 0);
       }
     },
 
     taskOptionsFromDraft(draft) {
       const nested = draft && (draft.taskOptions || draft.task_options);
       const saved = nested && typeof nested === "object" ? nested : {};
-      const status = draft && draft.status || saved.status || this.taskDefaults.status;
-      const due = draft && Object.prototype.hasOwnProperty.call(draft, "due") ? draft.due : saved.due;
-      const dueKind = draft && Object.prototype.hasOwnProperty.call(draft, "due_kind") ? draft.due_kind : saved.due_kind;
-      return {
-        status: status || this.taskStatuses[0] || "inbox",
-        priority: draft && draft.priority || saved.priority || this.taskDefaults.priority,
-        type: draft && draft.type || saved.type || this.taskDefaults.type,
-        project: draft && draft.project || saved.project || "",
-        topic: draft && draft.topic || saved.topic || "",
-        tags: Array.isArray(draft && draft.tags) ? draft.tags.slice() : (Array.isArray(saved.tags) ? saved.tags.slice() : []),
-        due: due || null,
-        due_kind: dueKind || null,
+      const source = {
+        status: draft && draft.status || saved.status,
+        priority: draft && draft.priority || saved.priority,
+        type: draft && draft.type || saved.type,
+        project: draft && draft.project || saved.project,
+        topic: draft && draft.topic || saved.topic,
+        tags: Array.isArray(draft && draft.tags) ? draft.tags : saved.tags,
+        due: draft && Object.prototype.hasOwnProperty.call(draft, "due") ? draft.due : saved.due,
+        due_kind: draft && Object.prototype.hasOwnProperty.call(draft, "due_kind") ? draft.due_kind : saved.due_kind,
       };
+      return normalizeMetadataValue(source, {
+        task_statuses: this.taskStatuses,
+        task_defaults: this.taskDefaults,
+      });
     },
 
     draftMetadataSnapshot(draft) {
@@ -258,31 +238,10 @@ function createDraftCoordinator() {
 
     captureDraftFields(draft) {
       if (!draft || draft.mode !== "new") return {};
-      const options = this.taskOptionsFromDraft(draft);
       return {
-        status: options.status || null,
-        priority: options.priority || null,
-        type: options.type || null,
-        project: options.project || null,
-        topic: options.topic || null,
-        tags: options.tags || [],
-        due: options.due || null,
-        due_kind: options.due_kind || null,
+        ...metadataCoreObject(this.taskOptionsFromDraft(draft)),
         instructions: String(draft.instructions || ""),
       };
-    },
-
-    closeTaskDraft() {
-      this.taskDraftOpen = false;
-      this.selectedWorkspaceDraft = null;
-      this.mode = "drafts";
-    },
-
-    persistSelectedDraft() {
-      const draft = this.selectedWorkspaceDraft;
-      if (!draft) return;
-      this.saveDraftLocally(draft);
-      if (!draft._orphanedLocal) this.scheduleDraftSave(draft);
     },
 
     saveDraftLocally(draft) {
@@ -300,7 +259,6 @@ function createDraftCoordinator() {
         this.captureComposer.draft = null;
         this.captureComposer.open = false;
       }
-      if (this.selectedWorkspaceDraft === draft) this.closeTaskDraft();
       if (this.contentEditor.draft === draft) {
         this.contentEditor.draft = null;
         this.contentEditor.text = "";
@@ -329,13 +287,6 @@ function createDraftCoordinator() {
             _savedMetadata: this.draftMetadataSnapshot(this.captureComposer.draft),
           });
           this.saveDraftLocally({ ...this.captureComposer.draft, id: newId, body: this.captureComposer.draft.text });
-        }
-        if (this.selectedWorkspaceDraft && (this.selectedWorkspaceDraft.sourceId === sourceId || this.selectedWorkspaceDraft.id === sourceId)) {
-          this.selectedWorkspaceDraft = { ...saved,
-            _savedBody: saved.body, _savedTitle: saved.title || "",
-            _savedKind: saved.kind,
-            _savedMetadata: this.draftMetadataSnapshot(saved) };
-          this.saveDraftLocally(this.selectedWorkspaceDraft);
         }
         if (this.contentEditor.draft === draft) {
           this.contentEditor.draft = { ...saved,
@@ -384,9 +335,7 @@ function createDraftCoordinator() {
           this.captureComposer.draft = null;
           this.captureComposer.persisted = false;
           this.captureComposer.close(this.captureContext());
-          if (wasEdit) this.mode = "notes";
-        } else {
-          this.closeTaskDraft();
+          if (wasEdit) this.mode = draft.kind === "task" ? "tasks" : "notes";
         }
         this.draftWorkspaceStatus = "";
         this.captureComposer.recoveryWarning = "";
@@ -436,9 +385,6 @@ function createDraftCoordinator() {
         if (this.captureComposer.draft && (this.captureComposer.draft.draftId === draft.id || this.captureComposer.draft.draftId === draft.draftId)) {
           this.captureComposer.draft = null;
           this.captureComposer.open = false;
-        }
-        if (this.selectedWorkspaceDraft && this.selectedWorkspaceDraft.id === (draft.id || draft.draftId)) {
-          this.closeTaskDraft();
         }
         this.draftWorkspaceStatus = "Draft discarded";
       } catch (error) {
