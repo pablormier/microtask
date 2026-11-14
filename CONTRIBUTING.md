@@ -43,8 +43,8 @@ Before finishing, run the relevant tests (see the [test guide](tests/README.md))
 ## Testing interactive features
 
 Human-only modes (`mt capture`, editor modes, `mt show`, `mt web`) may be
-driven by agents only in an isolated scratch workspace with fixture data and
-auto-sync disabled. Allocate it with `./mt scratch`.
+driven by agents only in an isolated temporary workspace (e.g. via `mktemp -d`)
+with fixture data and auto-sync disabled.
 
 ## Web UI
 

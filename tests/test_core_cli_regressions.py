@@ -130,24 +130,6 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
     def run_mt(self, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
         return support.run_cli(self.root, *args, input_text=input_text, env=self.env)
 
-    def test_scratch_allocates_unique_directories_without_creating_cards(self) -> None:
-        plain = self.run_mt("scratch")
-        self.assertEqual(plain.returncode, 0, plain.stderr)
-        first = Path(plain.stdout.strip())
-
-        structured = self.run_mt("scratch", "--json")
-        self.assertEqual(structured.returncode, 0, structured.stderr)
-        second = Path(json.loads(structured.stdout)["path"])
-
-        for path in (first, second):
-            self.assertTrue(path.is_absolute())
-            self.assertEqual(path.parent, (self.root / ".mt" / "scratch").resolve())
-            self.assertTrue(path.is_dir())
-            self.assertEqual(list(path.iterdir()), [])
-        self.assertNotEqual(first, second)
-        self.assertEqual(list(card_files(self.root, "task")), [])
-        self.assertEqual(list(card_files(self.root, "note")), [])
-
     def test_invalid_commands_never_capture_or_initialize_workspace_data(self) -> None:
         def snapshot() -> dict[str, bytes]:
             return {path.relative_to(self.root).as_posix(): path.read_bytes()

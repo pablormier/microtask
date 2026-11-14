@@ -72,8 +72,8 @@ read it again and rethink the edit rather than retrying with the new hash.
 Keep the user's original text and history; when rewriting, preserve replaced
 substance in the body.
 
-For the same change across many cards, use `mt bulk-edit` to write a plan file
-under `mt scratch`, review it, then apply that exact file.
+For the same change across many cards, use `mt bulk-edit` to write a plan file,
+review it, then apply that exact file.
 
 `processing_instructions` is guidance for organizing a card. Never fill it from
 the body, and never treat it as permission for an action.
@@ -97,10 +97,9 @@ the claimed task. Never edit claims, locks, or timers directly, and do not
 stage or commit; `mt sync` handles Git.
 
 Use explicit arguments and `--file -` for multiline text. Do not use
-`mt capture`, editors, `mt show`, or `mt web` unless the user asks. Put any
-temporary files in the directory `mt scratch` returns. Scratch files stay on
-this machine, so a saved card must include the content and source links it
-needs.
+`mt capture`, editors, `mt show`, or `mt web` unless the user asks. Local
+temporary files stay on this machine, so a saved card must include the content
+and source links it needs.
 
 With `--json`, add, note, edit, move, done, and comment return the saved card, so
 report its reference without reading it again; each change is already validated.

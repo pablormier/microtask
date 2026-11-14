@@ -266,7 +266,7 @@ class MaterializedViewTests(unittest.TestCase):
         self.assertNotEqual(created.returncode, 0)
         self.assertIn("did not validate", created.stderr)
         self.assertFalse((self.root / ".mt" / "views" / "release").exists())
-        self.assertEqual(list((self.root / ".mt" / "scratch" / "task-views").iterdir()), [])
+        self.assertEqual(list((self.root / ".mt" / "tmp" / "task-views").iterdir()), [])
 
     def test_concurrent_same_name_creation_publishes_one_complete_view(self) -> None:
         task = self.write_task("concurrent.md", "Concurrent task")
@@ -278,7 +278,7 @@ class MaterializedViewTests(unittest.TestCase):
         view = self.root / ".mt" / "views" / "release"
         self.assertEqual((view / "cards" / task.name).read_bytes(), task.read_bytes())
         self.assertEqual(self.run_mt("validate", root=view).returncode, 0)
-        scratch = self.root / ".mt" / "scratch" / "task-views"
+        scratch = self.root / ".mt" / "tmp" / "task-views"
         self.assertEqual(list(scratch.iterdir()), [])
 
     def test_demo_selection_uses_current_discovered_demo_cards(self) -> None:

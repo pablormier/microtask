@@ -16,7 +16,6 @@ from cli_admin import (
     command_repo_list,
     command_repo_remove,
     command_run,
-    command_scratch,
     command_skills_install,
     command_skills_uninstall,
     command_update,
@@ -137,10 +136,6 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
                                     description="Show effective workspace policy in a readable format, or use --json for automation.")
     policy_command.add_argument("--json", dest="as_json", action="store_true", help="print effective policy as JSON")
     policy_command.set_defaults(func=command_policy)
-
-    scratch = sub.add_parser("scratch", help="create a private scratch directory in the selected workspace")
-    scratch.add_argument("--json", dest="as_json", action="store_true", help="print the absolute directory path as JSON")
-    scratch.set_defaults(func=command_scratch)
 
     repo = sub.add_parser("repo", help="manage machine-local repository aliases")
     repo_sub = repo.add_subparsers(dest="repo_command", required=True)

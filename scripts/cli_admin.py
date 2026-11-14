@@ -339,18 +339,6 @@ def command_policy(args: argparse.Namespace) -> int:
     return 0
 
 
-def command_scratch(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    """Allocate a private working directory in the selected workspace."""
-    parent = _ws(ws).root / ".mt" / "scratch"
-    parent.mkdir(parents=True, exist_ok=True)
-    path = Path(tempfile.mkdtemp(prefix="run-", dir=parent)).resolve()
-    if args.as_json:
-        print(json.dumps({"path": str(path)}))
-    else:
-        print(path)
-    return 0
-
-
 def view_name_from_args(args: argparse.Namespace, query: card_query.Query) -> str:
     supplied = getattr(args, "name", None)
     source_text = query.text or next(iter(query.project or query.tag), None)
@@ -459,7 +447,7 @@ def create_view(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         print(f"error: view already exists: {destination}", file=sys.stderr)
         return 1
 
-    work_parent = resolved.root / ".mt" / "scratch" / "task-views"
+    work_parent = resolved.scratch_root() / "task-views"
     work_parent.mkdir(parents=True, exist_ok=True)
     work_root = Path(tempfile.mkdtemp(prefix="run-", dir=work_parent))
     try:

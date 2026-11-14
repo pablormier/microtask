@@ -8,6 +8,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -24,8 +25,7 @@ DOWN = b"\x1b[B"
 class CaptureCLITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        result = subprocess.run([str(ROOT / "mt"), "scratch"], capture_output=True, text=True, check=True)
-        cls.scratch = Path(result.stdout.strip())
+        cls.scratch = Path(tempfile.mkdtemp(prefix="mt-capture-test-"))
 
     @classmethod
     def tearDownClass(cls):

@@ -208,7 +208,7 @@ class ImportGithubTests(unittest.TestCase):
         self.assertEqual(len(list(card_files(self.root, "note"))), 2)
 
         capture = next(path for path in card_files(self.root, "note") if "first-reference" in path.name)
-        edited_notes = self.root / ".mt" / "scratch" / "microtask" / "github-capture-test" / "notes.md"
+        edited_notes = self.root / ".mt" / "tmp" / "microtask" / "github-capture-test" / "notes.md"
         edited_notes.parent.mkdir(parents=True, exist_ok=True)
         edited_notes.write_text("Reviewed source link separately.", encoding="utf-8")
         edited = self.run_mt("edit", capture.stem, "--body", "--append", "--file", str(edited_notes))
@@ -230,7 +230,7 @@ class ImportGithubTests(unittest.TestCase):
         )
         self.assertNotEqual(first.returncode, 0)
         capture = card_files(self.root, "note")[0]
-        content = self.root / ".mt" / "scratch" / "microtask" / "github-source-test" / "content.md"
+        content = self.root / ".mt" / "tmp" / "microtask" / "github-source-test" / "content.md"
         content.parent.mkdir(parents=True, exist_ok=True)
         content.write_text("Reviewed source copy.", encoding="utf-8")
         snapshot = json.loads(self.run_mt("read", capture.stem, "--json").stdout)

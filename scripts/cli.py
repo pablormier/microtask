@@ -25,7 +25,6 @@ from cli_admin import (  # noqa: F401
     command_repo_list,
     command_repo_remove,
     command_run,
-    command_scratch,
     command_skills_install,
     command_skills_uninstall,
     command_update,
@@ -219,7 +218,7 @@ def main() -> int:
         args.text = [args.file_text]
     if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
         root_parser.error("an empty body requires --title")
-    if args.command not in {"policy", "view", "scratch"}:
+    if args.command not in {"policy", "view"}:
         ws.pin_demo()
         ws.maybe_seed_demo()
     if args.command in {

@@ -11,17 +11,11 @@ review prompt and follow it throughout the discussion.
 
 ## Source and initial map
 
-In a microtask workspace, create a run directory only if the review needs
-downloads, extracted text, rendered pages, or draft files. Follow the scratch
-convention in the [microtask skill](../microtask/SKILL.md):
-
-```sh
-paper_review_dir="$(./mt scratch)"
-```
-
-Place those working files and tool outputs in that directory. If the paper and
-review can be handled without intermediate files, skip the directory. Keep
-verified source references in the saved Note.
+Create a temporary working directory (e.g. via `mktemp -d`) only if the review
+needs downloads, extracted text, rendered pages, or draft files. Place those
+working files and tool outputs in that directory. If the paper and review can be
+handled without intermediate files, skip the directory. Keep verified source
+references in the saved Note.
 
 Accept an uploaded paper, local file, or source URL, plus any question or review
 focus. Obtain the paper before reviewing it; an abstract alone is not a full

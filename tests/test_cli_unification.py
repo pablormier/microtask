@@ -96,13 +96,14 @@ class CLIUnificationTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
 
     def test_creation_body_next_action_and_instructions_are_independent(self):
-        scratch = Path(self.json(self.run_mt("scratch", "--json"))["path"])
-        action = "Compare baselines.\nResume at Figure 2."
-        instructions = "Check the source.\nDo not infer commitments."
-        (scratch / "action.md").write_text(action)
-        (scratch / "instructions.md").write_text(instructions)
-        body = "## Next action\nThis is a paper heading.\n"
-        created = self.json(self.run_mt("add", "--title", "Atomic complete task", "--file", "-", "--next-action-file", str(scratch / "action.md"), "--instructions-file", str(scratch / "instructions.md"), "--json", input_bytes=body.encode()))
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            action = "Compare baselines.\nResume at Figure 2."
+            instructions = "Check the source.\nDo not infer commitments."
+            (scratch / "action.md").write_text(action)
+            (scratch / "instructions.md").write_text(instructions)
+            body = "## Next action\nThis is a paper heading.\n"
+            created = self.json(self.run_mt("add", "--title", "Atomic complete task", "--file", "-", "--next-action-file", str(scratch / "action.md"), "--instructions-file", str(scratch / "instructions.md"), "--json", input_bytes=body.encode()))
         saved = self.snapshot(created["ref"])
         self.assertEqual(saved["body"], body)
         self.assertEqual(saved["properties"]["next_action"], action)

@@ -70,7 +70,6 @@ class SkillsTests(unittest.TestCase):
         self.assertNotRegex(leftover, r"(?<![\w/.-])mt (?=[A-Za-z-])")
         self.assertIn(f"`{invocation} COMMAND`", text)
         self.assertIn(f"{invocation} list ", text)
-        self.assertIn(f"$({invocation} scratch)", text)
         return text
 
     def test_install_for_the_personal_workspace_scoped_to_a_project(self) -> None:
