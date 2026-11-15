@@ -24,15 +24,15 @@ ROOT = Path(__file__).resolve().parent.parent
 ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
 
 
-def gh(*args: str) -> subprocess.CompletedProcess[str]:
+def gh(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     try:
-        return subprocess.run(["gh", *args], cwd=ROOT, check=False, capture_output=True, text=True)
+        return subprocess.run(["gh", *args], cwd=cwd or ROOT, check=False, capture_output=True, text=True)
     except FileNotFoundError as error:
         raise RuntimeError("gh is not installed or not on PATH") from error
 
 
-def gh_json(*args: str) -> object:
-    result = gh(*args)
+def gh_json(*args: str, cwd: Path | None = None) -> object:
+    result = gh(*args, cwd=cwd)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "gh command failed")
     try:
@@ -41,10 +41,10 @@ def gh_json(*args: str) -> object:
         raise RuntimeError(f"gh returned invalid JSON: {error}") from error
 
 
-def resolve_repo(explicit: str | None) -> str:
+def resolve_repo(explicit: str | None, ws: workspace.Workspace | None = None) -> str:
     if explicit:
         return explicit
-    repo_root = workspace.Workspace.resolve().root
+    repo_root = (ws or workspace.Workspace.resolve()).root
     status = git_ops.workspace_status(repo_root)
     if status.state != "ready":
         if status.state == "missing":
@@ -65,9 +65,13 @@ def resolve_repo(explicit: str | None) -> str:
     return repo
 
 
-def capture_label() -> str:
+def capture_label(ws: workspace.Workspace | None = None) -> str:
+    resolved = ws or workspace.Workspace.resolve()
+    template = resolved.root / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
+    if not template.is_file():
+        template = resolved.app_root / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
     try:
-        raw = ISSUE_TEMPLATE.read_text(encoding="utf-8")
+        raw = template.read_text(encoding="utf-8")
     except FileNotFoundError as error:
         raise ValueError("capture issue template not found") from error
     # The issue form is nested YAML; only its flat top-level header is relevant.
@@ -78,9 +82,9 @@ def capture_label() -> str:
     return str(labels[0]).strip()
 
 
-def list_issues(repo: str, label: str) -> list[dict[str, object]]:
+def list_issues(repo: str, label: str, *, cwd: Path | None = None) -> list[dict[str, object]]:
     data = gh_json("issue", "list", "--repo", repo, "--label", label, "--state", "open",
-                   "--limit", "100", "--json", "number,title,body,url,createdAt,labels")
+                   "--limit", "100", "--json", "number,title,body,url,createdAt,labels", cwd=cwd)
     if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
         raise RuntimeError("gh issue list response is not an issue list")
     return data
@@ -119,8 +123,8 @@ def issue_timestamp(value: str) -> tuple[str, str]:
     return parsed.strftime("%Y-%m-%d-%H%M%S"), parsed.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def real_workspace_items() -> list[store.Card]:
-    return store.read_cards(store.real_cards_root())
+def real_workspace_items(ws: workspace.Workspace | None = None) -> list[store.Card]:
+    return store.read_cards(store.real_cards_root(ws))
 
 
 def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.Card]]:
@@ -142,7 +146,11 @@ def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.
     return result
 
 
-def render_capture(repo: str, issue: tuple[int, str, str, str, str]) -> tuple[str, bytes]:
+def render_capture(
+    repo: str,
+    issue: tuple[int, str, str, str, str],
+    ws: workspace.Workspace | None = None,
+) -> tuple[str, bytes]:
     number, title, body, url, created_at = issue
     identity = source_identity(url)
     if identity != (repo, number):
@@ -151,7 +159,7 @@ def render_capture(repo: str, issue: tuple[int, str, str, str, str]) -> tuple[st
     identifier = f"{identifier_time}-gh-{number}-{store.slugify(title)}"
     rendered = operations.render_item_document(
         item_mode="note", item_id=identifier, title=title,
-        priority=operations.unassigned_priority(store.policy()), project=None, topic=None,
+        priority=operations.unassigned_priority(store.policy(ws)), project=None, topic=None,
         due=None, due_kind=None, created=created, updated=created, tags=[],
         body_text=body, needs_review=True,
         github_source=url, github_source_hash=source_hash(title, body),
@@ -186,10 +194,12 @@ def validate_existing_sources(
 def capture_issues(
     repo: str,
     issues: list[tuple[int, str, str, str, str]],
+    ws: workspace.Workspace | None = None,
 ) -> tuple[list[str], list[int], list[int], dict[int, list[store.Card]]]:
     """Recheck markers and commit the complete import as one locked transaction."""
-    with transaction.time_mutation_lock():
-        items = real_workspace_items()
+    resolved_ws = ws or workspace.Workspace.resolve()
+    with transaction.time_mutation_lock(resolved_ws):
+        items = real_workspace_items(resolved_ws)
         index = existing_issues(repo, items)
         requested_numbers = [issue[0] for issue in issues]
         if len(requested_numbers) != len(set(requested_numbers)):
@@ -206,18 +216,20 @@ def capture_issues(
         imported_ids: list[str] = []
         imported_numbers: list[int] = []
         for issue in new_issues:
-            identifier, contents = render_capture(repo, issue)
+            identifier, contents = render_capture(repo, issue, ws=resolved_ws)
             relative = str(Path("cards") / f"{identifier}.md")
-            if identifier in existing_ids or relative in changes or (ROOT / relative).exists():
+            if identifier in existing_ids or relative in changes or (resolved_ws.root / relative).exists():
                 raise RuntimeError(f"generated note ID already exists: {identifier}")
             changes[relative] = contents
             expected[relative] = None
             imported_ids.append(identifier)
             imported_numbers.append(issue[0])
         if changes:
-            transaction.apply_item_transaction(changes, expected=expected, source_root=ROOT)
+            transaction.apply_item_transaction(
+                changes, expected=expected, source_root=resolved_ws.root, ws=resolved_ws
+            )
             # The first real capture leaves demo mode, like mt add and mt note.
-            store.pin_demo_state()
+            store.pin_demo_state(resolved_ws)
         existing_numbers = [issue[0] for issue in issues if issue[0] in index]
         return imported_ids, imported_numbers, existing_numbers, index
 
@@ -231,24 +243,24 @@ def main(argv: list[str] | None = None, ws: workspace.Workspace | None = None) -
     if not transaction.run_validator(resolved_ws):
         return 1
     try:
-        label = capture_label()
-        repo = resolve_repo(args.repo)
-        issues = [issue_values(issue) for issue in list_issues(repo, label)]
-        imported_ids, imported_numbers, existing_numbers, index = capture_issues(repo, issues)
+        label = capture_label(resolved_ws)
+        repo = resolve_repo(args.repo, resolved_ws)
+        issues = [issue_values(issue) for issue in list_issues(repo, label, cwd=resolved_ws.root)]
+        imported_ids, imported_numbers, existing_numbers, index = capture_issues(repo, issues, ws=resolved_ws)
         captured_numbers = set(existing_numbers) | set(imported_numbers)
         # Every listed issue now has a durable local capture; sync it before closing any issue.
         sync_status = 0
         if captured_numbers:
-            if store.policy().get("rules", {}).get("auto_sync", False):
+            if store.policy(resolved_ws).get("rules", {}).get("auto_sync", False):
                 # Issue closure is external and requires an explicit successful
                 # sync, even when ordinary local mutations can stay Git-free.
                 if args.json:
                     with redirect_stdout(sys.stderr):
-                        sync_status = transaction.command_sync(argparse.Namespace(message=None))
+                        sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
                 else:
-                    sync_status = transaction.command_sync(argparse.Namespace(message=None))
+                    sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
             else:
-                sync_status = transaction.auto_sync_after_mutation(changed=True)
+                sync_status = transaction.auto_sync_after_mutation(changed=True, ws=resolved_ws)
 
         receipt: dict[str, object] = {
             "repo": repo,
@@ -269,7 +281,7 @@ def main(argv: list[str] | None = None, ws: workspace.Workspace | None = None) -
         closed: list[int] = []
         close_failures: dict[int, str] = {}
         for number in sorted(captured_numbers):
-            result = gh("issue", "close", str(number), "--repo", repo)
+            result = gh("issue", "close", str(number), "--repo", repo, cwd=resolved_ws.root)
             if result.returncode == 0:
                 closed.append(number)
             else:

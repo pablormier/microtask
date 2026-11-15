@@ -439,6 +439,23 @@ class ImportGithubTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
         self.assertEqual(list((self.root / "cards").glob("*.md")), [])
 
+    def test_data_only_workspace_import_writes_to_selected_workspace(self) -> None:
+        data_ws = Path(self.temporary.name) / "data-ws"
+        init = self.run_mt("init", str(data_ws), "--data")
+        self.assertEqual(init.returncode, 0, init.stderr)
+        self.git(data_ws, "init", "-b", "main")
+        self.git(data_ws, "remote", "add", "origin", "https://github.com/acme/tasks.git")
+
+        result = self.run_mt("-R", str(data_ws), "import-github", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt["repo"], "acme/tasks")
+        self.assertEqual(len(receipt["imported_ids"]), 1)
+        self.assertTrue((data_ws / "cards" / f"{receipt['imported_ids'][0]}.md").is_file())
+        self.assertEqual(list((self.root / "cards").glob("*.md")), [])
+        self.assertEqual(json.loads(self.state_path.read_text())["issues"][0]["state"], "closed")
+
 
 if __name__ == "__main__":
     unittest.main()
