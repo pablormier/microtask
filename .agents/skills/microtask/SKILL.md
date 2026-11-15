@@ -36,6 +36,7 @@ being worked on.
 ```sh
 mt search WORDS --all --compact     # context and duplicates, incl. archived/hidden
 mt list --all --json
+mt list --kind note --all --compact # list notes without dumping bodies
 mt list --triage --limit 5 --full   # whole cards, same shape as mt read --json
 mt read @REF [@REF2 ...] --json     # properties, body, ref, path, content_hash
 ```

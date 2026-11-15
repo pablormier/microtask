@@ -778,7 +778,7 @@ def capture_card(
         kind, text, title=title, capture_id=capture_id,
         created=created_at or getattr(args, "capture_timestamp", None),
         status=getattr(args, "status", None) if kind == "task" else None,
-        task_type=(getattr(args, "task_type", None) or getattr(args, "type", None)) if kind == "task" else None,
+        task_type=getattr(args, "task_type", None) if kind == "task" else None,
         next_action=card_text_option(args, "next_action") if kind == "task" else "",
         instructions=card_text_option(args, "instructions"),
         priority=getattr(args, "priority", None), project=getattr(args, "project", None),

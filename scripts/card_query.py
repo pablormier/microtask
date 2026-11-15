@@ -92,7 +92,7 @@ DEFAULT = Query()
 # ---- Parsing -------------------------------------------------------------
 
 def _option(field: str) -> str:
-    return "--" + field.replace("_", "-")
+    return "--task-type" if field == "type" else "--" + field.replace("_", "-")
 
 
 def _values(value: object) -> tuple[str, ...]:
@@ -235,8 +235,8 @@ def add_query_arguments(parser: argparse.ArgumentParser, *, defaults: dict | Non
     group = parser.add_argument_group("selecting cards")
 
     def names(field: str) -> list[str]:
-        return [_option(field)] + [_option(alias) for alias, target in ALIASES.items()
-                                   if target.get(field, 0) is None]
+        return list(dict.fromkeys([_option(field)] + [_option(alias) for alias, target in ALIASES.items()
+                                                      if target.get(field, 0) is None]))
 
     def many(field: str, metavar: str, help: str, **extra: object) -> None:
         group.add_argument(*names(field), dest=field, action="append", metavar=metavar, help=help, **extra)

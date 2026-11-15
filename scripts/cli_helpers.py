@@ -288,9 +288,9 @@ def add_card_metadata_arguments(command: argparse.ArgumentParser, *, editing: bo
                                  default=None, help=description)
             command.add_argument(f"--no-{name}", dest=dest, action="store_const", const=False,
                                  help=f"do not {description}")
-        command.add_argument("--type", dest="task_type", help="set task type (tasks only)")
+        command.add_argument("--task-type", dest="task_type", help="set task type (tasks only)")
         return
-    command.add_argument("--type", dest="task_type", help="set task type (tasks only)")
+    command.add_argument("--task-type", dest="task_type", help="set task type (tasks only)")
     command.add_argument("--status", help="set task status (tasks only; non-claim open statuses)")
     command.add_argument("--remove-tag", dest="tag_remove", action="append", default=None,
                          help="remove a tag (repeatable; preserves other tags)")
