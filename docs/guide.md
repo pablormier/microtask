@@ -194,8 +194,10 @@ unset MT_PROJECT
 ## Drafts
 
 Drafts are unfinished cards or edits kept in `drafts/`. They stay out of lists,
-search, and focus until you apply them. The dashboard saves drafts as you type,
-and the CLI works on the same files:
+search, and focus until you apply them. The dashboard saves drafts as you type
+(and can expand the capture composer or card editor into a full-screen **Zen
+mode** with `Write`, `Split`, and `Preview` views via `⤢` or
+`Cmd/Ctrl+Shift+F`), and the CLI works on the same files:
 
 ```sh
 mt draft list

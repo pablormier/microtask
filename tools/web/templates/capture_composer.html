@@ -1,9 +1,11 @@
       <template x-if="captureComposer.open && captureComposer.draft">
-        <div class="mt-composer-backdrop mt-dialog-backdrop" @click.self="captureComposer.close(captureContext())">
-          <section class="mt-composer mt-dialog" role="dialog" aria-modal="true"
+        <div class="mt-composer-backdrop mt-dialog-backdrop" :class="{ 'is-zen': captureComposer.zen }" @click.self="if (!captureComposer.zen) captureComposer.close(captureContext())">
+          <section class="mt-composer mt-dialog" role="dialog" :class="{ 'is-zen': captureComposer.zen }" aria-modal="true"
                    x-ref="composerDialog" @keydown.tab="trapComposerFocus($event)"
                    aria-labelledby="mt-composer-title" aria-describedby="mt-composer-help"
-                   @keydown.escape.stop.prevent="captureComposer.close(captureContext())"
+                   @keydown.escape.stop.prevent="captureComposer.handleEscape(captureContext())"
+                   @keydown.meta.shift.f.stop.prevent="captureComposer.toggleZen(captureContext())"
+                   @keydown.ctrl.shift.f.stop.prevent="captureComposer.toggleZen(captureContext())"
                    @keydown.meta.enter.stop.prevent="captureComposer.save(captureContext())"
                    @keydown.ctrl.enter.stop.prevent="captureComposer.save(captureContext())">
             <header class="mt-composer-header">
@@ -16,10 +18,32 @@
                   <button type="button" class="mt-segment" :aria-pressed="captureComposer.draft?.kind === 'task'" @click="captureComposer.setKind(captureContext(), 'task')" :disabled="captureComposer.saving">Task</button>
                 </div>
               </template>
+              <div class="mt-segmented mt-zen-view-toggle" role="group" aria-label="Zen editor view" x-show="captureComposer.zen">
+                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'write'" @click="captureComposer.setZenView(captureContext(), 'write')">Write</button>
+                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'split'" @click="captureComposer.setZenView(captureContext(), 'split')">Split</button>
+                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'preview'" @click="captureComposer.setZenView(captureContext(), 'preview')">Preview</button>
+              </div>
+              <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-meta-toggle"
+                      x-show="captureComposer.zen && captureComposer.draft?.mode === 'new'"
+                      :aria-expanded="captureComposer.zenMetaOpen"
+                      @click="captureComposer.zenMetaOpen = !captureComposer.zenMetaOpen">
+                <span>Properties</span>
+                <span class="mt-zen-meta-badge" x-show="captureComposer.zenMetaSummary()" x-text="captureComposer.zenMetaSummary()"></span>
+              </button>
+              <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-zen-toggle"
+                      :aria-label="captureComposer.zen ? 'Exit Zen mode' : 'Enter Zen mode'"
+                      :title="captureComposer.zen ? 'Exit Zen mode (Esc)' : 'Zen mode (⌘/Ctrl+Shift+F)'"
+                      :aria-pressed="captureComposer.zen"
+                      @click="captureComposer.toggleZen(captureContext())">
+                <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path x-show="!captureComposer.zen" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                  <path x-show="captureComposer.zen" d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"/>
+                </svg>
+              </button>
               <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-close" aria-label="Close capture editor" @click="captureComposer.close(captureContext())"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
             </header>
             <div class="mt-composer-content">
-              <p id="mt-composer-help" class="mt-composer-capture-date">Saved as a draft as you type. Close anytime to continue later.</p>
+              <p id="mt-composer-help" class="mt-composer-capture-date" x-show="!captureComposer.zen">Saved as a draft as you type. Close anytime to continue later.</p>
               <template x-if="captureComposer.draft && captureComposer.draft?.mode === 'new'">
                 <label class="mt-composer-title-field">
                   <span class="mt-sr-only">Title (optional)</span>
@@ -27,40 +51,49 @@
                          :disabled="captureComposer.saving" autocomplete="off" aria-label="Optional capture title">
                 </label>
               </template>
-              <template x-if="captureComposer.draft?.mode === 'new'">
-                <div class="mt-capture-properties" x-data="cardMetadataEditor(captureComposer.draft?.taskOptions || {}, true, 'capture', cardMetadataConfig(), captureComposer.draft?.taskMetadataErrors || {}, captureComposer.draft?.kind)"
-                     x-effect="disabled = captureComposer.saving || busy; cardKind = captureComposer.draft?.kind || 'note'; fieldErrors = captureComposer.draft?.taskMetadataErrors || {}; if (['type', 'project', 'topic', 'tags'].some(field => fieldErrors[field])) morePropertiesOpen = true"
-                     @metadata-change="captureComposer.draft.taskOptions = $event.detail; captureComposer.persist(captureContext())">
-                  {card_metadata_editor}
-                </div>
-              </template>
+              <div class="mt-composer-meta-group" x-show="!captureComposer.zen || captureComposer.zenMetaOpen" :class="{ 'is-zen-popover': captureComposer.zen }">
+                <template x-if="captureComposer.draft?.mode === 'new'">
+                  <div class="mt-capture-properties" x-data="cardMetadataEditor(captureComposer.draft?.taskOptions || {}, true, 'capture', cardMetadataConfig(), captureComposer.draft?.taskMetadataErrors || {}, captureComposer.draft?.kind)"
+                       x-effect="disabled = captureComposer.saving || busy; cardKind = captureComposer.draft?.kind || 'note'; fieldErrors = captureComposer.draft?.taskMetadataErrors || {}; if (['type', 'project', 'topic', 'tags'].some(field => fieldErrors[field])) morePropertiesOpen = true"
+                       @metadata-change="captureComposer.draft.taskOptions = $event.detail; captureComposer.persist(captureContext())">
+                    {card_metadata_editor}
+                  </div>
+                </template>
+                <template x-if="captureComposer.draft?.mode === 'new'">
+                  <details class="mt-processing-instructions mt-extra-details"
+                           :open="Boolean(captureComposer.draft?.instructions && captureComposer.draft.instructions.trim())">
+                    <summary class="mt-extra-summary">
+                      <span class="mt-extra-summary-copy">
+                        <span class="mt-extra-summary-label">Processing instructions</span>
+                        <span class="mt-detail-summary-meta">(optional)</span>
+                      </span>
+                      <span class="mt-extra-chevron" aria-hidden="true"></span>
+                    </summary>
+                    <label for="mt-processing-instructions">How should this capture be organized or triaged?</label>
+                    <textarea id="mt-processing-instructions" class="mt-field" rows="4"
+                              x-model="captureComposer.draft.instructions"
+                              @input="captureComposer.persist(captureContext())"
+                              :disabled="captureComposer.saving"
+                              placeholder="Add guidance for organizing or triaging this capture"></textarea>
+                  </details>
+                </template>
+              </div>
               <div class="mt-composer-body-label-row">
-                <label for="mt-composer-body" x-text="captureComposer.draft?.kind === 'task' ? 'Description' : 'Note'"></label>
+                <label for="mt-composer-body" x-show="!captureComposer.zen" x-text="captureComposer.draft?.kind === 'task' ? 'Description' : 'Note'"></label>
                 <button type="button" class="mt-button mt-button-compact mt-button-quiet mt-composer-template" @click="captureComposer.applyMeetingTemplate(captureContext())"
                         x-show="captureComposer.draft && captureComposer.draft?.mode === 'new' && captureComposer.draft?.kind === 'note'" :disabled="captureComposer.saving">Insert meeting template</button>
               </div>
-              <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.text"
-                        @input="captureComposer.persist(captureContext())" :disabled="captureComposer.saving"
-                        :placeholder="!captureComposer.draft ? '' : (captureComposer.draft?.mode === 'edit' ? '' : (captureComposer.draft?.kind === 'task' ? 'What do you want to accomplish?' : 'Write a thought, observation, or meeting note…'))"
-                        aria-label="Capture text"></textarea>
-              <template x-if="captureComposer.draft?.mode === 'new'">
-                <details class="mt-processing-instructions mt-extra-details"
-                         :open="Boolean(captureComposer.draft?.instructions && captureComposer.draft.instructions.trim())">
-                  <summary class="mt-extra-summary">
-                    <span class="mt-extra-summary-copy">
-                      <span class="mt-extra-summary-label">Processing instructions</span>
-                      <span class="mt-detail-summary-meta">(optional)</span>
-                    </span>
-                    <span class="mt-extra-chevron" aria-hidden="true"></span>
-                  </summary>
-                  <label for="mt-processing-instructions">How should this capture be organized or triaged?</label>
-                  <textarea id="mt-processing-instructions" class="mt-field" rows="4"
-                            x-model="captureComposer.draft.instructions"
-                            @input="captureComposer.persist(captureContext())"
-                            :disabled="captureComposer.saving"
-                            placeholder="Add guidance for organizing or triaging this capture"></textarea>
-                </details>
-              </template>
+              <div class="mt-zen-workspace" :class="{ 'is-zen': captureComposer.zen, 'is-split': captureComposer.zen && captureComposer.zenView === 'split', 'is-preview': captureComposer.zen && captureComposer.zenView === 'preview' }">
+                <div class="mt-zen-editor-pane mt-editor-surface-host" x-show="!captureComposer.zen || captureComposer.zenView !== 'preview'"
+                     x-effect="captureComposer.syncSurface(captureContext(), $el)">
+                  <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.text"
+                            x-show="!captureComposer.isCustomMounted()"
+                            @input="captureComposer.persist(captureContext()); captureComposer.schedulePreview()" :disabled="captureComposer.saving"
+                            :placeholder="!captureComposer.draft ? '' : (captureComposer.draft?.mode === 'edit' ? '' : (captureComposer.draft?.kind === 'task' ? 'What do you want to accomplish?' : 'Write a thought, observation, or meeting note…'))"
+                            aria-label="Capture text"></textarea>
+                </div>
+                <div class="mt-preview mt-zen-preview" x-show="captureComposer.zen && (captureComposer.zenView === 'split' || captureComposer.zenView === 'preview')" x-html="captureComposer.previewHtml"></div>
+              </div>
               <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.recoveryWarning" x-text="captureComposer.recoveryWarning"></p>
               <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.draft && captureComposer.draft._orphanedLocal">This local copy no longer matches the workspace draft. Recover it as a separate draft or dismiss the local copy.</p>
               <p class="mt-composer-recovery-warning" role="status" x-show="draftNeedsReconciliation(captureComposer.draft)">This edit has no verified target baseline and needs manual reconciliation before it can be applied.</p>

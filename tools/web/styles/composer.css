@@ -176,3 +176,110 @@
   gap: 12px;
   margin-bottom: var(--mt-space-3);
 }
+
+/* Zen mode & shared pluggable editor workspace */
+.mt-zen-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--mt-space-4);
+  min-height: 0;
+}
+.mt-zen-editor-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.mt-zen-workspace.is-zen {
+  flex: 1 1 auto;
+  grid-template-rows: minmax(0, 1fr);
+}
+.mt-zen-workspace.is-zen.is-split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+.mt-zen-preview {
+  min-width: 0;
+  padding: 14px 18px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface-subdued);
+  overflow: auto;
+}
+.mt-zen-workspace.is-zen.is-preview .mt-zen-preview {
+  border-color: transparent;
+  background: transparent;
+  padding-inline: 0;
+}
+.mt-zen-meta-badge {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: var(--mt-radius-pill);
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent-hover);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 600;
+}
+.mt-composer-backdrop.is-zen {
+  padding: 0;
+  place-items: stretch;
+}
+.mt-composer.is-zen {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100vh;
+  max-height: 100vh;
+  border-radius: 0;
+  padding: clamp(14px, 2.5vw, 24px) clamp(16px, 4vw, 40px);
+}
+.mt-composer.is-zen .mt-composer-header,
+.mt-composer.is-zen .mt-composer-content,
+.mt-composer.is-zen .mt-composer-footer {
+  width: min(72ch, 100%);
+  margin-inline: auto;
+}
+.mt-composer.is-zen .mt-composer-content {
+  padding-right: 0;
+  margin-right: auto;
+}
+.mt-composer.is-zen:has(.mt-zen-workspace.is-split) .mt-composer-header,
+.mt-composer.is-zen:has(.mt-zen-workspace.is-split) .mt-composer-content,
+.mt-composer.is-zen:has(.mt-zen-workspace.is-split) .mt-composer-footer {
+  width: min(140ch, 100%);
+}
+.mt-composer.is-zen .mt-composer-title-field input.mt-field {
+  font-size: clamp(1.35rem, 2.2vw, 1.85rem);
+}
+.mt-composer.is-zen .mt-composer-body.mt-field {
+  flex: 1 1 auto;
+  min-height: 50vh;
+  border-color: transparent;
+  background: transparent;
+  padding: 8px 0;
+  box-shadow: none;
+  resize: none;
+}
+.mt-composer.is-zen .mt-composer-body.mt-field:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+.mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
+  margin-bottom: var(--mt-space-4);
+  padding: 14px 16px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-lg);
+  background: var(--mt-surface-subdued);
+}
+.mt-composer.is-zen .mt-composer-template {
+  margin-left: -10px;
+}
+@media (max-width: 56rem) {
+  .mt-zen-workspace.is-zen.is-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}

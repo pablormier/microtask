@@ -61,6 +61,7 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
         "picker.js",
         "metadata_editor.js",
         "draft_store.js",
+        "editor_surface.js",
         "capture_composer.js",
         "property_editor.js",
         "content_editor.js",

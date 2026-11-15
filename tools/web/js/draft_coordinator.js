@@ -81,6 +81,7 @@ function createDraftCoordinator() {
         needsReconciliation: draft => this.draftNeedsReconciliation(draft),
         finishWorkspaceDraft: draft => this.finishContentDraft(draft),
         clearStatus: () => { this.captureComposer.message = ""; this.captureComposer.messageError = false; },
+        nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => this.$refs.detailContentInput?.focus()),
       };
     },
@@ -199,6 +200,11 @@ function createDraftCoordinator() {
           ? draft._savedMetadata
           : this.draftMetadataSnapshot({ taskOptions: this.taskOptionsFromDraft(draft) }),
       };
+      this.captureComposer.zen = false;
+      this.captureComposer.zenView = "write";
+      this.captureComposer.zenMetaOpen = false;
+      this.captureComposer.previewHtml = "";
+      if (this.captureComposer.surface) this.captureComposer.surface.setValue(body);
       this.captureComposer.open = true;
       this.$nextTick(() => {
         const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");

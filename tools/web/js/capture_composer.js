@@ -10,6 +10,140 @@ function createCaptureComposer() {
     messageError: false,
     saving: false,
     returnFocus: null,
+    zen: false,
+    zenView: "write",
+    zenMetaOpen: false,
+    previewHtml: "",
+    _previewTimer: null,
+    surface: null,
+
+    ensureSurface(ctx, hostEl) {
+      if (typeof createEditorSurface !== "function") return null;
+      if (!this.surface) {
+        this.surface = createEditorSurface({
+          getValue: () => (this.draft ? this.draft.text : ""),
+          onInput: text => {
+            if (!this.draft) return;
+            this.draft.text = text;
+            this.persist(ctx);
+            this.schedulePreview();
+          },
+          onSave: () => this.save(ctx),
+          onEscape: () => this.handleEscape(ctx),
+          getPlaceholder: () => (!this.draft ? "" : (this.draft.mode === "edit" ? "" :
+            (this.draft.kind === "task" ? "What do you want to accomplish?" : "Write a thought, observation, or meeting note…"))),
+          isDisabled: () => this.saving,
+        });
+      }
+      if (hostEl && this.zen && this.surface.hasCustomEngine() && !this.surface.instance) {
+        this.surface.mount(hostEl);
+      }
+      return this.surface;
+    },
+
+    syncSurface(ctx, hostEl) {
+      const surface = this.ensureSurface(ctx, hostEl);
+      if (!surface) return;
+      if (this.zen && surface.hasCustomEngine()) {
+        if (hostEl && (!surface.instance || surface.hostEl !== hostEl)) {
+          surface.mount(hostEl);
+        }
+        surface.setDisabled(this.saving);
+      } else if (surface.instance) {
+        surface.destroy();
+      }
+    },
+
+    hasCustomEngine() {
+      return Boolean(this.surface && this.surface.hasCustomEngine());
+    },
+
+    isCustomMounted() {
+      return Boolean(this.surface && this.surface.instance);
+    },
+
+    refreshPreview() {
+      if (typeof renderEditorPreview === "function") {
+        this.previewHtml = renderEditorPreview({}, this.draft ? this.draft.text : "");
+      } else if (typeof renderMarkdown === "function" && typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
+        this.previewHtml = renderMarkdown({}, this.draft ? (this.draft.text || "") : "");
+      } else {
+        this.previewHtml = "";
+      }
+    },
+
+    schedulePreview() {
+      if (!this.zen || (this.zenView !== "split" && this.zenView !== "preview")) return;
+      if (this._previewTimer) clearTimeout(this._previewTimer);
+      this._previewTimer = setTimeout(() => {
+        this._previewTimer = null;
+        this.refreshPreview();
+      }, 150);
+    },
+
+    toggleZen(ctx, force) {
+      if (!this.open || !this.draft) return;
+      const next = typeof force === "boolean" ? force : !this.zen;
+      this.zen = next;
+      this.zenMetaOpen = false;
+      if (next && (this.zenView === "split" || this.zenView === "preview")) {
+        this.refreshPreview();
+      }
+      if (ctx && typeof ctx.nextTick === "function") {
+        ctx.nextTick(() => {
+          if (!next || this.zenView !== "preview") {
+            if (!(this.surface && this.surface.focus())) {
+              if (typeof ctx.focusInput === "function") ctx.focusInput();
+            }
+          }
+        });
+      }
+    },
+
+    setZenView(ctx, view) {
+      if (view !== "write" && view !== "split" && view !== "preview") return;
+      this.zenView = view;
+      if (view === "split" || view === "preview") {
+        if (this._previewTimer) {
+          clearTimeout(this._previewTimer);
+          this._previewTimer = null;
+        }
+        this.refreshPreview();
+      }
+      if (view !== "preview" && ctx && typeof ctx.nextTick === "function") {
+        ctx.nextTick(() => {
+          if (!(this.surface && this.surface.focus())) {
+            if (typeof ctx.focusInput === "function") ctx.focusInput();
+          }
+        });
+      }
+    },
+
+    handleEscape(ctx) {
+      if (this.zenMetaOpen) {
+        this.zenMetaOpen = false;
+        return;
+      }
+      if (this.zen) {
+        this.toggleZen(ctx, false);
+        return;
+      }
+      this.close(ctx);
+    },
+
+    zenMetaSummary() {
+      if (!this.draft) return "";
+      const parts = [];
+      const opts = this.draft.taskOptions || {};
+      if (opts.project) parts.push(opts.project);
+      if (opts.topic) parts.push(opts.topic);
+      if (Array.isArray(opts.tags) && opts.tags.length) {
+        parts.push(opts.tags.length === 1 ? "1 tag" : opts.tags.length + " tags");
+      }
+      if (opts.due) parts.push("due " + opts.due);
+      if (this.draft.instructions && this.draft.instructions.trim()) parts.push("instructions");
+      return parts.join(" · ");
+    },
 
     makeId() {
       if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
@@ -108,6 +242,11 @@ function createCaptureComposer() {
       };
       this.draft._savedMetadata = ctx.metadataSnapshot(this.draft);
       this.persisted = false;
+      this.zen = false;
+      this.zenView = "write";
+      this.zenMetaOpen = false;
+      this.previewHtml = "";
+      if (this.surface) this.surface.setValue("");
       this.message = "";
       this.messageError = false;
       this.openComposer(ctx, event);
@@ -173,6 +312,15 @@ function createCaptureComposer() {
       } else if (this.draft && this.draft.mode === "new") {
         this.persist(ctx);
       }
+      if (this._previewTimer) {
+        clearTimeout(this._previewTimer);
+        this._previewTimer = null;
+      }
+      if (this.surface) this.surface.destroy();
+      this.zen = false;
+      this.zenView = "write";
+      this.zenMetaOpen = false;
+      this.previewHtml = "";
       this.open = false;
       const returnFocus = this.returnFocus;
       ctx.nextTick(() => {
@@ -220,6 +368,8 @@ function createCaptureComposer() {
         this.draft.text += separator + headings;
       }
       this.persist(ctx);
+      if (this.surface) this.surface.setValue(this.draft.text);
+      this.schedulePreview();
       this.message = "Meeting headings added. Existing text was kept.";
       this.messageError = false;
       ctx.focusInput();

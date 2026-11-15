@@ -6,9 +6,129 @@ function createContentEditor() {
     text: "",
     original: "",
     tab: "write",
+    zen: false,
+    zenView: "write",
+    previewHtml: "",
+    _previewTimer: null,
+    surface: null,
     localSaved: true,
     saving: false,
     error: "",
+
+    ensureSurface(ctx, hostEl) {
+      if (typeof createEditorSurface !== "function") return null;
+      if (!this.surface) {
+        this.surface = createEditorSurface({
+          getValue: () => this.text,
+          onInput: text => {
+            this.text = text;
+            this.persist(ctx);
+            this.schedulePreview(ctx);
+          },
+          onSave: () => this.save(ctx),
+          onEscape: () => this.handleEscape(ctx),
+          getPlaceholder: () => "Write Markdown or LaTeX…",
+          isDisabled: () => Boolean(ctx.draftBusy || this.saving),
+        });
+      }
+      if (hostEl && this.zen && this.surface.hasCustomEngine() && !this.surface.instance) {
+        this.surface.mount(hostEl);
+      }
+      return this.surface;
+    },
+
+    syncSurface(ctx, hostEl) {
+      const surface = this.ensureSurface(ctx, hostEl);
+      if (!surface) return;
+      if (this.zen && surface.hasCustomEngine()) {
+        if (hostEl && (!surface.instance || surface.hostEl !== hostEl)) {
+          surface.mount(hostEl);
+        }
+        surface.setDisabled(Boolean((ctx && ctx.draftBusy) || this.saving));
+      } else if (surface.instance) {
+        surface.destroy();
+      }
+    },
+
+    hasCustomEngine() {
+      return Boolean(this.surface && this.surface.hasCustomEngine());
+    },
+
+    isCustomMounted() {
+      return Boolean(this.surface && this.surface.instance);
+    },
+
+    refreshPreview(ctx) {
+      if (typeof renderEditorPreview === "function") {
+        this.previewHtml = renderEditorPreview(ctx ? ctx.selected : {}, this.text);
+      } else {
+        this.previewHtml = this.preview(ctx);
+      }
+    },
+
+    schedulePreview(ctx) {
+      if (!this.zen || (this.zenView !== "split" && this.zenView !== "preview")) return;
+      if (this._previewTimer) clearTimeout(this._previewTimer);
+      this._previewTimer = setTimeout(() => {
+        this._previewTimer = null;
+        this.refreshPreview(ctx);
+      }, 150);
+    },
+
+    toggleZen(ctx, force) {
+      if (!this.draft) return;
+      const next = typeof force === "boolean" ? force : !this.zen;
+      this.zen = next;
+      if (next) {
+        if (this.tab === "preview") this.zenView = "preview";
+        else if (this.zenView === "preview") this.zenView = "write";
+        if (this.zenView === "split" || this.zenView === "preview") {
+          this.refreshPreview(ctx);
+        }
+      } else {
+        this.tab = this.zenView === "preview" ? "preview" : "write";
+      }
+      if (ctx && typeof ctx.nextTick === "function") {
+        ctx.nextTick(() => {
+          if (!next || this.zenView !== "preview") {
+            if (!(this.surface && this.surface.focus())) {
+              if (typeof ctx.focusInput === "function") ctx.focusInput();
+            }
+          }
+        });
+      } else if ((!next || this.zenView !== "preview") && ctx && typeof ctx.focusInput === "function") {
+        ctx.focusInput();
+      }
+    },
+
+    setZenView(ctx, view) {
+      if (view !== "write" && view !== "split" && view !== "preview") return;
+      this.zenView = view;
+      if (view === "split" || view === "preview") {
+        if (this._previewTimer) {
+          clearTimeout(this._previewTimer);
+          this._previewTimer = null;
+        }
+        this.refreshPreview(ctx);
+      }
+      if (view !== "preview") {
+        const focusEditor = () => {
+          if (!(this.surface && this.surface.focus())) {
+            if (ctx && typeof ctx.focusInput === "function") ctx.focusInput();
+          }
+        };
+        if (ctx && typeof ctx.nextTick === "function") ctx.nextTick(focusEditor);
+        else focusEditor();
+      }
+    },
+
+    handleEscape(ctx) {
+      if (this.zen) {
+        this.toggleZen(ctx, false);
+        return true;
+      }
+      return false;
+    },
 
     begin(ctx, saved) {
       const card = ctx.selected;
@@ -28,7 +148,11 @@ function createContentEditor() {
       // draft being reopened. This keeps recovered divergent text saveable.
       this.original = card.body;
       this.tab = "write";
+      this.zen = false;
+      this.zenView = "write";
+      this.previewHtml = "";
       this.error = "";
+      if (this.surface) this.surface.setValue(source);
       ctx.clearStatus();
       ctx.focusInput();
     },
@@ -50,8 +174,16 @@ function createContentEditor() {
         this.error = "The draft could not be saved locally. Keep the editor open until the workspace save succeeds.";
         return false;
       }
+      if (this._previewTimer) {
+        clearTimeout(this._previewTimer);
+        this._previewTimer = null;
+      }
+      if (this.surface) this.surface.destroy();
       this.draft = null;
       this.text = "";
+      this.zen = false;
+      this.zenView = "write";
+      this.previewHtml = "";
       this.error = "";
     },
 
