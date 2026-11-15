@@ -195,7 +195,7 @@ class SyncTests(unittest.TestCase):
         current_priority = str(tasklib.Card.read(doing).frontmatter["priority"])
         for args in (
             ("read", task.stem), ("list", "--json"),
-            ("focus", task.stem, "--by", "agent:test"), ("unfocus",),
+            ("focus", task.stem, "--by", "agent:test"), ("focus", "--clear"),
             ("edit", task.stem, "--set", f"priority={current_priority}", "--by", "agent:test"),
             ("move", task.stem, "doing", "--by", "agent:test"),
             ("time", "start", task.stem, "--by", "agent:test"),

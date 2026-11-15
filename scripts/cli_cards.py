@@ -16,13 +16,11 @@ import uuid
 import card_format
 import card_query
 from cli_helpers import (
-    _cli_print_error,
     _cli_run_write,
     create_editor_recovery_copy,
     editor_command,
     resolve_unique,
 )
-import operations
 from operations import (
     _apply_bulk_metadata,
     _bulk_edit_assignments,
@@ -41,7 +39,6 @@ from operations import (
     create_card,
     finish_lifecycle_timer,
     focus_context,
-    followup_sort_key,
     parse_tag_json,
     render_converted_note,
     render_converted_task,
@@ -57,7 +54,6 @@ from store import (
     Card,
     CardInputError,
     ReferenceIndex,
-    TaskError,
     _ws,
     active_root,
     command_query,
@@ -326,7 +322,7 @@ def command_convert(args: argparse.Namespace, ws: Workspace | None = None) -> in
         return 2
     to_note = args.destination == "note"
     if to_note and any(getattr(args, name, None) is not None for name in ("status", "task_type", "next_action")):
-        print("error: --status, --type, and --next-action apply only when converting a note to a task", file=sys.stderr)
+        print("error: --status, --task-type, and --next-action apply only when converting a note to a task", file=sys.stderr)
         return 2
     item, result = resolve_unique(
         query, kind=None if to_note else "note",
@@ -377,39 +373,6 @@ def parse_edit_tags(value: str) -> list[str]:
 
 def command_edit(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return _command_edit_serialized(args, ws=ws)
-
-
-def command_card_metadata(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    """Apply a card metadata patch with a whole-card compare-and-swap."""
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", args.expected_hash or ""):
-        print("error: expected hash must be a 64-character SHA-256 digest", file=sys.stderr)
-        return 2
-    try:
-        patch = json.loads(args.patch)
-    except (TypeError, json.JSONDecodeError) as error:
-        print(f"error: metadata patch must be JSON: {error}", file=sys.stderr)
-        return 2
-    if not isinstance(patch, dict) or not patch:
-        print("error: metadata patch contains unsupported or missing fields", file=sys.stderr)
-        return 2
-    resolved = _ws(ws)
-    try:
-        result = operations.op_card_metadata(
-            resolved,
-            args.ref,
-            patch,
-            expected_hash=args.expected_hash,
-            kind=args.kind,
-            match_mode="exact",
-            sync=False,
-        )
-    except TaskError as error:
-        return _cli_print_error(error)
-    if args.as_json:
-        print(json.dumps(result.receipt, ensure_ascii=False))
-    else:
-        print(f"Updated {result.receipt['kind']} properties: {result.receipt['ref']}")
-    return auto_sync_after_mutation(changed=bool(result.receipt["changed"]), ws=resolved)
 
 
 def _edit_body_mode_from_args(args: argparse.Namespace) -> str | None:
@@ -1092,39 +1055,6 @@ def command_focus(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return 0
 
 
-def command_unfocus(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    from cli_parser import parser
-
-    resolved = _ws(ws)
-    clear_focus_task_id(resolved)
-    return command_focus(parser().parse_args(["focus"]), ws=resolved)
-
-
-def command_followup(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    resolved = _ws(ws)
-    selection = command_query(args)
-    if selection is None:
-        return 2
-    priorities = list(store.policy(resolved).get("priorities", {}).keys())
-    rank = {name: index for index, name in enumerate(priorities)}
-    waiting = card_query.narrow(selection, "status", ["waiting"])
-    tasks = select_cards(discover(ws=resolved), waiting) if waiting else []
-    tasks = sorted(tasks, key=lambda task: followup_sort_key(task, rank))
-    if not tasks:
-        print("No waiting follow-ups.")
-        return 0
-    print(f"Follow-ups ({len(tasks)} waiting):\n")
-    for task in tasks:
-        priority = str(task.frontmatter.get("priority") or "medium")
-        due = str(task.frontmatter.get("due") or "-")
-        ref = f"@{task.short_ref}"
-        print(f"  [{ref}] [{priority:<7}] {task.title}")
-        print(f"       due:  {due}")
-        print(f"       next: {task.next_action or '-'}")
-        print(f"       cmds: mt read {ref}")
-    return 0
-
-
 def command_search(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return _run_card_query(args, search=True, ws=ws)
 
@@ -1174,7 +1104,7 @@ def _validate_capture_args(root_parser: argparse.ArgumentParser, args: argparse.
     if args.kind == "note":
         if any(getattr(args, name, None) is not None
                for name in ("status", "task_type", "next_action", "next_action_file", "by")):
-            root_parser.error("--status, --type, --next-action, --next-action-file, and --by are task-only options")
+            root_parser.error("--status, --task-type, --next-action, --next-action-file, and --by are task-only options")
     else:
         if args.template:
             root_parser.error("--template applies only to notes")

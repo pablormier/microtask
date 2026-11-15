@@ -237,7 +237,7 @@ class ParsingTests(unittest.TestCase):
         for fields, flag in ((dict(status=("nope",)), "--status"), (dict(priority=("urgent",)), "--priority"),
                              (dict(kind=("note",), status=("doing",)), "--status"),
                              (dict(kind=("note",), priority=("low",)), "--priority"),
-                             (dict(kind=("note",), type=("bug",)), "--type"),
+                             (dict(kind=("note",), type=("bug",)), "--task-type"),
                              (dict(kind=("page",)), "--kind"),
                              (dict(updated_since="2026-03-02", updated_before="2026-03-02"), "--updated-since"),
                              (dict(due=("soon",)), "--due"), (dict(archived="yes"), "--archived"),
@@ -265,9 +265,10 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(card_query.query_from_args(parser.parse_args(["--hidden"]), env={}).hidden, "only")
 
 
-QUERY_FLAGS = [f"--{field.replace('_', '-')}" for field in card_query.LIST_FIELDS + card_query.DATE_FIELDS
+QUERY_FLAGS = ["--task-type" if field == "type" else f"--{field.replace('_', '-')}"
+               for field in card_query.LIST_FIELDS + card_query.DATE_FIELDS
                + ("needs_review", "triage", "archived", "hidden")]
-COMMANDS = (("list",), ("search",), ("focus",), ("view",), ("bulk-edit",), ("followup",),
+COMMANDS = (("list",), ("search",), ("focus",), ("bulk-edit",),
             ("time", "list"), ("time", "report"), ("web",))
 
 
@@ -283,7 +284,7 @@ class RegistrationTests(unittest.TestCase):
         root = tasklib.parser()
         for path in COMMANDS:
             options = set(subparser(root, path)._option_string_actions)
-            text_flags = ["--match", "--and", "--or", "--fuzzy"] if path[0] in ("search", "view") else []
+            text_flags = ["--match", "--and", "--or", "--fuzzy"] if path[0] == "search" else []
             for flag in QUERY_FLAGS + ["--all", "--include-archived", "--include-hidden", "--since",
                                        "--due-after", "--task-type"] + text_flags:
                 with self.subTest(command=" ".join(path), flag=flag):
@@ -382,19 +383,19 @@ print(json.dumps(out))
             with self.subTest(query=mapping):
                 self.assertEqual(sorted(listed), sorted(shown))
 
-    def test_project_scope_limits_followup_and_time_report(self):
+    def test_project_scope_limits_waiting_list_and_time_report(self):
         self.add("Wait on alpha", "--project", "alpha", "--status", "waiting")
         self.add("Wait on beta", "--project", "beta", "--status", "waiting")
         self.mt("time", "add", "Wait on alpha", "30m")
         self.mt("time", "add", "Wait on beta", "15m")
         scoped = self.environment(MT_PROJECT="alpha")
-        followup = self.mt("followup", env=scoped)
-        self.assertIn("Wait on alpha", followup.stdout)
-        self.assertNotIn("Wait on beta", followup.stdout)
-        self.assertIn("Scope: project alpha (MT_PROJECT)", followup.stderr)
+        waiting = self.mt("list", "--status", "waiting", env=scoped)
+        self.assertIn("Wait on alpha", waiting.stdout)
+        self.assertNotIn("Wait on beta", waiting.stdout)
+        self.assertIn("Scope: project alpha (MT_PROJECT)", waiting.stderr)
         report = self.mt("time", "report", env=scoped)
         self.assertIn("Total: 30m", report.stdout)
-        self.assertIn("Wait on beta", self.mt("followup", "--project", "beta", env=scoped).stdout)
+        self.assertIn("Wait on beta", self.mt("list", "--status", "waiting", "--project", "beta", env=scoped).stdout)
         self.assertIn("Total: 45m", self.mt("time", "report").stdout)
 
     def test_time_reports_include_archived_work_and_count_only_sessions_in_the_window(self):

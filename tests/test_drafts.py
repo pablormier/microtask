@@ -389,7 +389,10 @@ class DraftCliTests(unittest.TestCase):
         validate = self.run_mt("validate", env=env)
         self.assertEqual(validate.returncode, 0, validate.stdout + validate.stderr)
 
-    def test_task_metadata_cli_applies_one_hash_guarded_patch_and_preserves_claim_and_body(self) -> None:
+    def test_task_metadata_patch_applies_one_hash_guarded_patch_and_preserves_claim_and_body(self) -> None:
+        import operations
+        from workspace import Workspace
+
         actor = dict(self.env)
         actor["MT_USERNAME"] = "capture-test"
         created = self.run_mt("add", "Metadata target", "--status", "doing", "--by", "capture-test", env=actor)
@@ -404,13 +407,11 @@ class DraftCliTests(unittest.TestCase):
             "topic": "custom topic", "tags": ["code", "custom-tag"],
             "due": "2026-12-31T09:45:00", "due_kind": "reminder",
         }
-        metadata_args = (
-            "card-metadata", f"@{hashlib.sha256(path.stem.encode()).hexdigest()[:8]}",
-            "--expected-hash", before_hash, "--patch", json.dumps(patch), "--json",
-        )
+        ref = f"@{hashlib.sha256(path.stem.encode()).hexdigest()[:8]}"
         unauthorized = dict(self.env)
         unauthorized["MT_USERNAME"] = "another-user"
-        receipt = self.json_output(self.run_mt(*metadata_args, env=unauthorized))
+        ws = Workspace.at(self.root, environ=unauthorized)
+        receipt = operations.op_card_metadata(ws, ref, patch, expected_hash=before_hash, sync=False).receipt
         saved = path.read_bytes()
         frontmatter, saved_body = card_format.parse_frontmatter(saved.decode("utf-8"))
         metadata = card_format.parse_yaml(frontmatter or "")
@@ -421,12 +422,8 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(metadata["due_kind"], "reminder")
         self.assertEqual(receipt["content_hash"], hashlib.sha256(saved).hexdigest())
 
-        stale = self.run_mt(
-            "card-metadata", receipt["ref"], "--expected-hash", before_hash,
-            "--patch", json.dumps({"priority": "low"}), "--json",
-        )
-        self.assertNotEqual(stale.returncode, 0)
-        self.assertIn("conflict", stale.stderr)
+        with self.assertRaisesRegex(Exception, "conflict"):
+            operations.op_card_metadata(ws, receipt["ref"], {"priority": "low"}, expected_hash=before_hash, sync=False)
         self.assertEqual(path.read_bytes(), saved)
         self.assertEqual(self.run_mt("validate").returncode, 0)
 

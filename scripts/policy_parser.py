@@ -102,8 +102,7 @@ def parse_policy_yaml(content: str) -> dict:
 def workspace_root() -> Path:
     """Folder holding the cards and policy: MT_WORKSPACE when set, else the application's own."""
     value = os.environ.get("MT_WORKSPACE")
-    # A view is a disposable copy and only ever works on its own cards.
-    if not value or (APP_ROOT / "mt-view.json").is_file():
+    if not value:
         return APP_ROOT
     path = Path(value)
     return path.resolve() if path.is_absolute() else path

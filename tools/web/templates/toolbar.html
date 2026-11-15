@@ -5,10 +5,6 @@
           <span class="mt-brand-wordmark">MicroTask</span>
           <span class="mt-sr-only"> Kanban</span>
         </h1>
-        <span class="mt-view-indicator" x-show="view" role="status"
-              :title="view ? 'Changes apply to this copy. Source: ' + view.source : ''"
-              :aria-label="view ? 'View ' + view.name + ' copy; changes apply here. Source: ' + view.source : ''"
-              x-text="view ? 'View: ' + view.name + ' · copy' : ''"></span>
         <div class="mt-mode-toggle mt-segmented" role="group" aria-label="Dashboard mode">
           <button class="mt-segment" type="button" :aria-pressed="mode === 'tasks'" @click="mode = 'tasks'">Tasks</button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'focus'" @click="mode = 'focus'">Focus</button>

@@ -1,8 +1,7 @@
-"""Administrative, setup, skill, repository, view, and web CLI commands."""
+"""Administrative, setup, skill, repository, and web CLI commands."""
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,17 +30,10 @@ from store import (
     demo_active,
     discover,
     foreign_env,
-    item_json_record,
-    now_stamp,
-    select_cards,
-    view_marker,
     workspace_env,
 )
-from transaction import time_mutation_lock
 import validation
 from workspace import (
-    VIEW_MARKER,
-    VIEW_NAME_RE,
     Workspace,
     is_data_workspace,
 )
@@ -265,11 +257,6 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
              f"{notes_count} note{'s' if notes_count != 1 else ''}", "1")
     if demo_active(resolved):
         box_line("Demo workspace · bundled examples", "33")
-    marker = view_marker(resolved)
-    if marker is not None:
-        box_line(f"View copy: {marker['name']}", "33")
-        box_line(f"Source: {marker['source']}", location=True)
-        box_line("Changes stay in this view copy.")
     print(paint("╰" + "─" * (width - 2) + "╯", "36"))
 
     print()
@@ -339,78 +326,12 @@ def command_policy(args: argparse.Namespace) -> int:
     return 0
 
 
-def view_name_from_args(args: argparse.Namespace, query: card_query.Query) -> str:
-    supplied = getattr(args, "name", None)
-    source_text = query.text or next(iter(query.project or query.tag), None)
-    if supplied is None:
-        if not source_text:
-            raise ValueError("provide --name when no project, tag, or search text supplies a name")
-        slug = "-".join(re.findall(r"[a-z0-9]+", str(source_text).casefold()))
-        if not slug or len(slug) > 64:
-            raise ValueError("cannot derive a safe view name; provide --name")
-        return slug
-    if len(supplied) > 64 or not VIEW_NAME_RE.fullmatch(supplied):
-        raise ValueError("--name must be a lowercase slug using letters, digits, and single hyphens")
-    return supplied
-
-
-def validated_view_items(records: object, ws: Workspace | None = None) -> list[tuple[str, str, bytes, str]]:
-    """Verify selector provenance against the active card roots and current bytes."""
-    resolved_ws = _ws(ws)
-    if not isinstance(records, list):
-        raise ValueError("item selector did not return a JSON array")
-    root = store.cards_root(resolved_ws).resolve()
-    selected: list[tuple[str, str, bytes, str]] = []
-    seen_paths: set[str] = set()
-    destinations: set[str] = set()
-    for record in records:
-        if not isinstance(record, dict):
-            raise ValueError("item selector returned a malformed record")
-        kind, raw_path, expected_hash = record.get("kind"), record.get("path"), record.get("content_hash")
-        if (
-            not isinstance(kind, str)
-            or kind not in {"task", "note"}
-            or not isinstance(raw_path, str)
-            or not isinstance(expected_hash, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
-            or raw_path in seen_paths
-        ):
-            raise ValueError("item selector returned a malformed or duplicate item record")
-        relative = Path(raw_path)
-        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
-            raise ValueError(f"item selector returned an unsafe card path: {raw_path!r}")
-        source_path = resolved_ws.root / relative
-        try:
-            resolved = source_path.resolve(strict=True)
-            resolved.relative_to(root)
-        except (OSError, ValueError) as error:
-            raise ValueError(f"item selector returned a path outside the current {kind} cards: {raw_path}") from error
-        if source_path.is_symlink() or resolved.parent != root or resolved.suffix != ".md":
-            raise ValueError(f"item selector returned a path outside the current {kind} cards: {raw_path}")
-        if relative.parent != root.relative_to(resolved_ws.root.resolve()):
-            raise ValueError(f"item selector returned a path outside the current {kind} cards: {raw_path}")
-        raw = source_path.read_bytes()
-        actual_hash = hashlib.sha256(raw).hexdigest()
-        if actual_hash != expected_hash:
-            raise ValueError(f"selected card changed during view creation: {raw_path}; rerun the command")
-        destination_key = source_path.name
-        if destination_key in destinations:
-            raise ValueError(f"selected cards collide at cards/{source_path.name}")
-        seen_paths.add(raw_path)
-        destinations.add(destination_key)
-        selected.append((str(kind), raw_path, raw, actual_hash))
-    return selected
-
-
 def copy_application(
-    target: Path, *, local_policy: bool = False, examples: bool = False, ws: Workspace | None = None,
+    target: Path, *, examples: bool = False, ws: Workspace | None = None,
 ) -> None:
-    """Copy the self-contained application into TARGET with an empty cards/ folder.
-
-    Views keep this machine's mt-policy.local.yaml; a new workspace gets the demo examples.
-    """
+    """Copy the self-contained application into TARGET with an empty cards/ folder."""
     resolved = _ws(ws)
-    files = APPLICATION_FILES + (("mt-policy.local.yaml",) if local_policy else ())
+    files = APPLICATION_FILES
     folders = APPLICATION_FOLDERS + (("examples",) if examples else ())
     for name in files:
         # Settings come from the workspace in use; everything else is the application.
@@ -422,101 +343,6 @@ def copy_application(
             shutil.copytree(resolved.app_root / name, target / name,
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.swp", ".env"))
     (target / "cards").mkdir()
-
-
-def create_view(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    resolved = _ws(ws)
-    query = command_query(args, ws=resolved)
-    if query is None:
-        return 2
-    if query.match != "exact" and not query.text:
-        print("error: --and, --or, --fuzzy, and --match require search words", file=sys.stderr)
-        return 2
-    if query == card_query.DEFAULT and not args.name:
-        print("error: view requires search words, a filter, or --name", file=sys.stderr)
-        return 2
-    try:
-        name = view_name_from_args(args, query)
-    except ValueError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
-
-    views_root = resolved.root / ".mt" / "views"
-    destination = views_root / name
-    if destination.exists():
-        print(f"error: view already exists: {destination}", file=sys.stderr)
-        return 1
-
-    work_parent = resolved.scratch_root() / "task-views"
-    work_parent.mkdir(parents=True, exist_ok=True)
-    work_root = Path(tempfile.mkdtemp(prefix="run-", dir=work_parent))
-    try:
-        try:
-            selected = validated_view_items(
-                [item_json_record(card, ws=resolved) for card in select_cards(discover(ws=resolved), query)],
-                ws=resolved,
-            )
-        except (OSError, ValueError) as error:
-            print(f"error: could not create view: {error}", file=sys.stderr)
-            return 1
-
-        copy_application(work_root, local_policy=True, ws=resolved)
-        items: list[dict[str, str]] = []
-        for kind, source_path, raw, content_hash in selected:
-            filename = Path(source_path).name
-            target = work_root / "cards" / filename
-            target.write_bytes(raw)
-            items.append({"kind": kind, "path": source_path, "content_hash": content_hash})
-        marker = {
-            "version": 1,
-            "name": name,
-            "source": str(resolved.root.resolve()),
-            "created": now_stamp(),
-            "items": items,
-        }
-        (work_root / VIEW_MARKER).write_text(
-            json.dumps(marker, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        view_ws = Workspace(work_root, app_root=resolved.app_root)
-        try:
-            view_policy = store.policy(view_ws)
-            report = validation.audit_workspace(work_root, view_policy)
-        except (OSError, ValueError) as error:
-            print(f"error: {error}", file=sys.stderr)
-            print("error: selected items did not validate in the new view", file=sys.stderr)
-            return 1
-        if report.errors:
-            for error in report.errors:
-                print(f"  - {error}", file=sys.stderr)
-            print("error: selected items did not validate in the new view", file=sys.stderr)
-            return 1
-
-        views_root.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            print(f"error: view already exists: {destination}", file=sys.stderr)
-            return 1
-        os.rename(work_root, destination)
-        print(f"Created view: {destination}")
-        print(f"Selected items: {len(selected)}")
-        return 0
-    except (OSError, ValueError) as error:
-        print(f"error: could not create view: {error}", file=sys.stderr)
-        return 1
-    finally:
-        if work_root.exists():
-            shutil.rmtree(work_root)
-
-
-def command_view(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    # The existing mutation lock protects both the fixed selection snapshot
-    # and the exclusive destination check from concurrent card edits/views.
-    resolved = _ws(ws)
-    with time_mutation_lock(resolved):
-        resolved.reset_demo()
-        resolved.pin_demo()
-        resolved.maybe_seed_demo()
-        return create_view(args, ws=resolved)
 
 
 def command_repo_add(args: argparse.Namespace) -> int:

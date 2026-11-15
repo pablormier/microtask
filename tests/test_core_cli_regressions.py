@@ -737,7 +737,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertNotIn("countdown", self.run_mt("focus", "--next").stdout)
 
         self.assertEqual(self.run_mt("move", tracking.stem, "waiting").returncode, 0)
-        self.assertNotIn("countdown", self.run_mt("followup").stdout)
+        self.assertNotIn("countdown", self.run_mt("list", "--status", "waiting").stdout)
         self.assertEqual(self.run_mt("move", tracking.stem, "active").returncode, 0)
         self.assertEqual(self.run_mt("move", visible.stem, "waiting").returncode, 0)
         self.assertEqual(self.run_mt("add", "Visibility inbox work").returncode, 0)
@@ -866,9 +866,9 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         for arguments in (("--limit", "0", "needle"), ("needle", "--match", "all"), ("needle", "--due", "soon")):
             with self.subTest(arguments=arguments):
                 self.assertEqual(self.run_mt("search", *arguments).returncode, 2)
-        type_alias = self.run_mt("search", "needle", "--type", "note", "--json")
-        self.assertEqual(type_alias.returncode, 0, type_alias.stderr)
-        self.assertEqual(json.loads(type_alias.stdout), [])
+        rejected_type = self.run_mt("search", "needle", "--type", "note", "--json")
+        self.assertEqual(rejected_type.returncode, 2)
+        self.assertIn("--type", rejected_type.stderr)
 
     def test_note_creation_preserves_supplied_text_and_notes_listing(self) -> None:
         content = "Remember this\n\nKeep the exact wording."

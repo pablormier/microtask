@@ -66,9 +66,8 @@ class CLIUnificationTests(unittest.TestCase):
         before = self.snapshot(created["ref"])
         policy = self.root / "mt-policy.yaml"
         policy.write_text(policy.read_text().replace("auto_sync: false", "auto_sync: true"))
-        result = self.json(self.run_mt("card-metadata", created["ref"], "--kind", "note",
-                                      "--expected-hash", before["content_hash"],
-                                      "--patch", '{"title":"No change"}', "--json"))
+        result = self.json(self.run_mt("edit", created["ref"], "--title", "No change",
+                                       "--expected-hash", before["content_hash"], "--json"))
         self.assertFalse(result["changed"])
         self.assertEqual(self.snapshot(created["ref"]), before)
 
@@ -175,7 +174,7 @@ class CLIUnificationTests(unittest.TestCase):
 
     def test_task_only_creation_options_are_rejected_for_notes_with_one_message(self):
         for prefix in (("note",), ("add", "--kind", "note")):
-            for option in (("--status", "active"), ("--type", "bug"), ("--next-action", "x"),
+            for option in (("--status", "active"), ("--task-type", "bug"), ("--next-action", "x"),
                            ("--next-action-file", "-"), ("--by", "me")):
                 with self.subTest(prefix=prefix, option=option):
                     result = self.run_mt(*prefix, "Body", *option)
@@ -184,7 +183,7 @@ class CLIUnificationTests(unittest.TestCase):
         self.assertEqual(self.json(self.run_mt("list", "--kind", "note", "--json")), [])
 
     def test_comments_conversion_and_delete_keep_identity_and_content(self):
-        created = self.json(self.run_mt("add", "Original body", "--title", "Lifecycle task", "--status", "active", "--type", "bug", "--next-action", "Compare baselines.", "--needs-review", "--json"))
+        created = self.json(self.run_mt("add", "Original body", "--title", "Lifecycle task", "--status", "active", "--task-type", "bug", "--next-action", "Compare baselines.", "--needs-review", "--json"))
         ref = created["ref"]
         self.json(self.run_mt("comment", ref, "-m", "Progress saved", "--json"))
         noted = self.json(self.run_mt("convert", ref, "note", "--json"))
@@ -235,12 +234,6 @@ class CLIUnificationTests(unittest.TestCase):
             "--set", "priority=high", "--json",
         ))
         self.assertEqual({item["title"] for item in plan["items"]}, {"Earlier boundary"})
-        view = self.run_mt(
-            "view", "--kind", "task", "--due-before", "2026-12-02", "--name", "before-boundary",
-        )
-        self.assertEqual(view.returncode, 0, view.stderr.decode("utf-8", errors="replace"))
-        view_tasks = list((self.root / ".mt" / "views" / "before-boundary" / "cards").glob("*.md"))
-        self.assertEqual([path.stem for path in view_tasks], [listed[0]["id"]])
 
 
     def test_archive_hidden_all_selection_matches_between_collections(self) -> None:
@@ -254,14 +247,10 @@ class CLIUnificationTests(unittest.TestCase):
         searched = self.json(self.run_mt("search", "Visibility", "--kind", "task", "--archived", "--json"))
         plan = self.json(self.run_mt("bulk-edit", "--kind", "task", "--archived",
                                      "--set", "priority=high", "--json"))
-        view = self.run_mt("view", "--kind", "task", "--archived", "--name", "archived-visibility")
-        self.assertEqual(view.returncode, 0, view.stderr)
-        view_names = {path.stem for path in (self.root / ".mt/views/archived-visibility/cards").glob("*.md")}
         selected_names = {item["title"] for item in listed}
         self.assertEqual(selected_names, {"Visibility archived", "Visibility both"})  # only archived includes hidden ones
         self.assertEqual({item["title"] for item in searched}, selected_names)
         self.assertEqual({item["title"] for item in plan["items"]}, selected_names)
-        self.assertEqual(view_names, {item["id"] for item in listed})
         every = self.json(self.run_mt("list", "--kind", "task", "--all", "--json"))
         self.assertEqual({item["title"] for item in every}, {
             "Visibility ordinary", "Visibility archived", "Visibility hidden", "Visibility both",

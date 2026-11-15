@@ -40,7 +40,6 @@ FOCUS_REASONS = {
 RESTART_COMMANDS = {
     "inbox": "mt read {ref}",
     "active": "mt move {ref} doing",
-    "waiting": "mt followup",
     "default": "mt read {ref}",
 }
 VAGUE_RESTART_PATTERN = r"^(plan|research|work on|continue|figure out)\b"
@@ -277,12 +276,6 @@ class Card:
 
 def policy(ws: Workspace | None = None) -> dict:
     return _ws(ws).policy()
-
-
-
-def view_marker(ws: Workspace | None = None) -> dict[str, object] | None:
-    """Read and validate the provenance marker for a materialized view."""
-    return _ws(ws).view_marker()
 
 
 

@@ -135,7 +135,7 @@ delete anything without your OK.
 
 To let agents in another project track their work here, run
 `mt skills install --project NAME` in that project. See
-[Workspaces and views](docs/guide.md#workspaces-and-views) for keeping a
+[Workspaces](docs/guide.md#workspaces) for keeping a
 project's cards in a workspace of their own.
 
 With Git (the installer's default), `git diff` shows exactly what an agent

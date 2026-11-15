@@ -202,7 +202,6 @@ def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None
             if item.frontmatter.get(field):
                 name = str(item.frontmatter[field])
                 usage[field][name] = usage[field].get(name, 0) + 1
-    marker = store.view_marker()
     return {
         "workspace_key": hashlib.sha256(str(workspace_root().resolve()).encode("utf-8")).hexdigest()[:16],
         "status_labels": status_labels,
@@ -225,7 +224,6 @@ def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
         "api_token": api_token,
         "demo": store.demo_active(),
-        "view": ({"name": marker["name"], "source": marker["source"]} if marker else None),
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
     }

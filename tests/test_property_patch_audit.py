@@ -49,6 +49,10 @@ class PropertyPatchAuditTests(unittest.TestCase):
                 self.assertEqual(validated.returncode, 0, validated.stderr.decode("utf-8", errors="replace"))
 
     def test_dashboard_semantic_noop_preserves_human_yaml_and_explicit_nulls(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import operations
+        from workspace import Workspace
+
         created = self.create_card("note")
         path = self.root / created["path"]
         raw = path.read_bytes()
@@ -57,9 +61,10 @@ class PropertyPatchAuditTests(unittest.TestCase):
         raw = raw.replace(marker, b"# Keep this formatting comment.\npriority: none\nproject: null\ndue: null\ndue_kind: null\n", 1)
         path.write_bytes(raw)
         digest = hashlib.sha256(raw).hexdigest()
-        patch = json.dumps({"title": "Audit note", "project": None, "due": None, "due_kind": None})
-        result = self.json(self.run_mt("card-metadata", created["ref"], "--kind", "note",
-                                       "--expected-hash", digest, "--patch", patch, "--json"))
+        patch = {"title": "Audit note", "project": None, "due": None, "due_kind": None}
+        result = operations.op_card_metadata(
+            Workspace.at(self.root), created["ref"], patch, expected_hash=digest, kind="note", sync=False
+        ).receipt
         self.assertFalse(result["changed"])
         self.assertEqual(path.read_bytes(), raw)
 

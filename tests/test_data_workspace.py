@@ -68,18 +68,6 @@ class DataWorkspaceTests(unittest.TestCase):
         self.mt("draft", "create", "note", "--title", "Draft note", "--file", "-", input_text="Body\n")
         self.mt("validate")
         self.mt("done", ref)
-        self.mt("view", "--name", "notes", "--kind", "note")
-        view = self.data / ".mt" / "views" / "notes"
-        self.assertEqual(len(list((view / "cards").glob("*.md"))), 1)
-        self.assertIn("default_priority: low", (view / "mt-policy.yaml").read_text(encoding="utf-8"))
-        own_env = {key: value for key, value in self.env.items() if key != "MT_WORKSPACE"}
-        listed = subprocess.run([str(view / "mt"), "list", "--all", "--json"], env=own_env, text=True,
-                                capture_output=True, check=True)
-        self.assertEqual(len(json.loads(listed.stdout)), 1, "the view did not use its own cards")
-        # A view stays on its own cards even when it inherits MT_WORKSPACE, directly or through mt run.
-        subprocess.run([str(view / "mt"), "add", "In view"], env=self.env, capture_output=True, check=True)
-        self.mt("run", str(view / "mt"), "add", "Also in view")
-        self.assertEqual(len(list((view / "cards").glob("*.md"))), 3)
 
         second = json.loads(self.mt("read", "Second task", "--json").stdout)
         record = second[0] if isinstance(second, list) else second

@@ -20,21 +20,18 @@ from cli_admin import (
     command_skills_uninstall,
     command_update,
     command_validate,
-    command_view,
     command_web,
 )
 from cli_cards import (
     command_add,
     command_bulk_edit,
     command_capture,
-    command_card_metadata,
     command_comment,
     command_convert,
     command_delete,
     command_done,
     command_edit,
     command_focus,
-    command_followup,
     command_list,
     command_move,
     command_read,
@@ -42,7 +39,6 @@ from cli_cards import (
     command_show,
     command_topic_list,
     command_topic_rename,
-    command_unfocus,
     parse_edit_tags,
 )
 from cli_drafts import (
@@ -399,18 +395,10 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     card_query.add_query_arguments(focus)
     focus.set_defaults(func=command_focus)
 
-    unfocus = sub.add_parser("unfocus", help="clear the local focus selection")
-    unfocus.set_defaults(func=command_unfocus)
-
-    followup = sub.add_parser("followup", help="show waiting tasks needing follow-up")
-    followup.description = "Show waiting tasks, narrowed by the selection filters."
-    card_query.add_query_arguments(followup)
-    followup.set_defaults(func=command_followup)
-
     listing = sub.add_parser("list", help="list tasks and notes")
     listing.description = (
         "List visible, unarchived tasks and notes by default. Filters on different fields combine; "
-        "repeated values of one filter are alternatives. --status, --priority, and --type select tasks; "
+        "repeated values of one filter are alternatives. --status, --priority, and --task-type select tasks; "
         "--needs-review selects any card marked for review. --archived and --hidden take exclude "
         "(default), include, or only; --all includes both. "
         "Done tasks older than rules.done_window (default 2w) are left out unless --status, "
@@ -460,17 +448,6 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
                                     "properties, body) in one JSON array; implies --json, conflicts with --compact")
     search.set_defaults(func=command_search)
 
-    view = sub.add_parser("view", help="create an editable workspace copy")
-    view.add_argument("--name", help="view name; defaults to a safe slug from the selector")
-    card_query.add_query_arguments(view, text=True)
-    view.description = (
-        "Create an independent workspace copy of the cards selected by the same filters as list and search. "
-        "The source selection is copied once; later source changes are not included. "
-        "By default, the view directory name is a safe slug from the project, tag, or search text; "
-        "use --name when the selector does not provide a clear name."
-    )
-    view.set_defaults(func=command_view)
-
     show = sub.add_parser("show", help="human browser preview of an item or saved .mt Markdown file; agents use read")
     show.add_argument(
         "query",
@@ -501,20 +478,6 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
 
 
 def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
-    card_metadata = sub.add_parser(
-        "card-metadata", help=argparse.SUPPRESS,
-        description="Apply one hash-guarded card metadata patch for the dashboard.",
-    )
-    card_metadata.add_argument("ref", help="exact card reference")
-    card_metadata.add_argument("--kind", choices=("task", "note"), help="reject the patch unless the card has this kind")
-    card_metadata.add_argument("--expected-hash", required=True, help="whole-card SHA-256 precondition")
-    card_metadata.add_argument("--patch", required=True, help="JSON object containing metadata fields")
-    card_metadata.add_argument("--json", dest="as_json", action="store_true", help="print a saved receipt")
-    card_metadata.set_defaults(func=command_card_metadata)
-    # The dashboard uses this private command; public editing uses `mt edit`.
-    sub._choices_actions[:] = [action for action in sub._choices_actions
-                               if action.dest != "card-metadata"]
-
     edit = sub.add_parser("edit", help="edit one uniquely matched task or note")
     edit.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")
     add_match_mode_arguments(edit)
@@ -641,7 +604,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     add_match_mode_arguments(convert)
     convert.add_argument("destination", choices=("task", "note"), help="conversion destination")
     convert.add_argument("--status", help="status when converting a note to task; defaults to policy")
-    convert.add_argument("--type", dest="task_type", help="task type when converting a note to task")
+    convert.add_argument("--task-type", dest="task_type", help="task type when converting a note to task")
     convert.add_argument("--next-action", help="optional next action when converting a note to task")
     convert.add_argument("--json", dest="as_json", action="store_true", help="return the converted card receipt as JSON")
     convert.description = (
@@ -668,7 +631,7 @@ def parser() -> argparse.ArgumentParser:
                "Use 'mt <command> --help' for command-specific options and matching behavior. "
                "For metadata and body changes, see 'mt edit --help'; "
                "for configured values and defaults, use 'mt policy --json'. "
-               "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, followup, view, bulk-edit, "
+               "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, bulk-edit, "
                "time list, time report, and web to one project or topic; an explicit --project or --topic wins.",
     )
     root.add_argument(
@@ -687,6 +650,5 @@ def parser() -> argparse.ArgumentParser:
     _register_topic_parsers(sub)
     _register_query_parsers(sub)
     _register_mutation_parsers(sub)
-    public_commands = [name for name in sub.choices if name != "card-metadata"]
-    sub.metavar = "{" + ",".join(public_commands) + "}"
+    sub.metavar = "{" + ",".join(sub.choices) + "}"
     return root

@@ -50,7 +50,6 @@ function taskBoard() {
     apiToken: MT_CONFIG.api_token || "",
     workspaceKey: MT_CONFIG.workspace_key || "",
     demo: false,
-    view: null,
     showYearProgress: true,
     showDeadlineProgress: true,
     deadlineProgressStart: "created",
@@ -782,7 +781,6 @@ function taskBoard() {
       this.focusContext = meta.focus || { candidates: [], alerts: [], followup_ids: [] };
       this.runningTimers = meta.time_running || {};
       this.timerWarnHours = meta.timer_warn_hours || 8;
-      this.view = meta.view || null;
       this.demo = Boolean(meta.demo);
       this.showYearProgress = meta.show_year_progress !== false;
       this.showDeadlineProgress = meta.show_deadline_progress !== false;

@@ -56,22 +56,6 @@
   letter-spacing: -.02em;
   white-space: nowrap;
 }
-.mt-view-indicator {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: min(24rem, 32vw);
-  padding: 4px 8px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--mt-accent) 25%, transparent);
-  border-radius: var(--mt-radius-pill);
-  background: var(--mt-accent-soft);
-  color: var(--mt-accent);
-  font-size: var(--mt-font-size-xs);
-  font-weight: 600;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .mt-mode-toggle {
   display: inline-flex;
   flex: 0 0 auto;
@@ -129,7 +113,6 @@
   .mt-title-row { flex-wrap: wrap; gap: 6px 8px; }
   .mt-mode-toggle { max-width: 100%; }
   .mt-demo-banner { flex-basis: 100%; max-width: none; margin-left: 0; }
-  .mt-view-indicator { max-width: min(18rem, 42vw); }
 }
 @media (max-width: 38rem) {
   .mt-toolbar { padding: 8px 12px; }

@@ -29,18 +29,14 @@ from cli_admin import (  # noqa: F401
     command_skills_uninstall,
     command_update,
     command_validate,
-    command_view,
     command_web,
     copy_application,
-    create_view,
     init_data_workspace,
     installed_by_microtask,
     portable_invocation,
     render_skill_file,
     skill_sources,
     skills_invocation,
-    validated_view_items,
-    view_name_from_args,
 )
 from cli_cards import (  # noqa: F401
     _apply_bulk_plan_locked,
@@ -58,7 +54,6 @@ from cli_cards import (  # noqa: F401
     command_add,
     command_bulk_edit,
     command_capture,
-    command_card_metadata,
     command_comment,
     command_convert,
     command_create,
@@ -66,7 +61,6 @@ from cli_cards import (  # noqa: F401
     command_done,
     command_edit,
     command_focus,
-    command_followup,
     command_list,
     command_move,
     command_note_editor,
@@ -75,7 +69,6 @@ from cli_cards import (  # noqa: F401
     command_show,
     command_topic_list,
     command_topic_rename,
-    command_unfocus,
     parse_edit_tags,
     save_terminal_capture,
     sync_error_after_json_save,
@@ -218,11 +211,11 @@ def main() -> int:
         args.text = [args.file_text]
     if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
         root_parser.error("an empty body requires --title")
-    if args.command not in {"policy", "view"}:
+    if args.command != "policy":
         ws.pin_demo()
         ws.maybe_seed_demo()
     if args.command in {
-        "add", "note", "capture", "time", "focus", "unfocus", "followup", "list", "search", "view", "show", "edit", "bulk-edit",
+        "add", "note", "capture", "time", "focus", "list", "search", "show", "edit", "bulk-edit",
         "comment", "move", "convert", "done", "delete", "sync", "validate", "draft",
     }:
         show_workspace(command=args.command, ws=ws)

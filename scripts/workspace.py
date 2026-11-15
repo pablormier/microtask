@@ -3,18 +3,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, timedelta
-import json
 import os
 from pathlib import Path
 import re
 
-import card_format
 import policy_parser
 
 
 APP_ROOT = policy_parser.APP_ROOT
-VIEW_MARKER = "mt-view.json"
-VIEW_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DEMO_DATE_ANCHOR = date(2026, 1, 5)
 
 _DETERMINISTIC_POLICY_KEYS = {
@@ -40,7 +36,7 @@ def resolve_workspace_root(
     """Folder holding cards and policy: MT_WORKSPACE when set, else app_root."""
     env = os.environ if environ is None else environ
     value = env.get("MT_WORKSPACE")
-    if not value or (app_root / VIEW_MARKER).is_file():
+    if not value:
         return app_root
     return Path(value)
 
@@ -102,7 +98,7 @@ class Workspace:
         self.app_root = Path(app_root)
         self.environ = dict(os.environ if environ is None else environ)
         self._demo_state: bool | None = demo
-        self._policy_stamp: tuple[int | None, int | None, int | None] | None = None
+        self._policy_stamp: tuple[int | None, int | None] | None = None
         self._policy_cache: dict | None = None
 
     @classmethod
@@ -140,10 +136,6 @@ class Workspace:
     def is_data_only(self) -> bool:
         return self.root != self.app_root and is_data_workspace(self.root)
 
-    @property
-    def is_view(self) -> bool:
-        return (self.root / VIEW_MARKER).is_file()
-
     def real_cards_root(self) -> Path:
         return self.root / "cards"
 
@@ -153,60 +145,10 @@ class Workspace:
     def is_empty(self) -> bool:
         return not any(self.real_cards_root().glob("*.md"))
 
-    def view_marker(self) -> dict[str, object] | None:
-        """Read and validate the provenance marker for a materialized view."""
-        marker_path = self.root / VIEW_MARKER
-        if not marker_path.exists():
-            return None
-        try:
-            marker = json.loads(marker_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as error:
-            raise ValueError(f"view marker is malformed: {marker_path}: {error}") from error
-        expected = {"version", "name", "source", "created", "items"}
-        if not isinstance(marker, dict) or set(marker) != expected:
-            raise ValueError(f"view marker is malformed: {marker_path}")
-        if type(marker.get("version")) is not int or marker.get("version") != 1:
-            raise ValueError(f"unsupported view marker version in {marker_path}: {marker.get('version')!r}")
-        if (
-            not isinstance(marker.get("name"), str)
-            or not VIEW_NAME_RE.fullmatch(str(marker["name"]))
-            or not isinstance(marker.get("source"), str)
-            or not Path(str(marker["source"])).is_absolute()
-            or not isinstance(marker.get("created"), str)
-            or not card_format.is_timestamp(str(marker["created"]))
-            or not isinstance(marker.get("items"), list)
-        ):
-            raise ValueError(f"view marker is malformed: {marker_path}")
-        seen_paths: set[str] = set()
-        for item in marker["items"]:
-            if (
-                not isinstance(item, dict)
-                or set(item) != {"kind", "path", "content_hash"}
-                or not isinstance(item.get("kind"), str)
-                or item.get("kind") not in {"task", "note"}
-                or not isinstance(item.get("path"), str)
-                or not isinstance(item.get("content_hash"), str)
-                or not re.fullmatch(r"[0-9a-f]{64}", str(item["content_hash"]))
-                or str(item["path"]) in seen_paths
-            ):
-                raise ValueError(f"view marker is malformed: {marker_path}")
-            relative = Path(str(item["path"]))
-            if (
-                relative.is_absolute()
-                or relative.as_posix() != str(item["path"])
-                or relative.parent not in {Path("cards"), Path(".mt/demo/cards")}
-                or relative.suffix != ".md"
-                or relative.name in {"", ".", ".."}
-            ):
-                raise ValueError(f"view marker is malformed: {marker_path}")
-            seen_paths.add(str(item["path"]))
-        return marker
-
     def policy(self) -> dict:
         stamp = (
             _stat_mtime(self.root / "mt-policy.yaml"),
             _stat_mtime(self.root / "mt-policy.local.yaml"),
-            _stat_mtime(self.root / VIEW_MARKER),
         )
         if self._policy_cache is not None and self._policy_stamp == stamp:
             return self._policy_cache
@@ -215,8 +157,6 @@ class Workspace:
         rules = raw.get("rules")
         if isinstance(rules, dict):
             view["rules"] = {key: value for key, value in rules.items() if key in _DETERMINISTIC_RULE_KEYS}
-        if self.view_marker() is not None:
-            view.setdefault("rules", {})["auto_sync"] = False
         self._policy_stamp = stamp
         self._policy_cache = view
         return view

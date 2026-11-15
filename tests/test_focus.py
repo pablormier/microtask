@@ -360,22 +360,15 @@ class FocusTests(unittest.TestCase):
         self.assertNotIn("Other project task", result.stdout)
         self.assertTrue(first.exists())
 
-    def test_unfocus_and_focus_clear_restore_ranked_focus(self) -> None:
+    def test_focus_clear_restores_ranked_focus(self) -> None:
         ranked = self.add_ready_task("Ranked urgent task", priority="urgent")
         pinned = self.add_ready_task("Pinned low task", priority="low")
-        self.assertEqual(self.run_mt("focus", f"@{self.short_ref(pinned)}").returncode, 0)
-
-        unfocus = self.run_mt("unfocus")
-        self.assertEqual(unfocus.returncode, 0, unfocus.stderr)
-        self.assertFalse((self.root / ".mt" / "focus").exists())
-        self.assertIn("Ranked urgent task", unfocus.stdout)
-        self.assertNotIn("Pinned low task", unfocus.stdout)
-
         self.assertEqual(self.run_mt("focus", f"@{self.short_ref(pinned)}").returncode, 0)
         clear = self.run_mt("focus", "--clear")
         self.assertEqual(clear.returncode, 0, clear.stderr)
         self.assertFalse((self.root / ".mt" / "focus").exists())
         self.assertIn("Ranked urgent task", clear.stdout)
+        self.assertNotIn("Pinned low task", clear.stdout)
         self.assertTrue(ranked.exists())
 
     def test_stale_focus_pin_is_ignored(self) -> None:
@@ -493,31 +486,6 @@ Note.
                 result = self.run_mt(*arguments)
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("error:", result.stderr)
-
-    def test_followup_lists_waiting_tasks_by_due_then_priority(self) -> None:
-        overdue = (date.today() - timedelta(days=1)).isoformat()
-        future = (date.today() + timedelta(days=5)).isoformat()
-        undated = self.add_ready_task("Undated waiting", priority="urgent")
-        future_task = self.add_ready_task("Future waiting", priority="urgent", due=future)
-        overdue_task = self.add_ready_task("Overdue waiting", priority="low", due=overdue)
-        for title in ("Undated waiting", "Future waiting", "Overdue waiting"):
-            self.assertEqual(self.run_mt("move", title, "waiting").returncode, 0)
-
-        result = self.run_mt("followup")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Follow-ups (3 waiting):", result.stdout)
-        self.assertLess(result.stdout.index("Overdue waiting"), result.stdout.index("Future waiting"))
-        self.assertLess(result.stdout.index("Future waiting"), result.stdout.index("Undated waiting"))
-        self.assertIn("cmds: mt read @", result.stdout)
-        for task in (overdue_task, future_task, undated):
-            self.assertEqual(re.search(r"(?m)^status: (.+)$", task.read_text()).group(1), "waiting")
-
-    def test_followup_handles_empty_waiting_folder(self) -> None:
-        result = self.run_mt("followup")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("No waiting follow-ups.", result.stdout)
 
 
 if __name__ == "__main__":

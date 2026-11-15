@@ -11,7 +11,7 @@ How to work with microtask day to day. For every option of a command, run
 - [Topics, projects, and tags](#topics-projects-and-tags)
 - [The dashboard](#the-dashboard)
 - [Drafts](#drafts)
-- [Workspaces and views](#workspaces-and-views)
+- [Workspaces](#workspaces)
 - [Settings](#settings)
 
 ## Cards: tasks and notes
@@ -67,14 +67,14 @@ mt read @4e91a7c2
 ```
 
 One set of filters selects cards everywhere: `list`, `search`, `focus`,
-`followup`, `view`, `bulk-edit`, `time list`, `time report`, `mt web`, and the
+`bulk-edit`, `time list`, `time report`, `mt web`, and the
 dashboard's filter bar. Filters on different fields combine; repeat a filter to
 accept several values (`--status active --status doing`). The fields are
-`--kind`, `--status`, `--priority`, `--type`, `--project`, `--topic`, `--tag`,
+`--kind`, `--status`, `--priority`, `--task-type`, `--project`, `--topic`, `--tag`,
 `--needs-review`, `--triage`, the date ranges `--created-*`, `--updated-*`,
 `--completed-*`, and `--due-*` (with `since` and `before`), `--due MODE`
 (`overdue`, `today`, `week`, `any`, `none`), `--archived`, and `--hidden`. `search`
-and `view` also take words, with `--and`, `--or`, or `--fuzzy`. Sorting,
+also takes words, with `--and`, `--or`, or `--fuzzy`. Sorting,
 limits, and `--json` belong to `list` and `search`; `--full` prints whole cards
 as `mt read --json` does.
 
@@ -112,8 +112,8 @@ mt done @4e91a7c2 --note "Appointment booked"
 
 - Moving a task to `doing` claims it under your name, so people and agents
   sharing the workspace don't pick up the same task. Finishing releases it.
-- `mt focus` suggests one task to work on next; `mt followup` lists waiting
-  tasks that need a nudge.
+- `mt focus` suggests one task to work on next; `mt list --status waiting`
+  lists waiting tasks that need a nudge.
 - `mt time start REF` claims a task in `doing` and saves and switches your
   previous timer. Use `--parallel` to keep your other timers running. Timers
   belong to the username selected by `--by`, `MT_USERNAME`, or workspace defaults.
@@ -178,7 +178,7 @@ mt web --project release --project docs --port 8765  # a fixed port keeps bookma
 ```
 
 To stay in one project from the command line, set `MT_PROJECT` (or
-`MT_TOPIC`) for the shell. `add`, `note`, `list`, `search`, `focus`, `view`,
+`MT_TOPIC`) for the shell. `add`, `note`, `list`, `search`, `focus`,
 `bulk-edit`, and `web` then behave as if you had passed `--project`, and print a
 `Scope:` line so you can tell. An explicit `--project` or `--topic` wins.
 
@@ -206,7 +206,7 @@ mt draft recover          # recover editor copies left behind by a crash
 Applying a draft checks that neither the draft nor its target card changed in
 the meantime, so a stale draft never overwrites newer work.
 
-## Workspaces and views
+## Workspaces
 
 A **workspace** is one folder (normally one Git repository) holding the app,
 your `cards/`, and settings. An installed `mt` always uses the workspace it
@@ -267,16 +267,6 @@ the same `mt repo add`. Without an alias the skills use the workspace's path,
 so keep them out of Git. Run `install` again after `mt update` to refresh them,
 and `mt skills uninstall` to remove them. Skills of your own in those folders
 are never changed.
-
-A **view** is a disposable, editable copy of part of a workspace, for focused
-work or experiments. Edits stay in the copy and are never written back, so to
-see or work on one project's live cards, filter instead (`mt list --project`,
-`mt web --project`):
-
-```sh
-mt view --project release             # creates .mt/views/release
-.mt/views/release/mt list
-```
 
 ## Settings
 
