@@ -185,11 +185,83 @@
   min-height: 0;
 }
 .mt-zen-editor-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+/* Floating IDE-style @mention autocomplete popup */
+ul.mt-mention-menu {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  width: min(24rem, calc(100vw - 24px));
+  max-height: 13.5rem;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface-raised);
+  box-shadow: var(--mt-shadow-dialog);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+li.mt-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-inline-size: 0;
+  min-block-size: 30px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--mt-radius-sm);
+  background: transparent;
+  color: var(--mt-text);
+  font-family: var(--mt-font-family-sans);
+  font-size: var(--mt-font-size-xs);
+  line-height: 1.3;
+  text-align: left;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+li.mt-mention-option.is-active {
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent-hover);
+}
+li.mt-mention-option .mt-ref {
+  flex: 0 0 auto;
+  font-size: var(--mt-font-size-xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+.mt-mention-title {
+  flex: 1 1 0%;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mt-font-size-sm);
+  font-weight: 500;
+}
+.mt-mention-meta {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+}
+li.mt-mention-option.is-active .mt-mention-meta {
+  color: var(--mt-accent-hover);
+  opacity: .82;
 }
 .mt-zen-workspace.is-zen {
   flex: 1 1 auto;
@@ -266,6 +338,10 @@
 .mt-composer.is-zen .mt-composer-body.mt-field:focus {
   border-color: transparent;
   box-shadow: none;
+}
+.mt-composer.is-zen .mt-composer-body.mt-field:focus-visible {
+  outline: 2px solid var(--mt-focus);
+  outline-offset: 4px;
 }
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
   margin-bottom: var(--mt-space-4);

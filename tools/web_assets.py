@@ -62,6 +62,7 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
         "metadata_editor.js",
         "draft_store.js",
         "editor_surface.js",
+        "mention_autocomplete.js",
         "capture_composer.js",
         "property_editor.js",
         "content_editor.js",
@@ -89,6 +90,16 @@ def _render_picker_list(template: str, field: str, *, empty_text: str, selected_
     })
 
 
+def _render_mention_menu(template: str, *, mention_id: str, controller: str,
+                         ctx_expr: str, input_expr: str) -> str:
+    return fill_placeholders(template, {
+        "{mention_id}": mention_id,
+        "{mention_controller}": controller,
+        "{mention_ctx}": ctx_expr,
+        "{mention_input}": input_expr,
+    })
+
+
 def load_template(web_dir: Path = WEB_DIR) -> str:
     templates_dir = web_dir / "templates"
     index_html = (web_dir / "index.html").read_text(encoding="utf-8")
@@ -96,6 +107,7 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
     toolbar = (templates_dir / "toolbar.html").read_text(encoding="utf-8")
     timer_menu = (templates_dir / "timer_menu.html").read_text(encoding="utf-8")
     picker_list = (templates_dir / "picker_list.html").read_text(encoding="utf-8")
+    mention_menu = (templates_dir / "mention_menu.html").read_text(encoding="utf-8")
     view_focus = (
         (templates_dir / "views" / "focus.html").read_text(encoding="utf-8")
         .replace("{card}", card)
@@ -107,8 +119,24 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
     drawer = (
         (templates_dir / "drawer.html").read_text(encoding="utf-8")
         .replace("{timer_menu}", timer_menu.replace("{timer_task}", "selected").replace("{timer_blocked}", " || !!contentEditor.draft"))
+        .replace("{detail_mention_menu}", _render_mention_menu(
+            mention_menu,
+            mention_id="mt-detail-mention",
+            controller="contentEditor",
+            ctx_expr="contentContext()",
+            input_expr="$refs.detailContentInput",
+        ))
     )
-    capture_composer = (templates_dir / "capture_composer.html").read_text(encoding="utf-8")
+    capture_composer = (
+        (templates_dir / "capture_composer.html").read_text(encoding="utf-8")
+        .replace("{composer_mention_menu}", _render_mention_menu(
+            mention_menu,
+            mention_id="mt-composer-mention",
+            controller="captureComposer",
+            ctx_expr="captureContext()",
+            input_expr="$refs.composerBody",
+        ))
+    )
     card_metadata_editor = fill_placeholders(
         (templates_dir / "card_metadata_editor.html").read_text(encoding="utf-8"),
         {

@@ -547,4 +547,8 @@ textarea.mt-content-input { min-height: 22rem; margin: 0; font-family: var(--mt-
   border-color: transparent;
   box-shadow: none;
 }
+.mt-detail.is-zen textarea.mt-content-input:focus-visible {
+  outline: 2px solid var(--mt-focus);
+  outline-offset: 4px;
+}
 

@@ -1,0 +1,19 @@
+<ul id="{mention_id}-list" class="mt-mention-menu" role="listbox" aria-label="Mention card"
+    x-cloak
+    x-show="{mention_controller}.mention?.open && {mention_controller}.mention?.items?.length"
+    x-transition.opacity.duration.100ms
+    :style="'top:' + ({mention_controller}.mention?.pos?.top || 0) + 'px;left:' + ({mention_controller}.mention?.pos?.left || 0) + 'px;transform:' + ({mention_controller}.mention?.pos?.placeAbove ? 'translateY(-100%)' : 'none')">
+  <template x-for="(item, idx) in ({mention_controller}.mention?.items || [])" :key="item.ref">
+    <li class="mt-mention-option" role="option"
+        :id="'{mention_id}-' + idx"
+        :class="{ 'is-active': idx === {mention_controller}.mention?.activeIndex }"
+        :aria-selected="String(idx === {mention_controller}.mention?.activeIndex)"
+        @mousedown.prevent
+        @mousemove="if ({mention_controller}.mention) {mention_controller}.mention.activeIndex = idx"
+        @click="{mention_controller}.pickMention({mention_ctx}, item, {mention_input})">
+      <span class="mt-ref" x-text="item.ref"></span>
+      <span class="mt-mention-title" x-text="item.title"></span>
+      <span class="mt-mention-meta" x-text="[item.kind === 'note' ? 'Note' : 'Task', item.topic || item.status].filter(Boolean).join(' · ')"></span>
+    </li>
+  </template>
+</ul>

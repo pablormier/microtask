@@ -16,6 +16,60 @@ function createCaptureComposer() {
     previewHtml: "",
     _previewTimer: null,
     surface: null,
+    mention: typeof createMentionAutocomplete === "function" ? createMentionAutocomplete() : null,
+
+    updateMention(ctx, textarea) {
+      if (!this.mention) return;
+      const cards = ctx && typeof ctx.getCards === "function" ? ctx.getCards() : [];
+      this.mention.update(textarea, cards);
+    },
+
+    handleMentionKeydown(ctx, event, textarea) {
+      if (!this.mention) return false;
+      const handled = this.mention.handleKeydown(event, textarea, nextText => {
+        if (!this.draft) return;
+        this.draft.text = nextText;
+        this.persist(ctx);
+        this.schedulePreview();
+      });
+      if (handled && this.mention.open && ctx && typeof ctx.nextTick === "function") {
+        ctx.nextTick(() => {
+          const activeEl = typeof document !== "undefined" && document.getElementById
+            ? document.getElementById("mt-composer-mention-" + this.mention.activeIndex)
+            : null;
+          if (activeEl && typeof activeEl.scrollIntoView === "function") {
+            activeEl.scrollIntoView({ block: "nearest" });
+          }
+        });
+      }
+      return handled;
+    },
+
+    handleMentionKeyup(ctx, event, textarea) {
+      if (!this.mention || !this.mention.open || !event) return;
+      if (event.isComposing || event.keyCode === 229) return;
+      if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+        this.updateMention(ctx, textarea);
+      }
+    },
+
+    pickMention(ctx, item, textarea) {
+      if (!this.mention) return;
+      this.mention.apply(textarea, item, nextText => {
+        if (!this.draft) return;
+        this.draft.text = nextText;
+        this.persist(ctx);
+        this.schedulePreview();
+      });
+    },
+
+    closeMention() {
+      if (this.mention) this.mention.close();
+    },
+
+    repositionMention(textarea) {
+      if (this.mention) this.mention.reposition(textarea);
+    },
 
     ensureSurface(ctx, hostEl) {
       if (typeof createEditorSurface !== "function") return null;
@@ -86,6 +140,7 @@ function createCaptureComposer() {
       const next = typeof force === "boolean" ? force : !this.zen;
       this.zen = next;
       this.zenMetaOpen = false;
+      this.closeMention();
       if (next && (this.zenView === "split" || this.zenView === "preview")) {
         this.refreshPreview();
       }
@@ -103,6 +158,7 @@ function createCaptureComposer() {
     setZenView(ctx, view) {
       if (view !== "write" && view !== "split" && view !== "preview") return;
       this.zenView = view;
+      if (view === "preview") this.closeMention();
       if (view === "split" || view === "preview") {
         if (this._previewTimer) {
           clearTimeout(this._previewTimer);
@@ -120,6 +176,10 @@ function createCaptureComposer() {
     },
 
     handleEscape(ctx) {
+      if (this.mention && this.mention.open) {
+        this.mention.close();
+        return;
+      }
       if (this.zenMetaOpen) {
         this.zenMetaOpen = false;
         return;
@@ -317,6 +377,7 @@ function createCaptureComposer() {
         this._previewTimer = null;
       }
       if (this.surface) this.surface.destroy();
+      if (this.mention) this.mention.close();
       this.zen = false;
       this.zenView = "write";
       this.zenMetaOpen = false;

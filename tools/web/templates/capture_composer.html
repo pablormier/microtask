@@ -88,9 +88,20 @@
                      x-effect="captureComposer.syncSurface(captureContext(), $el)">
                   <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.text"
                             x-show="!captureComposer.isCustomMounted()"
-                            @input="captureComposer.persist(captureContext()); captureComposer.schedulePreview()" :disabled="captureComposer.saving"
+                            @input="captureComposer.persist(captureContext()); captureComposer.schedulePreview(); captureComposer.updateMention(captureContext(), $el)"
+                            @click="captureComposer.updateMention(captureContext(), $el)"
+                            @keydown="captureComposer.handleMentionKeydown(captureContext(), $event, $el)"
+                            @keyup="captureComposer.handleMentionKeyup(captureContext(), $event, $el)"
+                            @scroll="captureComposer.repositionMention($el)"
+                            @blur="captureComposer.closeMention()"
+                            :disabled="captureComposer.saving"
+                            :aria-expanded="String(Boolean(captureComposer.mention?.open && captureComposer.mention?.items?.length))"
+                            aria-controls="mt-composer-mention-list"
+                            aria-autocomplete="list"
+                            :aria-activedescendant="(captureComposer.mention?.open && captureComposer.mention?.items?.length) ? ('mt-composer-mention-' + captureComposer.mention.activeIndex) : null"
                             :placeholder="!captureComposer.draft ? '' : (captureComposer.draft?.mode === 'edit' ? '' : (captureComposer.draft?.kind === 'task' ? 'What do you want to accomplish?' : 'Write a thought, observation, or meeting note…'))"
                             aria-label="Capture text"></textarea>
+                  {composer_mention_menu}
                 </div>
                 <div class="mt-preview mt-zen-preview" x-show="captureComposer.zen && (captureComposer.zenView === 'split' || captureComposer.zenView === 'preview')" x-html="captureComposer.previewHtml"></div>
               </div>

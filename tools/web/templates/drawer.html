@@ -1,5 +1,5 @@
       <template x-if="selected">
-        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" @click.self="if (!(contentEditor.draft && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.draft && contentEditor.zen) { contentEditor.toggleZen(contentContext(), false); } else if (!captureComposer.open) { clearSelection(); }">
+        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" @click.self="if (!(contentEditor.draft && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.draft && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.draft) contentEditor.toggleZen(contentContext())"
@@ -84,10 +84,20 @@
                         <textarea class="mt-field mt-content-input" x-ref="detailContentInput"
                                   x-show="!contentEditor.isCustomMounted()"
                                   x-model="contentEditor.text"
-                                  @input="contentEditor.persist(contentContext()); contentEditor.schedulePreview(contentContext())"
+                                  @input="contentEditor.persist(contentContext()); contentEditor.schedulePreview(contentContext()); contentEditor.updateMention(contentContext(), $el)"
+                                  @click="contentEditor.updateMention(contentContext(), $el)"
+                                  @keydown="contentEditor.handleMentionKeydown(contentContext(), $event, $el)"
+                                  @keyup="contentEditor.handleMentionKeyup(contentContext(), $event, $el)"
+                                  @scroll="contentEditor.repositionMention($el)"
+                                  @blur="contentEditor.closeMention()"
                                   :disabled="draftBusy || contentEditor.saving" aria-label="Content Markdown"
+                                  :aria-expanded="String(Boolean(contentEditor.mention?.open && contentEditor.mention?.items?.length))"
+                                  aria-controls="mt-detail-mention-list"
+                                  aria-autocomplete="list"
+                                  :aria-activedescendant="(contentEditor.mention?.open && contentEditor.mention?.items?.length) ? ('mt-detail-mention-' + contentEditor.mention.activeIndex) : null"
                                   @keydown.meta.enter.prevent="contentEditor.save(contentContext())"
                                   @keydown.ctrl.enter.prevent="contentEditor.save(contentContext())"></textarea>
+                        {detail_mention_menu}
                       </div>
                       <div class="mt-preview mt-content-preview mt-zen-preview"
                            x-show="contentEditor.zen ? (contentEditor.zenView === 'split' || contentEditor.zenView === 'preview') : contentEditor.tab === 'preview'"

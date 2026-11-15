@@ -11,6 +11,58 @@ function createContentEditor() {
     previewHtml: "",
     _previewTimer: null,
     surface: null,
+    mention: typeof createMentionAutocomplete === "function" ? createMentionAutocomplete() : null,
+
+    updateMention(ctx, textarea) {
+      if (!this.mention) return;
+      const cards = ctx && typeof ctx.getCards === "function" ? ctx.getCards() : [];
+      this.mention.update(textarea, cards);
+    },
+
+    handleMentionKeydown(ctx, event, textarea) {
+      if (!this.mention) return false;
+      const handled = this.mention.handleKeydown(event, textarea, nextText => {
+        this.text = nextText;
+        this.persist(ctx);
+        this.schedulePreview(ctx);
+      });
+      if (handled && this.mention.open && ctx && typeof ctx.nextTick === "function") {
+        ctx.nextTick(() => {
+          const activeEl = typeof document !== "undefined" && document.getElementById
+            ? document.getElementById("mt-detail-mention-" + this.mention.activeIndex)
+            : null;
+          if (activeEl && typeof activeEl.scrollIntoView === "function") {
+            activeEl.scrollIntoView({ block: "nearest" });
+          }
+        });
+      }
+      return handled;
+    },
+
+    handleMentionKeyup(ctx, event, textarea) {
+      if (!this.mention || !this.mention.open || !event) return;
+      if (event.isComposing || event.keyCode === 229) return;
+      if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+        this.updateMention(ctx, textarea);
+      }
+    },
+
+    pickMention(ctx, item, textarea) {
+      if (!this.mention) return;
+      this.mention.apply(textarea, item, nextText => {
+        this.text = nextText;
+        this.persist(ctx);
+        this.schedulePreview(ctx);
+      });
+    },
+
+    closeMention() {
+      if (this.mention) this.mention.close();
+    },
+
+    repositionMention(textarea) {
+      if (this.mention) this.mention.reposition(textarea);
+    },
     localSaved: true,
     saving: false,
     error: "",
@@ -79,6 +131,7 @@ function createContentEditor() {
       if (!this.draft) return;
       const next = typeof force === "boolean" ? force : !this.zen;
       this.zen = next;
+      this.closeMention();
       if (next) {
         if (this.tab === "preview") this.zenView = "preview";
         else if (this.zenView === "preview") this.zenView = "write";
@@ -104,6 +157,7 @@ function createContentEditor() {
     setZenView(ctx, view) {
       if (view !== "write" && view !== "split" && view !== "preview") return;
       this.zenView = view;
+      if (view === "preview") this.closeMention();
       if (view === "split" || view === "preview") {
         if (this._previewTimer) {
           clearTimeout(this._previewTimer);
@@ -123,6 +177,10 @@ function createContentEditor() {
     },
 
     handleEscape(ctx) {
+      if (this.mention && this.mention.open) {
+        this.mention.close();
+        return true;
+      }
       if (this.zen) {
         this.toggleZen(ctx, false);
         return true;
@@ -179,6 +237,7 @@ function createContentEditor() {
         this._previewTimer = null;
       }
       if (this.surface) this.surface.destroy();
+      if (this.mention) this.mention.close();
       this.draft = null;
       this.text = "";
       this.zen = false;

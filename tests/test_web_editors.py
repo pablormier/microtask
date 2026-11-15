@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
     ROOT / "tools/web/js/card_helpers.js",
     ROOT / "tools/web/js/editor_surface.js",
+    ROOT / "tools/web/js/mention_autocomplete.js",
     ROOT / "tools/web/js/capture_composer.js",
     ROOT / "tools/web/js/property_editor.js",
     ROOT / "tools/web/js/content_editor.js",
@@ -242,6 +243,102 @@ try {
   assert.equal(composer.isCustomMounted(),false);
 } finally {
   delete global.window;
+}
+""")
+
+    def test_mention_autocomplete_matches_refs_and_keywords_and_inserts(self) -> None:
+        self.run_node(r"""
+const cards=[
+  {ref:'@4e91a7c2',title:'Fix login timeout bug',kind:'task',status:'active',project:'auth',topic:'work',tags:['bug']},
+  {ref:'@8a12bc34',title:'Quarterly roadmap notes',kind:'note',status:'',project:'planning',topic:'work',tags:['strategy']},
+  {ref:'@11223344',title:'Dentist appointment',kind:'task',status:'inbox',project:'',topic:'personal',tags:['errand']},
+];
+assert.deepEqual(findMentionTrigger('See @log', 8), {query:'log', start:4, end:8});
+assert.deepEqual(findMentionTrigger('See @fix login', 14), {query:'fix login', start:4, end:14});
+assert.equal(findMentionTrigger('email@example.com', 17), null);
+
+assert.equal(matchMentionCards(cards, '4e9')[0].ref, '@4e91a7c2');
+assert.equal(matchMentionCards(cards, 'login bug')[0].ref, '@4e91a7c2');
+assert.equal(matchMentionCards(cards, 'strategy')[0].ref, '@8a12bc34');
+
+const mention=createMentionAutocomplete();
+const textarea={
+  value:'Check @road',
+  selectionStart:11,
+  focused:false,
+  selectionRange:null,
+  focus(){ this.focused=true; },
+  setSelectionRange(a,b){ this.selectionRange=[a,b]; },
+};
+mention.update(textarea, cards);
+assert.equal(mention.open,true);
+assert.equal(mention.items.length,1);
+assert.equal(mention.items[0].ref,'@8a12bc34');
+
+let updated='';
+const handled=mention.handleKeydown(
+  {key:'Enter',metaKey:false,ctrlKey:false,shiftKey:false,preventDefault(){},stopPropagation(){}},
+  textarea,
+  next=>{ updated=next; },
+);
+assert.equal(handled,true);
+assert.equal(updated,'Check @8a12bc34 ');
+assert.equal(textarea.value,'Check @8a12bc34 ');
+assert.deepEqual(textarea.selectionRange,[16,16]);
+assert.equal(mention.open,false);
+
+// Escape closes mention menu before closing Zen or composer
+textarea.value='See @';
+textarea.selectionStart=5;
+mention.update(textarea, cards);
+assert.equal(mention.open,true);
+assert.equal(mention.items.length,3);
+// IME composition events are ignored so candidate confirmation does not insert a mention
+assert.equal(mention.handleKeydown({key:'Enter',isComposing:true,preventDefault(){},stopPropagation(){}}, textarea, ()=>{}), false);
+assert.equal(mention.handleKeydown({key:'Enter',keyCode:229,preventDefault(){},stopPropagation(){}}, textarea, ()=>{}), false);
+assert.equal(mention.open,true);
+mention.handleKeydown({key:'ArrowDown',preventDefault(){}}, textarea, ()=>{});
+assert.equal(mention.activeIndex,1);
+mention.handleKeydown({key:'Escape',preventDefault(){},stopPropagation(){}}, textarea, ()=>{});
+assert.equal(mention.open,false);
+
+// Moving caret away from @trigger closes menu instead of applying at stale range
+textarea.value='See @road and more';
+textarea.selectionStart=9;
+mention.update(textarea, cards);
+assert.equal(mention.open,true);
+textarea.selectionStart=18;
+assert.equal(mention.handleKeydown({key:'Enter',preventDefault(){},stopPropagation(){}}, textarea, ()=>{}), false);
+assert.equal(mention.open,false);
+
+// Caret positioning anchors the floating menu near the @ token and flips above near bottom edge
+global.window={
+  innerWidth:800,
+  innerHeight:300,
+  getComputedStyle:()=>({fontSize:'14px',lineHeight:'20px'}),
+};
+global.document={
+  body:{appendChild(){},removeChild(){}},
+  createElement:(tag)=>tag==='span'
+    ? {offsetLeft:42,offsetTop:16,offsetHeight:20,textContent:''}
+    : {style:{},textContent:'',appendChild(){}},
+};
+try {
+  textarea.value='Hello @road';
+  textarea.selectionStart=11;
+  textarea.scrollTop=0;
+  textarea.scrollLeft=0;
+  textarea.getBoundingClientRect=()=>({left:100,top:50,bottom:220,width:400,height:170});
+  mention.update(textarea, cards);
+  assert.deepEqual(mention.pos, {top:90, left:142, placeAbove:false});
+
+  // Near bottom of viewport flips above caret
+  textarea.getBoundingClientRect=()=>({left:600,top:240,bottom:290,width:400,height:50});
+  mention.reposition(textarea);
+  assert.deepEqual(mention.pos, {top:252, left:404, placeAbove:true});
+} finally {
+  delete global.window;
+  delete global.document;
 }
 """)
 

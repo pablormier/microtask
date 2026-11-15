@@ -195,10 +195,11 @@ function taskBoard() {
       this.loading = true;
       this.loadError = "";
       try {
+        await this.refreshItems();
         if (!this.ready) {
           this.restoreLocalWorkspaceDrafts();
         }
-        await Promise.all([this.refreshItems(), this.loadWorkspaceDrafts()]);
+        await this.loadWorkspaceDrafts();
         this.ready = true;
         this.$nextTick(() => this.readCardLocation());
       } catch (error) {

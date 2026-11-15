@@ -12,7 +12,7 @@ function createDetailController() {
     trapDialogFocus(event, dialog) {
       if (!dialog || !dialog.querySelectorAll) return;
       const focusable = Array.from(dialog.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+        ':is(a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]):not([tabindex="-1"])'
       )).filter(element => element.getClientRects().length
         && getComputedStyle(element).visibility !== "hidden"
         && !element.closest("[inert]")
