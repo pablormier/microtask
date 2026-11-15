@@ -112,12 +112,20 @@ function createDraftCoordinator() {
 
     visibleDrafts() {
       const query = this.draftSearch.trim().toLowerCase();
+      const modeFilter = this.draftModeFilter || "all";
       return this.drafts.filter(draft => {
+        if (modeFilter !== "all" && draft.mode !== modeFilter) return false;
         if (!query) return true;
         const target = this.tasks.find(item => item.path === draft.target);
-        return [draft.title, draft.kind, draft.mode, draft.body, target && target.title, draft.target]
+        return [draft.title, draft.kind, draft.mode, draft.body, target && target.title, target && target.ref, draft.target]
           .some(value => String(value || "").toLowerCase().includes(query));
       }).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+    },
+
+    draftTargetRef(draft) {
+      if (!draft || !draft.target) return "";
+      const target = this.tasks.find(item => item.path === draft.target);
+      return target ? (target.ref || "") : "";
     },
 
     draftDisplayTitle(draft) {
@@ -274,6 +282,7 @@ function createDraftCoordinator() {
         this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
       }
       this.draftWorkspaceStatus = "Local recovery copy dismissed";
+      if (typeof this.notify === "function") this.notify("Local recovery copy dismissed");
     },
 
     async recoverLocalWorkspaceDraft(draft) {
@@ -395,10 +404,13 @@ function createDraftCoordinator() {
           this.captureComposer.open = false;
         }
         this.draftWorkspaceStatus = "Draft discarded";
+        if (typeof this.notify === "function") this.notify("Draft discarded");
       } catch (error) {
         this.draftWorkspaceStatus = "Error";
-        this.captureComposer.message = error.message || "Could not discard draft";
+        const message = error.message || "Could not discard draft";
+        this.captureComposer.message = message;
         this.captureComposer.messageError = true;
+        if (typeof this.notify === "function") this.notify(message, true);
       } finally {
         this.draftBusy = false;
       }

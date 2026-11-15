@@ -1519,6 +1519,52 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
         self.assertEqual(len(spans),1)
         self.assertEqual(body[spans[0]['start']:spans[0]['end']],ref)
 
+    def test_drafts_view_filtering_target_ref_and_discard_toast(self) -> None:
+        drafts_html = (Path(__file__).resolve().parents[1] / "tools" / "web" / "templates" / "views" / "drafts.html").read_text(encoding="utf-8")
+        self.assertIn('class="mt-panel mt-surface"', drafts_html)
+        self.assertIn('class="mt-view-controls"', drafts_html)
+        self.assertIn('class="mt-draft-row mt-surface"', drafts_html)
+        self.assertNotIn("mt-draft-workspace-status", drafts_html)
+        self.assertNotIn("beginNewCapture", drafts_html)
+
+        result = self.run_node(r"""
+(async () => {
+  const app = taskBoard();
+  const notices = [];
+  app.notify = (text, error = false) => notices.push({ text, error });
+  app.tasks = [{ path: "cards/task-42.md", ref: "TASK-42", title: "API migration" }];
+  app.drafts = [
+    { id: "d1", kind: "task", mode: "new", title: "New draft", body: "Alpha", updated: "2026-11-15T10:00:00" },
+    { id: "d2", kind: "task", mode: "edit", target: "cards/task-42.md", title: "", body: "Beta", updated: "2026-11-15T11:00:00" },
+  ];
+  const allCount = app.visibleDrafts().length;
+  app.draftModeFilter = "new";
+  const newIds = app.visibleDrafts().map(d => d.id);
+  app.draftModeFilter = "edit";
+  const editIds = app.visibleDrafts().map(d => d.id);
+  app.draftModeFilter = "all";
+  const editRef = app.draftTargetRef(app.drafts[1]);
+  const newRef = app.draftTargetRef(app.drafts[0]);
+
+  global.fetch = async (url, options) => {
+    if (String(url).includes("draft-save")) {
+      const payload = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "a".repeat(64), updated: "2026-11-15T10:00:00" } }) };
+    }
+    return { ok: true, json: async () => ({ message: "Draft discarded" }) };
+  };
+  await app.discardWorkspaceDraft(app.drafts[0], true);
+  console.log(JSON.stringify({ allCount, newIds, editIds, editRef, newRef, notices, remaining: app.drafts.map(d => d.id) }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["allCount"], 2)
+        self.assertEqual(result["newIds"], ["d1"])
+        self.assertEqual(result["editIds"], ["d2"])
+        self.assertEqual(result["editRef"], "TASK-42")
+        self.assertEqual(result["newRef"], "")
+        self.assertEqual(result["notices"], [{"text": "Draft discarded", "error": False}])
+        self.assertEqual(result["remaining"], ["d2"])
+
 
 if __name__ == "__main__":
     unittest.main()
