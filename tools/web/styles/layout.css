@@ -39,14 +39,14 @@
   justify-content: center;
   width: 26px;
   height: 26px;
+  overflow: hidden;
   border-radius: 7px;
-  background: linear-gradient(135deg, var(--mt-accent), var(--mt-control-active));
-  color: var(--mt-accent-foreground);
   box-shadow: var(--mt-shadow-logo);
-  font-family: var(--mt-font-family-mono);
-  font-size: var(--mt-font-size-xs);
-  font-weight: 800;
-  letter-spacing: -.08em;
+}
+.mt-brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .mt-brand-wordmark {
   color: var(--mt-text);
