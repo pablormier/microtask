@@ -97,6 +97,7 @@ function createDetailController() {
 
         this.hoverTarget = link;
         this.hoverPos = this.computeHoverPos(link);
+        this.hoverDisplayCard = card;
         this.hoverCard = card;
       }, 150);
     },

@@ -99,6 +99,7 @@ function taskBoard() {
     restartNotice: "",
     detailReturnFocus: null,
     hoverCard: null,
+    hoverDisplayCard: null,
     hoverPos: { top: 0, left: 0, placeAbove: false },
     hoverTimer: null,
     hoverTarget: null,

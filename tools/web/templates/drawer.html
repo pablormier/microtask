@@ -165,33 +165,33 @@
                x-cloak
                x-show="hoverCard"
                x-transition.opacity.duration.120ms
-               :style="hoverCard ? `top: ${hoverPos.top}px; left: ${hoverPos.left}px; transform: ${hoverPos.placeAbove ? 'translateY(-100%)' : 'none'};` : ''"
+               :style="`top: ${hoverPos.top}px; left: ${hoverPos.left}px; transform: ${hoverPos.placeAbove ? 'translateY(-100%)' : 'none'}; pointer-events: ${hoverCard ? 'auto' : 'none'};`"
                @mouseenter="keepHoverCard()"
                @mouseleave="scheduleClearHoverCard()">
-            <template x-if="hoverCard">
+            <template x-if="hoverDisplayCard">
               <div class="mt-card-popover-inner">
                 <div class="mt-card-popover-header">
-                  <span class="mt-ref" x-text="hoverCard?.ref"></span>
-                  <span class="mt-badge mt-badge-neutral" x-text="hoverCard?.kind"></span>
-                  <span class="mt-badge mt-status-badge" :class="statusBadgeClass(hoverCard?.status)" x-show="hoverCard?.status" x-text="statusText(hoverCard?.status)"></span>
-                  <span class="mt-badge mt-priority" :class="priorityClass(hoverCard?.priority)" x-show="hasPriority(hoverCard?.priority)" x-text="hoverCard?.priority"></span>
-                  <span class="mt-badge mt-badge-warning mt-needs-review" x-show="hoverCard?.needs_review">Needs review</span>
+                  <span class="mt-ref" x-text="hoverDisplayCard?.ref"></span>
+                  <span class="mt-badge mt-badge-neutral" x-text="hoverDisplayCard?.kind"></span>
+                  <span class="mt-badge mt-status-badge" :class="statusBadgeClass(hoverDisplayCard?.status)" x-show="hoverDisplayCard?.status" x-text="statusText(hoverDisplayCard?.status)"></span>
+                  <span class="mt-badge mt-priority" :class="priorityClass(hoverDisplayCard?.priority)" x-show="hasPriority(hoverDisplayCard?.priority)" x-text="hoverDisplayCard?.priority"></span>
+                  <span class="mt-badge mt-badge-warning mt-needs-review" x-show="hoverDisplayCard?.needs_review">Needs review</span>
                 </div>
-                <div class="mt-card-popover-title" x-text="hoverCard?.title"></div>
-                <template x-if="hoverCard?.next_action">
+                <div class="mt-card-popover-title" x-text="hoverDisplayCard?.title"></div>
+                <template x-if="hoverDisplayCard?.next_action">
                   <div class="mt-card-popover-next">
                     <span class="mt-card-popover-label">Next:</span>
-                    <span x-text="hoverCard?.next_action"></span>
+                    <span x-text="hoverDisplayCard?.next_action"></span>
                   </div>
                 </template>
-                <template x-if="!hoverCard?.next_action && hoverCard?.excerpt">
-                  <div class="mt-card-popover-excerpt" x-text="hoverCard?.excerpt"></div>
+                <template x-if="!hoverDisplayCard?.next_action && hoverDisplayCard?.excerpt">
+                  <div class="mt-card-popover-excerpt" x-text="hoverDisplayCard?.excerpt"></div>
                 </template>
-                <div class="mt-card-popover-meta" x-show="hoverCard?.project || hoverCard?.topic || hoverCard?.due || (hoverCard?.tags && hoverCard?.tags.length)">
-                  <span class="mt-card-popover-meta-item" x-show="hoverCard?.project" x-text="'Project: ' + hoverCard?.project"></span>
-                  <span class="mt-card-popover-meta-item" x-show="hoverCard?.topic" x-text="'Topic: ' + hoverCard?.topic"></span>
-                  <time class="mt-badge mt-due" :class="dueClass(hoverCard)" x-show="hoverCard?.due" :datetime="hoverCard?.due" :title="hoverCard?.due" x-text="'Due ' + dateLabel(hoverCard?.due)"></time>
-                  <template x-for="tag in (hoverCard?.tags || []).slice(0, 3)" :key="tag">
+                <div class="mt-card-popover-meta" x-show="hoverDisplayCard?.project || hoverDisplayCard?.topic || hoverDisplayCard?.due || (hoverDisplayCard?.tags && hoverDisplayCard?.tags.length)">
+                  <span class="mt-card-popover-meta-item" x-show="hoverDisplayCard?.project" x-text="'Project: ' + hoverDisplayCard?.project"></span>
+                  <span class="mt-card-popover-meta-item" x-show="hoverDisplayCard?.topic" x-text="'Topic: ' + hoverDisplayCard?.topic"></span>
+                  <time class="mt-badge mt-due" :class="dueClass(hoverDisplayCard)" x-show="hoverDisplayCard?.due" :datetime="hoverDisplayCard?.due" :title="hoverDisplayCard?.due" x-text="'Due ' + dateLabel(hoverDisplayCard?.due)"></time>
+                  <template x-for="tag in (hoverDisplayCard?.tags || []).slice(0, 3)" :key="tag">
                     <span class="mt-badge mt-badge-success mt-tag" x-text="tag"></span>
                   </template>
                 </div>
