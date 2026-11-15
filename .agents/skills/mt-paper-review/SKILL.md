@@ -11,11 +11,11 @@ review prompt and follow it throughout the discussion.
 
 ## Source and initial map
 
-Create a temporary working directory (e.g. via `mktemp -d`) only if the review
-needs downloads, extracted text, rendered pages, or draft files. Place those
-working files and tool outputs in that directory. If the paper and review can be
-handled without intermediate files, skip the directory. Keep verified source
-references in the saved Note.
+Use a temporary working directory (such as your scratch directory, or `.mt/tmp/`
+when inside a microtask workspace) only if the review needs downloads,
+extracted text, rendered pages, or draft files. Place those working files and
+tool outputs there. If the paper and review can be handled without intermediate
+files, skip the directory. Keep verified source references in the saved Note.
 
 Accept an uploaded paper, local file, or source URL, plus any question or review
 focus. Obtain the paper before reviewing it; an abstract alone is not a full
