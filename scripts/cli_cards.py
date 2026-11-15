@@ -65,6 +65,7 @@ from store import (
     is_timestamp,
     item_compact_json_record,
     item_json_record,
+    item_outline_json_record,
     item_read_record,
     item_receipt,
     item_state_suffix,
@@ -837,6 +838,10 @@ def _run_card_query(args: argparse.Namespace, *, search: bool, ws: Workspace | N
     if getattr(args, "compact", False):
         for item in selected:
             print(json.dumps(item_compact_json_record(item), ensure_ascii=False))
+        return 0
+    if getattr(args, "outline", False):
+        for item in selected:
+            print(json.dumps(item_outline_json_record(item), ensure_ascii=False))
         return 0
     if args.full:
         print(json.dumps([item_read_record(item, ws=resolved) for item in selected], ensure_ascii=False))

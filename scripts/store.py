@@ -611,6 +611,36 @@ def item_compact_json_record(item: Card) -> dict[str, object]:
     return record
 
 
+def _markdown_headings(body: str) -> list[str]:
+    """Extract ATX headings outside fenced code blocks."""
+    headings: list[str] = []
+    fence: str | None = None
+    for line in body.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = None if fence == marker else (fence or marker)
+            continue
+        if fence is not None:
+            continue
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", stripped)
+        if match:
+            title = re.sub(r"\s+#+\s*$", "", match.group(2)).strip()
+            if title:
+                headings.append(f"{match.group(1)} {title}")
+    return headings
+
+
+def item_outline_json_record(item: Card) -> dict[str, object]:
+    """Serialize one item with compact metadata plus body stats and Markdown headings."""
+    record = item_compact_json_record(item)
+    body = item.body
+    record["body_chars"] = len(body)
+    record["body_lines"] = len(body.splitlines()) if body else 0
+    record["headings"] = _markdown_headings(body)
+    return record
+
+
 
 def workspace_env(ws: Workspace | None = None) -> dict[str, str]:
     """Environment for this application's own children, so they stay on this workspace."""

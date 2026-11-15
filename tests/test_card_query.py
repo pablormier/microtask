@@ -110,6 +110,15 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(selected(cards, archived="include", hidden="include"), ids(cards))
         self.assertEqual(selected(cards, archived="only", hidden="only"), ["both"])
 
+    def test_exclude_tag_filters_matching_tags_case_insensitively(self):
+        cards = [FakeCard("a", tags=["paper-review", "ml"]),
+                 FakeCard("b", tags=["ml"]),
+                 FakeCard("c", tags=[])]
+        self.assertEqual(selected(cards, exclude_tag=("PAPER-REVIEW",)), ["b", "c"])
+        self.assertEqual(selected(cards, tag=("ml",), exclude_tag=("paper-review",)), ["b"])
+        parsed = card_query.query_from_mapping({"without_tag": ["paper-review"]})
+        self.assertEqual(parsed.exclude_tag, ("paper-review",))
+
     def test_text_matches_title_id_and_body_in_each_mode(self):
         self.assertEqual(selected(self.cards, text="remember the"), ["c"])
         self.assertEqual(selected(self.cards, text="the remember"), [])

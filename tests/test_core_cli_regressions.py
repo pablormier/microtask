@@ -523,6 +523,11 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                 self.assertTrue({"ref", "id", "kind", "title", "status", "priority", "project", "topic", "due", "tags"}.issubset(
                     compact_records[0]
                 ))
+                outline = self.run_mt(*base, "--limit", "2", "--outline")
+                self.assertEqual(outline.returncode, 0, outline.stderr)
+                outline_records = [json.loads(line) for line in outline.stdout.splitlines()]
+                self.assertEqual([r["title"] for r in outline_records], ["Old task", "Recent task"])
+                self.assertTrue({"body_chars", "body_lines", "headings"}.issubset(outline_records[0]))
                 conflict = self.run_mt(*base, "--full", "--compact")
                 self.assertEqual(conflict.returncode, 2)
                 self.assertIn("not allowed with argument", conflict.stderr)
@@ -530,6 +535,16 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(inbox.returncode, 0, inbox.stderr)
         triaged = json.loads(self.run_mt("list", "--triage", "--full").stdout)
         self.assertEqual([r["properties"]["title"] for r in triaged], ["Needs triage"])
+
+        structured = self.run_mt(
+            "add", "--kind", "note", "--title", "Paper notes", "--file", "-", "--json",
+            input_text="## Paper Map\nSummary line.\n```md\n## Not a heading\n```\n### Details\n",
+        )
+        self.assertEqual(structured.returncode, 0, structured.stderr)
+        outlined = [json.loads(line) for line in self.run_mt("list", "--kind", "note", "--outline").stdout.splitlines()]
+        self.assertEqual(outlined[0]["headings"], ["## Paper Map", "### Details"])
+        self.assertGreater(outlined[0]["body_chars"], 0)
+        self.assertEqual(outlined[0]["body_lines"], 6)
 
     def test_unknown_option_or_command_suggests_the_closest_match(self) -> None:
         for arguments, suggestion in ((("list", "--stauts", "active"), "mt list: did you mean --status"),

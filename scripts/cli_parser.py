@@ -378,6 +378,18 @@ def _register_topic_parsers(sub: argparse._SubParsersAction) -> None:
     topic_rename.set_defaults(func=command_topic_rename)
 
 
+def _add_query_output_arguments(parser: argparse.ArgumentParser, what: str) -> None:
+    parser.add_argument("--json", action="store_true", help=f"print matching {what} as a JSON array")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--compact", action="store_true",
+                        help="print minimal-field JSON records, one per line")
+    output.add_argument("--outline", action="store_true",
+                        help="print minimal-field JSON records with body stats and headings, one per line")
+    output.add_argument("--full", action="store_true",
+                        help="print each card as 'mt read --json' does (ref, path, content_hash, "
+                             "properties, body) in one JSON array; implies --json, conflicts with --compact/--outline")
+
+
 def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     focus = sub.add_parser(
         "focus",
@@ -412,13 +424,7 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     size = listing.add_mutually_exclusive_group()
     size.add_argument("--limit", type=int, metavar="N", help="keep the first N sorted cards")
     size.add_argument("--tail", type=int, metavar="N", help="keep the last N sorted cards, in order")
-    listing.add_argument("--json", action="store_true", help="print matching cards as a JSON array")
-    listing_output = listing.add_mutually_exclusive_group()
-    listing_output.add_argument("--compact", action="store_true",
-                               help="print minimal-field JSON records, one per line")
-    listing_output.add_argument("--full", action="store_true",
-                               help="print each card as 'mt read --json' does (ref, path, content_hash, "
-                                    "properties, body) in one JSON array; implies --json, conflicts with --compact")
+    _add_query_output_arguments(listing, "cards")
     listing.set_defaults(func=command_list)
 
     search = sub.add_parser("search", help="search task and note titles, IDs, and Markdown bodies")
@@ -439,13 +445,7 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     search_size = search.add_mutually_exclusive_group()
     search_size.add_argument("--limit", type=int, metavar="N", help="keep the first N sorted matches")
     search_size.add_argument("--tail", type=int, metavar="N", help="keep the last N sorted matches, in order")
-    search.add_argument("--json", action="store_true", help="print matching cards as a JSON array")
-    search_output = search.add_mutually_exclusive_group()
-    search_output.add_argument("--compact", action="store_true",
-                               help="print minimal-field JSON records, one per line")
-    search_output.add_argument("--full", action="store_true",
-                               help="print each card as 'mt read --json' does (ref, path, content_hash, "
-                                    "properties, body) in one JSON array; implies --json, conflicts with --compact")
+    _add_query_output_arguments(search, "cards")
     search.set_defaults(func=command_search)
 
     show = sub.add_parser("show", help="human browser preview of an item or saved .mt Markdown file; agents use read")

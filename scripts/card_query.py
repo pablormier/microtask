@@ -22,7 +22,7 @@ DUE_MODES = ("overdue", "today", "week", "any", "none")
 DUE_OVERDUE, DUE_TODAY, DUE_WEEK, DUE_ANY, DUE_NONE = DUE_MODES
 VISIBILITY = ("exclude", "include", "only")
 MATCH_MODES = ("exact", "and", "or", "fuzzy")
-LIST_FIELDS = ("kind", "status", "priority", "type", "project", "topic", "tag", "due")
+LIST_FIELDS = ("kind", "status", "priority", "type", "project", "topic", "tag", "exclude_tag", "due")
 DATE_FIELDS = tuple(f"{name}_{edge}" for name in ("created", "updated", "completed", "due")
                     for edge in ("since", "before"))
 DATE_HELP = "YYYY-MM-DD or an age like 2w, 3m, 1y"
@@ -35,6 +35,7 @@ ALIASES = {
     "since": {"updated_since": None},
     "due_after": {"due_since": None},
     "task_type": {"type": None},
+    "without_tag": {"exclude_tag": None},
     "all": {"archived": "include", "hidden": "include"},
     "include_archived": {"archived": "include"},
     "include_hidden": {"hidden": "include"},
@@ -65,6 +66,7 @@ class Query:
     project: tuple[str, ...] = ()
     topic: tuple[str, ...] = ()
     tag: tuple[str, ...] = ()
+    exclude_tag: tuple[str, ...] = ()
     needs_review: bool = False
     triage: bool = False
     created_since: str | None = None
@@ -248,6 +250,7 @@ def add_query_arguments(parser: argparse.ArgumentParser, *, defaults: dict | Non
     many("project", "PROJECT", "exact case-insensitive project; repeat for several")
     many("topic", "PATH", "this topic and everything under it, whole segments, case-insensitive")
     many("tag", "TAG", "exact case-insensitive tag; repeat for several")
+    many("exclude_tag", "TAG", "exclude cards with this tag, case-insensitive; repeat for several")
     group.add_argument("--needs-review", action="store_true", help="select cards marked for review")
     group.add_argument("--triage", action="store_true",
                        help="select cards needing triage (inbox tasks and cards needing review)")
@@ -450,8 +453,10 @@ def matches(card: object, query: Query, *, now: datetime) -> bool:
         return False
     if query.topic and not any(card_format.topic_within(props.get("topic"), path) for path in query.topic):
         return False
-    if query.tag and not {tag.casefold() for tag in query.tag} & {
-            str(tag).casefold() for tag in props.get("tags") or []}:
+    card_tags = {str(tag).casefold() for tag in props.get("tags") or []}
+    if query.tag and not ({tag.casefold() for tag in query.tag} & card_tags):
+        return False
+    if query.exclude_tag and ({tag.casefold() for tag in query.exclude_tag} & card_tags):
         return False
     reviewed = props.get("needs_review") is True
     if query.needs_review and not reviewed:
