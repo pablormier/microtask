@@ -9,14 +9,22 @@ Use the [microtask skill](../microtask/SKILL.md) for reading, editing, and
 permissions. This skill covers the decisions. Triage organizes captures; it
 never does the captured work, claims it, or moves it to `doing`.
 
-## Pick the batch
+## Pick cards
 
-Take the cards the user names, or otherwise the next five from
-`mt list --triage --limit 5 --full` (inbox tasks plus notes marked
-`needs_review`), which returns each card's properties and body in one call.
-Note their references at the start and don't add captures that arrive later.
+Use **card-by-card mode** when the user asks to go one by one or when captures
+need discussion or verification; otherwise use **batch mode** for quick cleanup.
+
+- **Card-by-card:** fetch the next item with `mt list --triage --limit 1 --full`
+  (or walk the user's named cards one at a time). Handle one card, apply the
+  approved disposition, then move to the next until the user stops or the queue
+  is empty.
+- **Batch:** take the cards the user names, or otherwise the next five from
+  `mt list --triage --limit 5 --full` (inbox tasks plus notes marked
+  `needs_review`), which returns each card's properties and body in one call.
+  Note their references at the start and don't add captures that arrive later.
+
 Search the whole workspace (`--all`) for context. Context cards can inform
-decisions but are not part of the batch.
+decisions but are not part of the triage set.
 
 ## Decide each card
 
@@ -33,6 +41,11 @@ written from the full capture.
 - Reference material: a note.
 - A note that is really one action: convert it to a task. For imported issues
   with mixed content, keep the note and propose a separate task.
+- Paper notes or AI-drafted paper summaries: keep as a note (tag `paper-review`
+  if appropriate). In card-by-card mode, ask whether to verify and update it
+  with [mt-paper-review](../mt-paper-review/SKILL.md) before clearing
+  `needs_review`; in batch mode, propose a follow-up task if verification is
+  needed.
 - Meeting notes: keep the note and propose a task for each agreed action,
   linking back to it. Don't infer owners or deadlines from discussion.
 - Duplicate, obsolete, or already done: explain the evidence and propose what
@@ -53,15 +66,20 @@ and follow it for this triage only.
 
 ## Propose, then apply
 
-Show the batch as one compact table, one row per card: reference, proposed
-title, destination, priority, and due date. Keep cells short. Below the table,
-add a one-line reason only where a choice isn't obvious, and at most one
-short question per card. When a card is reasonably clear, propose your best
-guess instead of asking. One approval can cover the whole batch. New cards
-split from a capture still need the full proposal from the capture workflow.
+- **Card-by-card mode:** show the card's reference, title, source/links, a brief
+  summary, and your proposed disposition (plus any question or offer to verify a
+  paper with `mt-paper-review`). Wait for the user's answer, apply the change,
+  then fetch the next card.
+- **Batch mode:** show the batch as one compact table, one row per card:
+  reference, proposed title, destination, priority, and due date. Keep cells
+  short. Below the table, add a one-line reason only where a choice isn't
+  obvious, and at most one short question per card. When a card is reasonably
+  clear, propose your best guess instead of asking. One approval can cover the
+  whole batch.
 
-If the user already approved triage within a scope, apply within it and ask
-about ambiguous cards while continuing with the rest.
+New cards split from a capture still need the full proposal from the capture
+workflow. If the user already approved triage within a scope, apply within it
+and ask about ambiguous cards while continuing with the rest.
 
 Before each change, read the card again; if it changed, reassess. On a conflict
 or error, stop on that card and report it. Clear `needs_review` on a note only
