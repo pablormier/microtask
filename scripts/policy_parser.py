@@ -146,7 +146,61 @@ def load_policy(root: Path | None = None) -> dict:
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
         raise ValueError("policy rules.done_window must be an age like 2w, 30d, or 1m")
     policy["rules"].setdefault("done_window", "2w")
+    if "calendar" in policy:
+        normalized_calendar = normalize_calendar_policy(policy["calendar"])
+        if normalized_calendar is None:
+            policy.pop("calendar", None)
+        else:
+            policy["calendar"] = normalized_calendar
     return policy
+
+
+def _single_line_text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip() or any(char in value for char in "\r\n\x00"):
+        raise ValueError(f"{field} must be a non-empty, single-line string")
+    return value.strip()
+
+
+def _normalize_calendar_entries(entries: object, section: str) -> list[dict]:
+    if entries is None:
+        return []
+    if not isinstance(entries, list):
+        raise ValueError(f"policy calendar.{section} must be a list")
+    normalized = []
+    for index, item in enumerate(entries):
+        field = f"policy calendar.{section}[{index}]"
+        if isinstance(item, str):
+            normalized.append({"id": _single_line_text(item, field)})
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f"{field} must be a calendar ID string or mapping")
+        extra_keys = set(item) - {"id", "account", "provider"}
+        if extra_keys:
+            raise ValueError(f"{field} has unsupported key(s): {', '.join(sorted(map(str, extra_keys)))}")
+        entry = {"id": _single_line_text(item.get("id"), f"{field}.id")}
+        for opt_key in ("account", "provider"):
+            if item.get(opt_key) is not None:
+                entry[opt_key] = _single_line_text(item[opt_key], f"{field}.{opt_key}")
+        normalized.append(entry)
+    return normalized
+
+
+def normalize_calendar_policy(calendar: object) -> dict | None:
+    """Validate and normalize optional calendar allowlist settings from policy."""
+    if calendar is None:
+        return None
+    if not isinstance(calendar, dict):
+        raise ValueError("policy calendar must be a mapping")
+    extra_keys = set(calendar) - {"include", "guidance"}
+    if extra_keys:
+        raise ValueError(f"policy calendar has unsupported key(s): {', '.join(sorted(map(str, extra_keys)))}")
+    guidance = calendar.get("guidance", "")
+    if not isinstance(guidance, str) or "\x00" in guidance:
+        raise ValueError("policy calendar.guidance must be text without NUL characters")
+    return {
+        "include": _normalize_calendar_entries(calendar.get("include"), "include"),
+        "guidance": guidance,
+    }
 
 
 def merge_policy(base: dict, override: dict) -> dict:

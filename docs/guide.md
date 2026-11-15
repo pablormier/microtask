@@ -276,3 +276,7 @@ Workspace settings live in `mt-policy.yaml` and are synced with your cards.
 Machine-specific overrides go in `mt-policy.local.yaml`, which is not synced.
 `mt policy` shows the effective values, including the defaults for new cards,
 the work-in-progress limit, and `rules.auto_sync`.
+
+For optional calendar context in focus and weekly planning, see
+[Calendar setup](calendar.md). Your agent app supplies calendar access;
+microtask stores which calendars to use and how to interpret their events.

@@ -17,6 +17,10 @@ For syntax, use `mt COMMAND --help` and `mt policy --json` rather than reading
 source. If help does not cover something, report the gap instead of working
 around the CLI.
 
+For requested calendar setup or preference changes, use the
+[calendar guide](references/calendar.md). Calendar access belongs to the agent
+environment; preferences belong to workspace policy.
+
 ## Cards
 
 A card is a task (work) or a note (reference). Its properties live in

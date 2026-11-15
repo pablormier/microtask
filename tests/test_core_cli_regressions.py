@@ -664,6 +664,81 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertNotIn("auto_create_profiles", policy["rules"])
         self.assertNotIn("triage_batch_size", policy["rules"])
 
+    def test_policy_json_exposes_and_validates_calendar_settings(self) -> None:
+        baseline = json.loads(self.run_mt("policy", "--json").stdout)
+        self.assertNotIn("calendar", baseline)
+
+        (self.root / "mt-policy.local.yaml").write_text(
+            "calendar:\n"
+            "  include:\n"
+            "    - me@example.com\n"
+            "    - id: work@example.com\n"
+            "      account: me@example.com\n"
+            "      provider: gcalendar\n"
+            "  guidance: |\n"
+            "    Location entries provide context.\n"
+            "    Holidays do not necessarily mean time off.\n",
+            encoding="utf-8",
+        )
+        result = self.run_mt("policy", "--json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        policy = json.loads(result.stdout)
+        self.assertEqual(
+            policy["calendar"],
+            {
+                "include": [
+                    {"id": "me@example.com"},
+                    {"id": "work@example.com", "account": "me@example.com", "provider": "gcalendar"},
+                ],
+                "guidance": "Location entries provide context.\nHolidays do not necessarily mean time off.\n",
+            },
+        )
+
+        self.assertEqual(self.run_mt("validate").returncode, 0)
+
+        invalid_settings = (
+            ("calendar: false\n", "must be a mapping"),
+            ("calendar:\n  availability: []\n", "unsupported key"),
+            ("calendar:\n  include: work\n", "must be a list"),
+            ("calendar:\n  include: [false]\n", "ID string or mapping"),
+            ("calendar:\n  include: [{account: work}]\n", ".id must be"),
+            ("calendar:\n  include: [{id: ' '}]\n", ".id must be"),
+            ("calendar:\n  include: [{id: work, provider: false}]\n", ".provider must be"),
+            ("calendar:\n  include: [{id: work, extra: true}]\n", "unsupported key"),
+            ("calendar:\n  guidance: [wrong]\n", "guidance must be text"),
+        )
+        for yaml_text, diagnostic in invalid_settings:
+            with self.subTest(yaml=yaml_text):
+                (self.root / "mt-policy.local.yaml").write_text(yaml_text, encoding="utf-8")
+                for command in (("policy", "--json"), ("validate",)):
+                    invalid = self.run_mt(*command)
+                    self.assertNotEqual(invalid.returncode, 0)
+                    self.assertIn(diagnostic, invalid.stderr)
+
+    def test_calendar_local_overrides_replace_lists_and_can_disable_inherited_calendars(self) -> None:
+        shared = self.root / "mt-policy.yaml"
+        shared.write_text(shared.read_text() + "\ncalendar:\n  include: [shared]\n  guidance: Shared guidance\n")
+        local = self.root / "mt-policy.local.yaml"
+        for yaml_text, expected in (
+            ("calendar:\n  include: [local]\n", {"include": [{"id": "local"}], "guidance": "Shared guidance"}),
+            ("calendar:\n  include: []\n", {"include": [], "guidance": "Shared guidance"}),
+            ("calendar:\n  guidance: ''\n", {"include": [{"id": "shared"}], "guidance": ""}),
+            ("calendar: {}\n", {"include": [{"id": "shared"}], "guidance": "Shared guidance"}),
+            ("calendar: null\n", None),
+        ):
+            with self.subTest(yaml=yaml_text):
+                local.write_text("default_priority: high\n" + yaml_text)
+                result = self.run_mt("policy", "--json")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                policy = json.loads(result.stdout)
+                self.assertEqual(policy.get("calendar"), expected)
+                self.assertEqual(policy["default_priority"], "high")
+                self.assertEqual(self.run_mt("validate").returncode, 0)
+        shared.write_text(shared.read_text().split("\ncalendar:")[0])
+        local.write_text("calendar: {}\n")
+        self.assertEqual(json.loads(self.run_mt("policy", "--json").stdout)["calendar"],
+                         {"include": [], "guidance": ""})
+
     def test_failed_live_validation_rolls_back_item_transaction(self) -> None:
         path = self.write_task("2026-06-20-090000-rollback", "Original title")
         before = path.read_bytes()

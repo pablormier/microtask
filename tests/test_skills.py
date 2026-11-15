@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -62,6 +63,10 @@ class SkillsTests(unittest.TestCase):
                 skill = (self.project / target / name / "SKILL.md").read_text(encoding="utf-8")
                 frontmatter = skill.split("---\n")[1]
                 self.assertIn("installed-by: microtask", frontmatter, name)
+                for link in re.findall(r"\]\(([^)]+\.md)\)", skill):
+                    if "://" not in link:
+                        self.assertTrue((self.project / target / name / link).is_file(),
+                                        f"missing installed reference: {name}/{link}")
         text = installed_text(self.project)
         self.assertNotRegex(text, r"(?<![.\w/])\./mt\b")
         # Every mt command was rewritten: none is left that would reach the mt on PATH unscoped.
