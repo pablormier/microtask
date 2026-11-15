@@ -22,18 +22,24 @@ focus. Obtain the paper before reviewing it; an abstract alone is not a full
 paper. If access is incomplete, identify what you could read and limit claims
 accordingly. Ask for missing source material when needed.
 
-Begin each new paper with the concise map specified in the prompt. Include
-paper type, research question, contribution, datasets and their roles, data
-format/scale/source, applications, evaluation, findings, and uncertainties.
-Use tables when they make datasets, applications, or evaluations easier to
-compare. Mark missing details as not reported rather than guessing.
+Begin each new paper with a clear, readable paper map: problem and motivation,
+core idea, datasets and baselines (in a compact table), main claims, and key
+uncertainties. Favor plain-language intuition and concrete examples over dense
+terminology, metric dumps, or exhaustive equation lists. Include equations or
+low-level technical details in the initial review only when they are essential
+to explain the core mechanism, a major weakness, a falsification test, or a
+paper-vs-code discrepancy. Mark missing details as not reported rather than
+guessing.
 
 Identify the most consequential assumption and a simple baseline or test that
-could challenge it. Label these as your assessment and proposed test. If no
-single assumption supports most of the paper, say so rather than inventing one.
-Distinguish an evaluation not found in the available material from one proven
-to be absent; do not claim the authors missed a test without checking the paper
-and available supplementary material.
+could challenge it. For methods papers, also propose one simple, strong
+alternative baseline (e.g., a standard classical method, linear/heuristic model,
+or stripped-down ablation) that could plausibly replace or rival the proposed
+method, and note whether the paper tested an equivalent. Label these as your
+assessment and proposed test. If no single assumption supports most of the
+paper, say so rather than inventing one. Distinguish an evaluation not found in
+the available material from one proven to be absent; do not claim the authors
+missed a test without checking the paper and available supplementary material.
 
 ## Discussion and evidence
 
@@ -42,12 +48,15 @@ evidence, external background, your inference, and missing information. Cite
 sections, pages, figures, tables, or equations only when actually verified.
 Keep simple answers direct and concise; use sections for complex questions.
 
-For methods papers, cover inputs, formats, dimensions, preprocessing, steps,
-parameters, defaults, outputs, assumptions, failure modes, and minimum usage
-as relevant to the user's question. When an implementation is available,
-inspect its documentation and relevant code, then compare it with the paper.
-Record the inspected repository version when known. Do not claim to have run
-code based on inspection; installation and experiments are separate work.
+For methods papers, explain the core mechanism intuitively so the reader can
+follow the critical assessment. When an implementation is available, inspect
+its documentation and relevant code, compare it with the paper, and highlight
+only substantive discrepancies, bugs, or unstated constraints that affect the
+paper's claims or reproducibility (record the inspected repository version).
+Leave exhaustive parameter defaults, input/output schemas, preprocessing
+inventories, and usage snippets for follow-up Q&A unless the user asks for them
+upfront. Do not claim to have run code based on inspection; installation and
+experiments are separate work.
 
 ## Save a microtask Note
 

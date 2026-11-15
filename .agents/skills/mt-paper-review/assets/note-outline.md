@@ -3,23 +3,30 @@ bibliographic details rather than filling them from memory.]
 
 ## Paper map
 
-[Concise paper type, research question, contribution, main findings, and
-scientific or practical applications, with verified source locations.]
+[Plain-language summary of paper type, the problem it solves, main contribution,
+and headline claims. Keep readable and uncluttered.]
 
 ## Data and evaluation
 
-[Use a table when helpful: dataset, data type/format/scale/source, role,
-application, evaluation procedure, baselines, metrics, and source location.
-Keep rows complete and mark unreported information explicitly.]
+[Compact table: dataset, scale & source, role in paper, and key baselines.
+Avoid cramming exhaustive metric lists or feature/gene names into table cells.]
 
-## Assumptions and critical assessment
+## Core mechanism
 
-[Most consequential assumption, why it matters, a simple proposed baseline
-or falsification test, limitations, and alternative interpretations.
-Distinguish the paper's evidence from your own assessment.]
+[Include for methods papers: brief, intuitive explanation of how the method
+works, using a concrete example and only the essential equations needed to
+understand the critique below.]
 
-## Method and implementation
+## Critical assessment and falsification tests
 
-[Include only when relevant: inputs, preprocessing, steps, parameters,
-outputs, minimum usage, failure modes, and paper/code differences.
-Identify code versions and file locations actually inspected.]
+[Most consequential assumptions and weaknesses, why they matter, and the
+simplest baseline or test to falsify each claim. For methods papers, include a
+simple, strong alternative baseline that could replace or rival the method, and
+whether the paper tested it. Clearly separate paper statements from your own
+assessment.]
+
+## Code audit
+
+[Include when code is available: inspected repository version/commit and only
+the paper-vs-code discrepancies, bugs, or missing components that affect
+validity or reproducibility.]
