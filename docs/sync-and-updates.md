@@ -89,15 +89,3 @@ not push. Run `mt sync` afterwards to share it with your other machines.
 Any tracked file outside those workspace paths belongs to the app and is
 replaced on update, so keep your own working files in `.mt/`.
 
-## Upgrade notes
-
-### `area` became `topic`
-
-In each existing workspace, stop dashboards and automatic sync, then run the
-one-time rename. It also renames `suggested_areas` in `mt-policy.yaml`:
-
-```sh
-python3 scripts/migrate_area_to_topic.py --plan
-python3 scripts/migrate_area_to_topic.py --apply
-mt validate
-```
