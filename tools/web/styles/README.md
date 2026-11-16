@@ -25,7 +25,13 @@ selector specificity as their base and follow it in the stylesheet.
 - **Toolbar:** brand and view tabs on the left; the Display menu, then actions
   (Filters, Clear filters, Resume, and the primary New last) on the right. The
   Filters toggle counts active filters. At narrow widths the view tabs move to
-  their own horizontally scrolling row.
+  their own row. On phones the tabs share that row evenly (scrolling only
+  below about 360px), the brand shows the logo alone, and Search, Filters, and
+  Clear drop their text so the actions fit on the brand row.
+- **Column pager:** on phones, where the board shows one column at a time, a
+  row of pill buttons above it names every column with its count, marks the
+  one in view with `aria-current`, and scrolls to a column on tap. It is
+  hidden at wider widths and for flat or horizontal layouts.
 - **Theme:** the Display menu holds Theme (System, Light, Dark) and Text
   size. A script in `<head>` resolves the saved choice to `data-theme` on
   `<html>` before first paint, and `board.js` keeps it in sync with the

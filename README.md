@@ -149,7 +149,8 @@ changed in your workspace, and you can undo any of it.
 - [Install, sync, and updates](docs/sync-and-updates.md): remotes, new
   machines, and keeping the app up to date
 - [Using microtask from your phone](docs/mobile.md): Telegram bot with Claude
-  Code on a Pi/VPS, Codex/Claude mobile apps, and `mt web` over Tailscale
+  Code on a Pi/VPS, Codex Cloud / Claude mobile apps, ChatGPT GitHub issue
+  capture (`mt import-github`), and `mt web` over Tailscale
 - `mt help` and `mt COMMAND --help`: every command and option
 
 Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md) and the [test guide](tests/README.md).

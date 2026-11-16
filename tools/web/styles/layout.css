@@ -132,6 +132,18 @@
     scrollbar-width: none;
   }
   .mt-mode-toggle::-webkit-scrollbar { display: none; }
+  /* Tighter tabs share the row evenly, so all six fit from about 360px wide;
+     narrower screens still scroll the row. */
+  .mt-title-row .mt-mode-toggle .mt-segment { flex: 1 0 auto; padding-inline: 6px; }
+  /* Search and Filters show as icons so the actions fit on the brand row. */
+  .mt-title-row { flex-wrap: wrap; }
+  .mt-toolbar-actions { gap: 6px; }
+  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label { display: none; }
+  /* The logo alone names the app; the wordmark stays for screen readers. */
+  .mt-brand-wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .mt-filter-toggle .mt-badge { min-width: 1.25rem; padding-inline: 5px; }
+  /* Icon-only toolbar buttons are square, matching the Display trigger. */
+  .mt-toolbar-actions .mt-quick-search-trigger, .mt-toolbar-actions .mt-filter-toggle { min-width: var(--mt-control-size); padding-inline: 6px; }
   .mt-filter-search { flex-basis: 100%; }
   /* Filter menus span the wrapped row, below it, so chips near the edge stay on screen. */
   .mt-filters { position: relative; }

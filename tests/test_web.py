@@ -2422,6 +2422,41 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_phone_column_pager_follows_and_jumps_to_columns(self) -> None:
+        self.assertEqual(self.render_dashboard().returncode, 0)
+        rendered = self.output.read_text()
+        self.assertIn('<nav class="mt-column-pager" aria-label="Board columns"', rendered)
+        self.assertIn('@scroll.passive="trackColumn($el)"', rendered)
+        self.assertIn('Clear<span class="mt-filter-clear-label"> filters</span>', rendered)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        probe = (
+            'const assert = require("assert/strict");\n'
+            'global.window = {matchMedia: () => ({matches: true})};\n'
+            'const pagerItems = [0, 1, 2].map(() => ({scrolled: 0, scrollIntoView() { this.scrolled += 1; }}));\n'
+            'global.document = {getElementById: () => ({textContent: "{}"}), documentElement: {dataset: {}},\n'
+            '  querySelectorAll: () => pagerItems};\n'
+            f'eval({json.dumps(load_js(self.root / "tools/web"))} + `\n'
+            'const groups = {scrollLeft: 0, scrolledTo: null,\n'
+            '  getBoundingClientRect() { return {left: 0}; },\n'
+            '  scrollTo(options) { this.scrolledTo = options; },\n'
+            '  querySelectorAll: () => columns};\n'
+            'const columns = [12, 312, 612].map(left => ({getBoundingClientRect: () => ({left: left - groups.scrollLeft})}));\n'
+            'const app = taskBoard();\n'
+            'app.trackColumn(groups); assert.equal(app.columnIndex, 0);\n'
+            'groups.scrollLeft = 300; app.trackColumn(groups); assert.equal(app.columnIndex, 1);\n'
+            'assert.equal(pagerItems[1].scrolled, 1);\n'
+            'groups.scrollLeft = 590; app.trackColumn(groups); assert.equal(app.columnIndex, 2);\n'
+            'app.$refs = {groups}; groups.scrollLeft = 0;\n'
+            'app.scrollToColumn(1); assert.equal(app.columnIndex, 1);\n'
+            'assert.deepEqual(groups.scrolledTo, {left: 300, behavior: "auto"});\n'
+            'app.scrollToColumn(9); assert.equal(app.columnIndex, 1);\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")
         if not node:

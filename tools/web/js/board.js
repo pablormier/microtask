@@ -64,6 +64,7 @@ function taskBoard() {
     settings: normalizeViewSettings({}),
     textSize: "medium",
     theme: "system",
+    columnIndex: 0,
     ...createFilterController(),
     ...createDraftCoordinator(),
     ...createDetailController(),
@@ -274,6 +275,33 @@ function taskBoard() {
       const view = this.settings.archive;
       view.kind = kind;
       if (!cardGroupOptions(kind).some(option => option.value === view.group)) view.group = "none";
+    },
+
+    // On phones the board shows one column at a time; the pager follows the column nearest the left edge.
+    trackColumn(el) {
+      const columns = el ? el.querySelectorAll(":scope > .mt-column") : [];
+      const left = el ? el.getBoundingClientRect().left : 0;
+      let nearest = 0;
+      let best = Infinity;
+      columns.forEach((column, index) => {
+        const distance = Math.abs(column.getBoundingClientRect().left - left);
+        if (distance < best) { best = distance; nearest = index; }
+      });
+      if (nearest === this.columnIndex) return;
+      this.columnIndex = nearest;
+      const item = document.querySelectorAll(".mt-column-pager-item")[nearest];
+      if (item && item.scrollIntoView) item.scrollIntoView({ block: "nearest", inline: "nearest" });
+    },
+
+    scrollToColumn(index) {
+      const groups = this.$refs && this.$refs.groups;
+      const column = groups && groups.querySelectorAll(":scope > .mt-column")[index];
+      if (!column) return;
+      let smooth = true;
+      try { smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (_) {}
+      const offset = column.getBoundingClientRect().left - groups.getBoundingClientRect().left;
+      groups.scrollTo({ left: groups.scrollLeft + offset - 12, behavior: smooth ? "smooth" : "auto" });
+      this.columnIndex = index;
     },
 
     // `theme` is the viewer's choice; data-theme on <html> is what it resolves to now.
