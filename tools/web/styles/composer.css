@@ -344,7 +344,9 @@ li.mt-mention-option.is-active .mt-mention-meta {
   outline-offset: 4px;
 }
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
-  margin-bottom: var(--mt-space-4);
+  max-height: 45vh;
+  overflow: auto;
+  margin-block-end: var(--mt-space-4);
   padding: 14px 16px;
   border: 1px solid var(--mt-border);
   border-radius: var(--mt-radius-lg);

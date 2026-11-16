@@ -2,8 +2,8 @@
         <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" @click.self="if (!(contentEditor.draft && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.draft && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
-                   @keydown.meta.shift.f.stop.prevent="if (contentEditor.draft) contentEditor.toggleZen(contentContext())"
-                   @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.draft) contentEditor.toggleZen(contentContext())">
+                   @keydown.meta.shift.f.stop.prevent="if (contentEditor.draft) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
+                   @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.draft) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }">
             <header class="mt-detail-header">
               <div class="mt-detail-heading">
                 <div class="mt-detail-identity"><span class="mt-ref" x-text="selected?.ref"></span><span x-text="selected?.kind === 'note' ? 'Note' : 'Task'"></span><span x-show="selected?.archived">Archived</span><span x-show="selected?.hidden">Hidden</span></div>
@@ -47,7 +47,17 @@
               <section class="mt-detail-content" aria-label="Card content">
                 <header class="mt-content-header">
                   <h3>Content</h3>
-                  <button type="button" class="mt-button mt-button-compact mt-content-edit" x-ref="contentEditButton" x-show="!contentEditor.draft" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
+                  <div class="mt-layout-group" x-show="!contentEditor.draft">
+                    <button type="button" class="mt-button mt-button-compact mt-content-edit" x-ref="contentEditButton" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
+                    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact mt-content-edit-zen"
+                            aria-label="Edit in Zen mode" title="Edit in Zen mode (⌘/Ctrl+Shift+F)"
+                            @click="openSelectedInZen()"
+                            :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                      </svg>
+                    </button>
+                  </div>
                 </header>
                 <p class="mt-content-load-status" role="status" x-show="detailLoading">Loading card content…</p>
                 <div class="mt-content-load-error" role="alert" x-show="detailError">

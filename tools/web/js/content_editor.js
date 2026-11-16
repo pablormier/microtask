@@ -6,179 +6,40 @@ function createContentEditor() {
     text: "",
     original: "",
     tab: "write",
-    zen: false,
-    zenView: "write",
-    previewHtml: "",
-    _previewTimer: null,
-    surface: null,
-    mention: typeof createMentionAutocomplete === "function" ? createMentionAutocomplete() : null,
-
-    updateMention(ctx, textarea) {
-      if (!this.mention) return;
-      const cards = ctx && typeof ctx.getCards === "function" ? ctx.getCards() : [];
-      this.mention.update(textarea, cards);
-    },
-
-    handleMentionKeydown(ctx, event, textarea) {
-      if (!this.mention) return false;
-      const handled = this.mention.handleKeydown(event, textarea, nextText => {
-        this.text = nextText;
-        this.persist(ctx);
-        this.schedulePreview(ctx);
-      });
-      if (handled && this.mention.open && ctx && typeof ctx.nextTick === "function") {
-        ctx.nextTick(() => {
-          const activeEl = typeof document !== "undefined" && document.getElementById
-            ? document.getElementById("mt-detail-mention-" + this.mention.activeIndex)
-            : null;
-          if (activeEl && typeof activeEl.scrollIntoView === "function") {
-            activeEl.scrollIntoView({ block: "nearest" });
-          }
-        });
-      }
-      return handled;
-    },
-
-    handleMentionKeyup(ctx, event, textarea) {
-      if (!this.mention || !this.mention.open || !event) return;
-      if (event.isComposing || event.keyCode === 229) return;
-      if (["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
-        this.updateMention(ctx, textarea);
-      }
-    },
-
-    pickMention(ctx, item, textarea) {
-      if (!this.mention) return;
-      this.mention.apply(textarea, item, nextText => {
-        this.text = nextText;
-        this.persist(ctx);
-        this.schedulePreview(ctx);
-      });
-    },
-
-    closeMention() {
-      if (this.mention) this.mention.close();
-    },
-
-    repositionMention(textarea) {
-      if (this.mention) this.mention.reposition(textarea);
-    },
     localSaved: true,
     saving: false,
     error: "",
-
-    ensureSurface(ctx, hostEl) {
-      if (typeof createEditorSurface !== "function") return null;
-      if (!this.surface) {
-        this.surface = createEditorSurface({
-          getValue: () => this.text,
-          onInput: text => {
-            this.text = text;
-            this.persist(ctx);
-            this.schedulePreview(ctx);
-          },
-          onSave: () => this.save(ctx),
-          onEscape: () => this.handleEscape(ctx),
-          getPlaceholder: () => "Write Markdown or LaTeX…",
-          isDisabled: () => Boolean(ctx.draftBusy || this.saving),
-        });
-      }
-      if (hostEl && this.zen && this.surface.hasCustomEngine() && !this.surface.instance) {
-        this.surface.mount(hostEl);
-      }
-      return this.surface;
-    },
-
-    syncSurface(ctx, hostEl) {
-      const surface = this.ensureSurface(ctx, hostEl);
-      if (!surface) return;
-      if (this.zen && surface.hasCustomEngine()) {
-        if (hostEl && (!surface.instance || surface.hostEl !== hostEl)) {
-          surface.mount(hostEl);
+    ...zenWorkspaceMethods({
+      getText: editor => editor.text,
+      setText: (editor, ctx, nextText) => {
+        editor.text = nextText;
+        editor.persist(ctx);
+        editor.schedulePreview(ctx);
+      },
+      isDisabled: (editor, ctx) => Boolean((ctx && ctx.draftBusy) || editor.saving),
+      getPlaceholder: () => "Write Markdown or LaTeX…",
+      getPreviewCard: (editor, ctx) => (ctx ? ctx.selected : {}),
+      canEnterZen: editor => Boolean(editor.draft),
+      mentionIdPrefix: "mt-detail-mention-",
+      onBeforeToggleZen: (editor, next) => {
+        if (next) {
+          if (editor.tab === "preview") editor.zenView = "preview";
+          else if (editor.zenView === "preview") editor.zenView = "write";
+        } else {
+          editor.tab = editor.zenView === "preview" ? "preview" : "write";
         }
-        surface.setDisabled(Boolean((ctx && ctx.draftBusy) || this.saving));
-      } else if (surface.instance) {
-        surface.destroy();
-      }
-    },
-
-    hasCustomEngine() {
-      return Boolean(this.surface && this.surface.hasCustomEngine());
-    },
-
-    isCustomMounted() {
-      return Boolean(this.surface && this.surface.instance);
-    },
-
-    refreshPreview(ctx) {
-      if (typeof renderEditorPreview === "function") {
-        this.previewHtml = renderEditorPreview(ctx ? ctx.selected : {}, this.text);
-      } else {
-        this.previewHtml = this.preview(ctx);
-      }
-    },
-
-    schedulePreview(ctx) {
-      if (!this.zen || (this.zenView !== "split" && this.zenView !== "preview")) return;
-      if (this._previewTimer) clearTimeout(this._previewTimer);
-      this._previewTimer = setTimeout(() => {
-        this._previewTimer = null;
-        this.refreshPreview(ctx);
-      }, 150);
-    },
-
-    toggleZen(ctx, force) {
-      if (!this.draft) return;
-      const next = typeof force === "boolean" ? force : !this.zen;
-      this.zen = next;
-      this.closeMention();
-      if (next) {
-        if (this.tab === "preview") this.zenView = "preview";
-        else if (this.zenView === "preview") this.zenView = "write";
-        if (this.zenView === "split" || this.zenView === "preview") {
-          this.refreshPreview(ctx);
-        }
-      } else {
-        this.tab = this.zenView === "preview" ? "preview" : "write";
-      }
-      if (ctx && typeof ctx.nextTick === "function") {
-        ctx.nextTick(() => {
-          if (!next || this.zenView !== "preview") {
-            if (!(this.surface && this.surface.focus())) {
-              if (typeof ctx.focusInput === "function") ctx.focusInput();
-            }
-          }
-        });
-      } else if ((!next || this.zenView !== "preview") && ctx && typeof ctx.focusInput === "function") {
-        ctx.focusInput();
-      }
-    },
-
-    setZenView(ctx, view) {
-      if (view !== "write" && view !== "split" && view !== "preview") return;
-      this.zenView = view;
-      if (view === "preview") this.closeMention();
-      if (view === "split" || view === "preview") {
-        if (this._previewTimer) {
-          clearTimeout(this._previewTimer);
-          this._previewTimer = null;
-        }
-        this.refreshPreview(ctx);
-      }
-      if (view !== "preview") {
-        const focusEditor = () => {
-          if (!(this.surface && this.surface.focus())) {
-            if (ctx && typeof ctx.focusInput === "function") ctx.focusInput();
-          }
-        };
-        if (ctx && typeof ctx.nextTick === "function") ctx.nextTick(focusEditor);
-        else focusEditor();
-      }
-    },
+      },
+      onSave: (editor, ctx) => editor.save(ctx),
+      onEscape: (editor, ctx) => editor.handleEscape(ctx),
+    }),
 
     handleEscape(ctx) {
       if (this.mention && this.mention.open) {
         this.mention.close();
+        return true;
+      }
+      if (this.zenMetaOpen) {
+        this.zenMetaOpen = false;
         return true;
       }
       if (this.zen) {
@@ -186,6 +47,16 @@ function createContentEditor() {
         return true;
       }
       return false;
+    },
+
+    zenMetaSummary(form) {
+      if (!form) return "";
+      return formatZenMetaSummary(form, form.processing_instructions);
+    },
+
+    beginZen(ctx, saved) {
+      this.begin(ctx, saved);
+      if (this.draft) this.toggleZen(ctx, true);
     },
 
     begin(ctx, saved) {
@@ -208,6 +79,7 @@ function createContentEditor() {
       this.tab = "write";
       this.zen = false;
       this.zenView = "write";
+      this.zenMetaOpen = false;
       this.previewHtml = "";
       this.error = "";
       if (this.surface) this.surface.setValue(source);
@@ -232,17 +104,9 @@ function createContentEditor() {
         this.error = "The draft could not be saved locally. Keep the editor open until the workspace save succeeds.";
         return false;
       }
-      if (this._previewTimer) {
-        clearTimeout(this._previewTimer);
-        this._previewTimer = null;
-      }
-      if (this.surface) this.surface.destroy();
-      if (this.mention) this.mention.close();
+      this.destroyZenWorkspace();
       this.draft = null;
       this.text = "";
-      this.zen = false;
-      this.zenView = "write";
-      this.previewHtml = "";
       this.error = "";
     },
 
@@ -253,17 +117,38 @@ function createContentEditor() {
 
     canSave(ctx) {
       const draft = this.draft;
-      return Boolean(draft && !draft._orphanedLocal && !this.saving && !ctx.draftBusy && !ctx.busy &&
-        !ctx.needsReconciliation(draft) && draft.body !== this.original);
+      if (!draft || draft._orphanedLocal || this.saving || ctx.draftBusy || ctx.busy ||
+          ctx.needsReconciliation(draft)) return false;
+      const bodyDirty = this.text !== this.original;
+      const propsDirty = Boolean(this.zen && ctx.hasPropertyChanges && ctx.hasPropertyChanges());
+      if (!bodyDirty && !propsDirty) return false;
+      if (propsDirty && ctx.canSaveProperties && !ctx.canSaveProperties()) return false;
+      return true;
     },
 
     async save(ctx) {
       if (!this.canSave(ctx)) return null;
-      this.persist(ctx);
+      const bodyDirty = this.text !== this.original;
+      const propsDirty = Boolean(this.zen && ctx.hasPropertyChanges && ctx.hasPropertyChanges());
+      if (bodyDirty) this.persist(ctx);
       this.saving = true;
       this.error = "";
       try {
-        return await ctx.finishWorkspaceDraft(this.draft);
+        let result = null;
+        if (bodyDirty) {
+          result = await ctx.finishWorkspaceDraft(this.draft);
+          if (!result) return null;
+        }
+        if (propsDirty && ctx.saveProperties) {
+          const propResult = await ctx.saveProperties();
+          if (!propResult) {
+            this.error = (ctx.propertyError && ctx.propertyError()) || "Could not save card properties.";
+            return null;
+          }
+          result = propResult;
+          if (!bodyDirty) this.close(ctx);
+        }
+        return result;
       } finally {
         this.saving = false;
       }

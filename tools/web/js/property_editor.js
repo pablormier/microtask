@@ -65,9 +65,9 @@ function createPropertyEditor() {
       return Boolean(this.form && this.comparable(this.form) !== this.baseline);
     },
 
-    canApply(ctx) {
+    canApply(ctx, opts = {}) {
       const form = this.form;
-      if (!ctx.selected || ctx.busy || ctx.draftBusy || ctx.contentOpen || !form ||
+      if (!ctx.selected || ctx.busy || ctx.draftBusy || (!opts.allowContentOpen && ctx.contentOpen) || !form ||
           this.saving || this.conflict || this.baselineHash !== String(ctx.selected.content_hash || "") || !this.changed()) return false;
       if (!String(form.title || "").trim() || /[\r\n\0]/.test(form.title)) return false;
       if (form.due && (!form.due_kind || !Object.prototype.hasOwnProperty.call(ctx.dueKindPolicy, form.due_kind))) return false;
@@ -76,8 +76,8 @@ function createPropertyEditor() {
       return true;
     },
 
-    async apply(ctx) {
-      if (!this.canApply(ctx)) return null;
+    async apply(ctx, opts = {}) {
+      if (!this.canApply(ctx, opts)) return null;
       const form = this.form;
       const original = ctx.selected;
       const patch = {};

@@ -41,6 +41,11 @@ function createDraftCoordinator() {
         setMode: mode => { this.mode = mode; },
         openWorkspaceDraft: draft => this.openWorkspaceDraft(draft),
         finishWorkspaceDraft: draft => this.finishWorkspaceDraft(draft),
+        getSelected: () => this.selected,
+        saveCardProperties: (ref, expectedHash, patch) => this.apiPost("/api/card-metadata", {
+          ref, expected_hash: expectedHash, patch,
+        }),
+        actionMessage: () => this.actionMessage,
         nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => {
           const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
@@ -86,6 +91,19 @@ function createDraftCoordinator() {
         nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => this.$refs.detailContentInput?.focus()),
       };
+    },
+
+    openSelectedInZen() {
+      if (!this.selected || this.busy || this.draftBusy || this.detailLoading || this.detailError || typeof this.selected.body !== "string") return;
+      const card = this.selected;
+      const currentText = this.contentEditor.draft ? this.contentEditor.text : undefined;
+      if (this.contentEditor.draft) {
+        if (this.contentEditor.close(this.contentContext()) === false) return;
+      }
+      this.captureComposer.beginEdit(this.captureContext(), card, {
+        zen: true,
+        currentText,
+      });
     },
 
     noteDraftStorageKey(workspaceKey, draftId) {
@@ -347,7 +365,7 @@ function createDraftCoordinator() {
           this.contentEditor.draft = null;
           this.contentEditor.text = "";
           this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
-        } else if (draft === this.captureComposer.draft || (this.captureComposer.draft && this.captureComposer.draft.draftId === draft.id)) {
+        } else if ((draft === this.captureComposer.draft || (this.captureComposer.draft && this.captureComposer.draft.draftId === draft.id)) && draft.origin !== "card-body") {
           const wasEdit = draft.mode === "edit";
           this.captureComposer.draft = null;
           this.captureComposer.persisted = false;

@@ -343,5 +343,77 @@ try {
 """)
 
 
+    def test_unified_zen_composer_supports_existing_card_edits_and_combined_save(self) -> None:
+        self.run_node(r"""
+const note={
+  id:'note-1',ref:'@note-1',path:'cards/note-1.md',kind:'note',
+  title:'Original',content_hash:'h1',updated:'2026-11-15T10:00:00Z',
+  body:'Initial body',priority:'none',project:'',topic:'',tags:[],due:null,due_kind:null,
+  processing_instructions:'',
+};
+const composer=createCaptureComposer();
+const calls=[];
+const drafts=[];
+const ctx={
+  workspaceKey:'ws-1',
+  busy:false,
+  taskDefaults:{status:'inbox',priority:'none',type:'task'},
+  taskPriorityPolicy:{none:'None',high:'High'},
+  taskTypePolicy:{task:'Task'},
+  getDrafts:()=>drafts,
+  getSelected:()=>note,
+  store:{
+    isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!Number(d.revision||0),
+    forgetEmpty:()=>{},
+    saveLocal:()=>true,
+    upsert:()=>{},
+  },
+  scheduleDraftSave:()=>{},
+  focusInput:()=>{},
+  nextTick:fn=>fn(),
+  finishWorkspaceDraft:async(draft)=>{
+    calls.push(['body',draft.body]);
+    note.content_hash='h2';
+    return {saved_ref:'@note-1'};
+  },
+  saveCardProperties:async(ref,expectedHash,patch)=>{
+    calls.push(['props',ref,expectedHash,patch]);
+    return {saved_ref:ref};
+  },
+};
+
+// beginEdit opens unified Zen editor configured for existing card
+composer.beginEdit(ctx,note,{zen:true});
+assert.equal(composer.open,true);
+assert.equal(composer.zen,true);
+assert.equal(composer.isCardEdit(),true);
+assert.equal(composer.title(),'Edit note');
+assert.equal(composer.saveLabel(),'Save changes');
+assert.equal(composer.canSave(ctx),false);
+
+// Property-only change in Zen is saveable without touching body draft
+composer.draft.title='Updated title';
+composer.draft.taskOptions.tags=['zen'];
+assert.equal(composer.canSave(ctx),true);
+await composer.save(ctx);
+assert.deepEqual(calls,[['props','@note-1','h1',{tags:['zen'],title:'Updated title'}]]);
+assert.equal(composer.open,false);
+
+// Combined body + property change saves body first (updating hash), then properties
+calls.length=0;
+note.content_hash='h1';
+composer.beginEdit(ctx,note,{zen:true});
+composer.draft.text='Updated body';
+composer.draft.instructions='Keep concise';
+assert.equal(composer.canSave(ctx),true);
+await composer.save(ctx);
+assert.deepEqual(calls,[
+  ['body','Updated body'],
+  ['props','@note-1','h2',{processing_instructions:'Keep concise'}],
+]);
+assert.equal(composer.open,false);
+""")
+
+
 if __name__ == "__main__":
     unittest.main()
