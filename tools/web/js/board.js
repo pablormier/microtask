@@ -10,6 +10,9 @@ function taskBoard() {
   let focusAlertsCache = null;
   let followupTasksCache = null;
   let viewGroupsCache = null;
+  let visibleTopicTreeSource = null;
+  let visibleTopicExpandedSource = null;
+  let visibleTopicNodesCache = [];
 
   return {
     tasks: [],
@@ -306,7 +309,12 @@ function taskBoard() {
     },
 
     visibleTopicNodes() {
-      return visibleTopicTreeNodes(this.topicTree, this.expandedTopics);
+      if (visibleTopicTreeSource !== this.topicTree || visibleTopicExpandedSource !== this.expandedTopics) {
+        visibleTopicTreeSource = this.topicTree;
+        visibleTopicExpandedSource = this.expandedTopics;
+        visibleTopicNodesCache = visibleTopicTreeNodes(this.topicTree, this.expandedTopics);
+      }
+      return visibleTopicNodesCache;
     },
 
     selectTopicNode(path, event) {

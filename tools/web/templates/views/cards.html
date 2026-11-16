@@ -50,7 +50,8 @@
           <p class="mt-sync-warning" role="status" x-show="restartNotice" x-text="restartNotice"></p>
         </div>
         <div class="mt-cards-body" :class="{ 'has-topic-tree': topicTreeOpen() }">
-          <aside id="mt-topic-tree" class="mt-topic-tree mt-surface" aria-label="Topics" x-show="topicTreeOpen()" x-cloak>
+          <template x-if="topicTreeOpen()">
+          <aside id="mt-topic-tree" class="mt-topic-tree mt-surface" aria-label="Topics">
             <div class="mt-topic-tree-header">
               <h2>Topics</h2>
               <div class="mt-topic-tree-header-actions">
@@ -95,6 +96,7 @@
               </template>
             </ul>
           </aside>
+          </template>
           <div class="mt-groups" :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
           <template x-for="group in viewGroups()" :key="group.key">
             <div class="mt-column" :class="group.className">
