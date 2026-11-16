@@ -70,22 +70,23 @@
               <span>All topics</span>
             </button>
             <p class="mt-topic-tree-empty" x-show="!topicTree.length">No topics yet.</p>
-            <ul class="mt-topic-tree-list" role="tree" aria-label="Topic folders" x-show="topicTree.length">
+            <ul class="mt-topic-tree-list" aria-label="Topic folders" x-show="topicTree.length">
               <template x-for="node in visibleTopicNodes()" :key="node.path">
-                <li class="mt-topic-tree-item" role="treeitem"
-                    :aria-expanded="node.hasChildren ? String(node.expanded) : null"
-                    :aria-selected="String(filterHas('topic', node.path))">
+                <li class="mt-topic-tree-item">
                   <div class="mt-topic-tree-row" :class="{ 'is-selected': filterHas('topic', node.path) }"
                        :style="{ paddingLeft: (4 + node.depth * 14) + 'px' }">
                     <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-tree-disclosure"
                             x-show="node.hasChildren"
                             :class="{ 'is-expanded': node.expanded }"
+                            :aria-expanded="String(node.expanded)"
                             :aria-label="(node.expanded ? 'Collapse ' : 'Expand ') + node.name"
                             @click.stop="toggleTopicExpanded(node.path)">
                       <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
                     </button>
                     <span class="mt-topic-tree-spacer" x-show="!node.hasChildren" aria-hidden="true"></span>
-                    <button type="button" class="mt-button mt-button-quiet mt-topic-tree-label" :title="node.path" @click="selectTopicNode(node.path, $event)">
+                    <button type="button" class="mt-button mt-button-quiet mt-topic-tree-label"
+                            :aria-current="filterHas('topic', node.path) ? 'true' : null"
+                            :title="node.path" @click="selectTopicNode(node.path, $event)">
                       <span class="mt-topic-tree-name" x-text="node.name"></span>
                       <span class="mt-picker-count" x-show="node.count" x-text="node.count" :title="node.count === 1 ? '1 card' : node.count + ' cards'"></span>
                     </button>

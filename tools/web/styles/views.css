@@ -241,6 +241,8 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
   gap: 2px;
   border-radius: var(--mt-radius-lg);
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .mt-topic-tree-header {
   display: flex;
@@ -322,9 +324,9 @@ button.mt-topic-tree-label {
 .mt-topic-tree-row .mt-topic-tree-label:hover { background: none; }
 .mt-topic-tree-disclosure,
 .mt-topic-tree-spacer {
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
+  flex: 0 0 24px;
+  min-width: 24px;
+  min-height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
