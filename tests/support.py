@@ -34,6 +34,8 @@ def run_cli(
         kwargs["text"] = text
     else:
         kwargs["text"] = text
+        # Without input, `mt add` and `mt note` read a non-terminal stdin; never inherit one that may stay open.
+        kwargs["stdin"] = subprocess.DEVNULL
     return subprocess.run([str(root / "mt"), *args], **kwargs)
 
 

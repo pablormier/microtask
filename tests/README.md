@@ -34,3 +34,9 @@ Run the parallel suite (with the 60s time budget) or `unittest discover`:
 python3 tests/run.py
 python3 -m unittest discover -s tests -v
 ```
+
+CLI tests start `./mt` without input. With no text, `mt add` and `mt note` read
+the card body from stdin whenever it is not a terminal, so a test that inherits
+a stdin that never closes (an editor task or an agent's shell) waits forever.
+`tests/run.py` and `support.run_cli` give tests an empty stdin. When running
+`unittest` directly from such a tool, add `< /dev/null`.

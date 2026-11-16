@@ -70,6 +70,18 @@ def _run_class(module_name: str, class_qualname: str) -> dict:
     }
 
 
+def close_stdin() -> None:
+    """Give this process and its workers an empty stdin.
+
+    CLI tests start ./mt without input, and `mt add` or `mt note` with no text reads its body
+    from a stdin that is not a terminal. An inherited stdin that never closes, such as an
+    editor task or an agent's shell, would leave those tests waiting forever.
+    """
+    devnull = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(devnull, 0)
+    os.close(devnull)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run microtask tests in parallel by test class.")
     parser.add_argument("targets", nargs="*", help="optional test file paths or module names")
@@ -79,6 +91,7 @@ def main() -> int:
     parser.add_argument("--budget", type=float, default=None,
                         help="maximum allowed wall-clock seconds (defaults to 60s for full suite)")
     args = parser.parse_args()
+    close_stdin()
 
     compileall.compile_dir(ROOT / "scripts", quiet=1)
     compileall.compile_dir(ROOT / "tools", quiet=1)
