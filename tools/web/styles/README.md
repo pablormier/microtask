@@ -22,10 +22,17 @@ selector specificity as their base and follow it in the stylesheet.
   segmented choices (layout, text size) use a soft blue fill. Segments show
   their own focus ring, so `.mt-segmented` suppresses Pico's group ring.
   Preserve `aria-pressed` and `aria-expanded` states.
-- **Toolbar:** brand and view tabs on the left; display choices, then actions
+- **Toolbar:** brand and view tabs on the left; the Display menu, then actions
   (Filters, Clear filters, Resume, and the primary New last) on the right. The
   Filters toggle counts active filters. At narrow widths the view tabs move to
   their own horizontally scrolling row.
+- **Theme:** the Display menu holds Theme (System, Light, Dark) and Text
+  size. A script in `<head>` resolves the saved choice to `data-theme` on
+  `<html>` before first paint, and `board.js` keeps it in sync with the
+  system setting. Dark values live in `:root[data-theme="dark"]` in
+  `theme.css`; components use tokens only, so no rule needs a dark override.
+  Segmented controls use `--mt-segment-track` and `--mt-segment-selected` so
+  the selected segment rises above its track in both themes.
 - **Filter chips:** the Filters toggle shows a row below the title row (not on
   Drafts): search, then one `mt-filter-chip` button per facet and a `...` menu.
   The row is a `search` element, never a

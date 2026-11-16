@@ -45,7 +45,7 @@ dialog.mt-quick-search {
   -webkit-backdrop-filter: blur(20px) saturate(1.35);
   backdrop-filter: blur(20px) saturate(1.35);
   color: var(--mt-text);
-  box-shadow: 0 24px 64px -12px rgba(15, 23, 42, 0.24), 0 0 0 1px rgba(15, 23, 42, 0.05);
+  box-shadow: var(--mt-shadow-popover);
   overflow: hidden;
   opacity: 0;
   transition-property: opacity, transform, display, overlay;
@@ -96,7 +96,7 @@ dialog.mt-quick-search[open] {
 dialog.mt-quick-search::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
-  background-color: rgba(15, 23, 42, 0);
+  background-color: transparent;
   transition-property: background-color, display, overlay;
   transition-duration: 0.14s;
   transition-timing-function: ease-out;
@@ -104,12 +104,12 @@ dialog.mt-quick-search::backdrop {
 }
 
 :is(dialog.mt-quick-search[open]):where(:not([data-closing]))::backdrop {
-  background-color: rgba(15, 23, 42, 0.16);
+  background-color: var(--mt-backdrop-quiet);
 }
 
 @starting-style {
   :is(dialog.mt-quick-search[open]):where(:not([data-closing]))::backdrop {
-    background-color: rgba(15, 23, 42, 0);
+    background-color: transparent;
   }
 }
 

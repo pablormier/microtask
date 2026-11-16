@@ -2390,6 +2390,38 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
+    def test_theme_choice_resolves_to_data_theme_and_applies_before_paint(self) -> None:
+        self.assertEqual(self.render_dashboard().returncode, 0)
+        rendered = self.output.read_text()
+        head = rendered[:rendered.index("</head>")]
+        # The saved choice is applied in <head>, before the stylesheets, so a dark page never flashes light.
+        self.assertLess(head.index("mt-theme-v1"), head.index("<style>"))
+        self.assertRegex(head, r'<script nonce="[^"{}]+">\s*// Apply the saved theme')
+        self.assertIn(':root[data-theme="dark"]', rendered)
+        self.assertIn('aria-label="Display settings"', rendered)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        probe = (
+            'const assert = require("assert/strict");\n'
+            'const store = {}; let systemDark = false;\n'
+            'global.localStorage = {getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }};\n'
+            'global.window = {matchMedia: () => ({matches: systemDark, addEventListener() {}})};\n'
+            'global.document = {getElementById: () => ({textContent: "{}"}), documentElement: {dataset: {}}};\n'
+            f'eval({json.dumps(load_js(self.root / "tools/web"))} + `\n'
+            'const app = taskBoard();\n'
+            'const html = document.documentElement.dataset;\n'
+            'app.setTheme("system"); assert.equal(html.theme, "light");\n'
+            'systemDark = true; app.applyTheme(); assert.equal(html.theme, "dark");\n'
+            'app.setTheme("light"); assert.equal(html.theme, "light"); assert.equal(store["mt-theme-v1"], "light");\n'
+            'app.applyTheme(); assert.equal(html.theme, "light");\n'
+            'app.setTheme("dark"); systemDark = false; app.applyTheme(); assert.equal(html.theme, "dark");\n'
+            'app.setTheme("sepia"); assert.equal(app.theme, "system"); assert.equal(html.theme, "light");\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")
         if not node:

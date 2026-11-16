@@ -331,7 +331,7 @@ input.mt-field[type="search"] {
   padding: 3px;
   border: 0;
   border-radius: var(--mt-radius-md);
-  background: var(--mt-surface-quiet);
+  background: var(--mt-segment-track);
   /* Each segment shows its own focus ring; suppress Pico's group ring. */
   box-shadow: none;
 }
@@ -373,12 +373,12 @@ input.mt-field[type="search"] {
   transition: background-color .12s ease, color .12s ease, box-shadow .12s ease;
 }
 .mt-segmented .mt-segment[aria-pressed="true"] {
-  background: var(--mt-surface);
+  background: var(--mt-segment-selected);
   color: var(--mt-text);
   box-shadow: var(--mt-shadow-segment);
 }
-.mt-segmented .mt-segment:not([aria-pressed="true"]):enabled:hover { background: color-mix(in srgb, var(--mt-surface) 55%, transparent); color: var(--mt-text); }
-.mt-segmented .mt-segment[aria-pressed="true"]:enabled:hover { background: var(--mt-surface); color: var(--mt-text); }
+.mt-segmented .mt-segment:not([aria-pressed="true"]):enabled:hover { background: color-mix(in srgb, var(--mt-segment-selected) 55%, transparent); color: var(--mt-text); }
+.mt-segmented .mt-segment[aria-pressed="true"]:enabled:hover { background: var(--mt-segment-selected); color: var(--mt-text); }
 .mt-segmented .mt-segment:disabled { color: var(--mt-text-disabled); cursor: not-allowed; }
 .mt-segmented .mt-segment:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--mt-focus); outline-offset: 2px; }
 .mt-segmented-quiet { gap: 2px; padding: 0; border: 0; background: transparent; }
@@ -604,12 +604,12 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
   pointer-events: auto;
   animation: mt-toast-in .18s ease-out;
 }
-.mt-toast > .mt-icon { color: #4ade80; }
+.mt-toast > .mt-icon { color: var(--mt-toast-icon); }
 .mt-toast.is-error { background: var(--mt-danger); }
 .mt-toast.is-error > .mt-icon { color: inherit; }
 .mt-toast-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 button.mt-button.mt-toast-close { color: inherit; opacity: .75; }
-button.mt-button.mt-button-quiet.mt-toast-close:enabled:hover { background: rgba(255, 255, 255, .14); color: inherit; opacity: 1; }
+button.mt-button.mt-button-quiet.mt-toast-close:enabled:hover { background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; opacity: 1; }
 button.mt-button.mt-toast-close:focus-visible { outline-color: currentColor; }
 @keyframes mt-toast-in {
   from { opacity: 0; transform: translateY(8px); }

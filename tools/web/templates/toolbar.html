@@ -30,11 +30,25 @@
           <button class="mt-segment" type="button" :aria-pressed="mode === 'deadlines'" @click="mode = 'deadlines'">Deadlines</button>
         </div>
         <p class="mt-demo-banner" x-show="demo">Demo workspace — bundled examples; every action works on them. Create your first task to start your own workspace.</p>
-        <div class="mt-text-size mt-segmented mt-segmented-quiet" role="group" aria-label="Text size">
-          <button type="button" class="mt-segment mt-text-small" title="Small text" aria-label="Small text" :aria-pressed="textSize === 'small'" @click="setTextSize('small')">A</button>
-          <button type="button" class="mt-segment mt-text-medium" title="Medium text" aria-label="Medium text" :aria-pressed="textSize === 'medium'" @click="setTextSize('medium')">A</button>
-          <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
-        </div>
+        <details class="mt-card-menu mt-display-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+          <summary class="mt-menu-trigger" aria-label="Display settings" title="Display settings">
+            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/></svg>
+          </summary>
+          <div class="mt-card-menu-items mt-display-menu-items">
+            <span class="mt-menu-label" id="mt-theme-label">Theme</span>
+            <div class="mt-theme-choice mt-segmented" role="group" aria-labelledby="mt-theme-label">
+              <button type="button" class="mt-segment" :aria-pressed="theme === 'system'" @click="setTheme('system')">System</button>
+              <button type="button" class="mt-segment" :aria-pressed="theme === 'light'" @click="setTheme('light')">Light</button>
+              <button type="button" class="mt-segment" :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Dark</button>
+            </div>
+            <span class="mt-menu-label" id="mt-text-size-label">Text size</span>
+            <div class="mt-text-size mt-segmented mt-segmented-quiet" role="group" aria-labelledby="mt-text-size-label">
+              <button type="button" class="mt-segment mt-text-small" title="Small text" aria-label="Small text" :aria-pressed="textSize === 'small'" @click="setTextSize('small')">A</button>
+              <button type="button" class="mt-segment mt-text-medium" title="Medium text" aria-label="Medium text" :aria-pressed="textSize === 'medium'" @click="setTextSize('medium')">A</button>
+              <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
+            </div>
+          </div>
+        </details>
         <div class="mt-toolbar-actions">
           <button type="button" class="mt-button mt-quick-search-trigger" :disabled="!ready"
                   @click="openQuickSearch($event)" aria-label="Quick search">

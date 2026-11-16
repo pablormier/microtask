@@ -69,6 +69,11 @@
   --mt-priority-medium: #2563eb;
   --mt-priority-low: #94a3b8;
   --mt-progress-gradient: linear-gradient(90deg, var(--mt-accent), var(--mt-focus-soft));
+  --mt-toast-icon: #4ade80;
+  --mt-segment-track: var(--mt-surface-quiet);
+  --mt-segment-selected: var(--mt-surface);
+  --mt-shadow-popover: 0 24px 64px -12px rgba(15, 23, 42, .24), 0 0 0 1px rgba(15, 23, 42, .05);
+  --mt-backdrop-quiet: rgba(15, 23, 42, .16);
 
   /* Theme Pico's native forms and states through the same semantic palette. */
   --pico-font-family: var(--mt-font-family-sans);
@@ -101,6 +106,65 @@
   --pico-form-element-valid-focus-color: color-mix(in srgb, var(--mt-success) 25%, transparent);
   --pico-card-background-color: var(--mt-surface-raised);
   --pico-border-radius: var(--mt-radius-sm);
+}
+/* Dark theme: board.js resolves the System/Light/Dark choice to data-theme before first paint.
+   Cards sit lighter than columns, columns lighter than the page; text pairs keep 4.5:1 or more. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --mt-surface: #1b2029;
+  --mt-surface-subdued: #0e1116;
+  --mt-surface-raised: #222834;
+  --mt-surface-hover: #272e3a;
+  --mt-surface-quiet: #20252f;
+  --mt-surface-inset: #2e3542;
+  --mt-text: #e6e9ef;
+  --mt-text-muted: #9ba4b4;
+  --mt-border: #313846;
+  --mt-control-border: #3b4352;
+  --mt-button-surface: #222834;
+  --mt-button-hover: #2a313d;
+  --mt-button-active: #313947;
+  --mt-button-disabled: #1f242d;
+  --mt-text-disabled: #6b7385;
+  --mt-border-strong: #4d5667;
+  --mt-accent: #6d9eff;
+  --mt-accent-foreground: #0b1530;
+  --mt-accent-hover: #8cb3ff;
+  --mt-focus-soft: #3d5d9e;
+  --mt-overlay: rgba(0, 0, 0, .6);
+  --mt-success: #4ade80;
+  --mt-warning: #f2b84b;
+  --mt-danger: #f87171;
+  --mt-danger-soft: #3d1d20;
+  --mt-accent-soft: #1c2b4a;
+  --mt-success-soft: #15301f;
+  --mt-warning-soft: #3a2d10;
+  --mt-warning-border: #a87a26;
+  --mt-warning-soft-border: #6b5420;
+  --mt-warning-surface: #211c10;
+  --mt-danger-border: #8a3a3a;
+  --mt-danger-surface: #241618;
+  --mt-control-active: #a9c4ff;
+  --mt-surface-done: #181c23;
+  --mt-shadow-control: 0 1px 2px rgba(0, 0, 0, .3);
+  --mt-shadow-control-hover: 0 1px 3px rgba(0, 0, 0, .4);
+  --mt-shadow-control-active: inset 0 1px 2px rgba(0, 0, 0, .35);
+  --mt-shadow-surface: 0 1px 2px rgba(0, 0, 0, .3), 0 0 0 1px rgba(255, 255, 255, .03);
+  --mt-shadow-dialog: 0 24px 56px -12px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255, 255, 255, .06);
+  --mt-shadow-hover-strong: 0 4px 12px -2px rgba(0, 0, 0, .5), 0 2px 4px -2px rgba(0, 0, 0, .4);
+  --mt-shadow-logo: 0 1px 2px rgba(0, 0, 0, .5);
+  --mt-column-surface: #151922;
+  --mt-shadow-segment: 0 1px 2px rgba(0, 0, 0, .4), 0 0 0 1px rgba(255, 255, 255, .05);
+  --mt-priority-urgent: #f87171;
+  --mt-priority-high: #fb923c;
+  --mt-priority-medium: #6d9eff;
+  --mt-priority-low: #8b95a7;
+  --mt-toast-icon: #15803d;
+  /* The selected segment rises above a recessed track, as in light mode. */
+  --mt-segment-track: #12161d;
+  --mt-segment-selected: #343c4b;
+  --mt-shadow-popover: 0 24px 64px -12px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255, 255, 255, .06);
+  --mt-backdrop-quiet: rgba(0, 0, 0, .45);
 }
 [x-cloak] { display: none !important; }
 html:root { font-size: calc(var(--pico-font-size, 100%) * .875); background: var(--mt-surface-subdued); }

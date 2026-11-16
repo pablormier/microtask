@@ -63,6 +63,7 @@ function taskBoard() {
     layout: "vertical",
     settings: normalizeViewSettings({}),
     textSize: "medium",
+    theme: "system",
     ...createFilterController(),
     ...createDraftCoordinator(),
     ...createDetailController(),
@@ -123,6 +124,12 @@ function taskBoard() {
       let savedTextSize = "medium";
       try { savedTextSize = localStorage.getItem("mt-text-size-v2") || "medium"; } catch (_) {}
       this.setTextSize(savedTextSize);
+      let savedTheme = "system";
+      try { savedTheme = localStorage.getItem("mt-theme-v1") || "system"; } catch (_) {}
+      this.setTheme(savedTheme);
+      try {
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.applyTheme());
+      } catch (_) {}
       let savedLayout = "vertical";
       try {
         const queryLayout = new URLSearchParams(window.location.search).get("layout");
@@ -267,6 +274,21 @@ function taskBoard() {
       const view = this.settings.archive;
       view.kind = kind;
       if (!cardGroupOptions(kind).some(option => option.value === view.group)) view.group = "none";
+    },
+
+    // `theme` is the viewer's choice; data-theme on <html> is what it resolves to now.
+    setTheme(choice) {
+      this.theme = ["system", "light", "dark"].includes(choice) ? choice : "system";
+      try { localStorage.setItem("mt-theme-v1", this.theme); } catch (_) {}
+      this.applyTheme();
+    },
+
+    applyTheme() {
+      let dark = this.theme === "dark";
+      if (this.theme === "system") {
+        try { dark = window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (_) {}
+      }
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
     },
 
     setTextSize(size) {
