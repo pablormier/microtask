@@ -618,7 +618,13 @@ view_labels:
         self.assertIn(':title="deadlineProgressTitle(task)"', rendered)
         self.assertIn("stroke-dashoffset:' + (100 - deadlineProgressPercent(task)) + ';--mt-deadline-elapsed:' + deadlineProgressPercent(task) + '%'", rendered)
         self.assertIn('role="progressbar" :aria-label="\'Time elapsed toward \' + task.title"', rendered)
-        self.assertIn("return Boolean(this.showDeadlineProgress && task && task.due && task.status !== \"done\");", rendered)
+        self.assertIn("return Boolean(this.showDeadlineProgress && task && task.due && task.status !== \"done\" && this.dueState(task) !== \"overdue\");", rendered)
+        # The ring sits with the due badge, and the reference moves after the title to the last row.
+        card = rendered[rendered.index('<article class="mt-card mt-surface"'):]
+        card = card[:card.index("</article>")]
+        self.assertLess(card.index('class="mt-title"'), card.index('class="mt-card-due"'))
+        self.assertLess(card.index('class="mt-card-due"'), card.index("mt-progress-ring"))
+        self.assertLess(card.index('class="mt-card-footer"'), card.index('class="mt-ref mt-card-ref"'))
 
     def test_deadlines_view_hides_year_progress_bar_via_local_config(self) -> None:
         (self.root / "mt-policy.local.yaml").write_text(

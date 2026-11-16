@@ -6,11 +6,13 @@
           <template x-if="focusTask()">
             <div class="mt-focus-card">
               <div class="mt-card-header">
-                <div class="mt-ref" x-text="focusTask().ref"></div>
+                <div class="mt-title" x-text="focusTask().title"></div>
                 <div class="mt-badge mt-priority" x-show="hasPriority(focusTask().priority)" :class="priorityClass(focusTask().priority)" x-text="focusTask().priority"></div>
               </div>
-              <span class="mt-badge mt-status-badge" :class="statusBadgeClass(focusTask().status)" x-text="statusText(focusTask().status)"></span>
-              <div class="mt-title" x-text="focusTask().title"></div>
+              <div class="mt-focus-meta">
+                <span class="mt-badge mt-status-badge" :class="statusBadgeClass(focusTask().status)" x-text="statusText(focusTask().status)"></span>
+                <span class="mt-ref" title="Card reference" x-text="focusTask().ref"></span>
+              </div>
               <template x-if="focusTask().due">
                 <time class="mt-badge mt-due" :class="dueClass(focusTask())" :datetime="focusTask().due" :title="focusTask().due" x-text="'Due ' + dateLabel(focusTask().due)"></time>
               </template>
@@ -51,9 +53,11 @@
           <div class="mt-followups">
             <template x-for="task in followupTasks()" :key="task.id">
               <div class="mt-followup-item mt-surface">
-                <div class="mt-ref" x-text="task.ref"></div>
-                <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-text="statusText(task.status)"></span>
                 <div class="mt-followup-title" x-text="task.title"></div>
+                <div class="mt-focus-meta">
+                  <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-text="statusText(task.status)"></span>
+                  <span class="mt-ref" title="Card reference" x-text="task.ref"></span>
+                </div>
                 <template x-if="task.due">
                   <time class="mt-badge mt-due" :class="dueClass(task)" :datetime="task.due" :title="task.due" x-text="'Due ' + dateLabel(task.due)"></time>
                 </template>

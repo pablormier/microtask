@@ -55,19 +55,18 @@
   padding: 11px 13px 12px;
   cursor: pointer;
 }
+/* The title leads the card; priority sits at the trailing edge of its first line. */
 .mt-card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--mt-space-2);
+  margin-bottom: 4px;
 }
-.mt-card-header-start {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
+.mt-card-header .mt-title { flex: 1 1 auto; min-width: 0; margin: 0; }
 .mt-card-header .mt-priority { flex-shrink: 0; }
+.mt-card-due { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+.mt-card-due .mt-due { margin: 0; }
 .mt-ref {
   color: var(--mt-text-muted);
   font-family: var(--mt-font-family-mono);
@@ -108,7 +107,9 @@
 }
 .mt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 /* Tags and activity share the last card row; the count sits at the trailing edge. */
+/* Tags, activity and the card reference share the last row; the reference sits at the trailing edge. */
 .mt-card-footer { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.mt-card-ref { flex: 0 0 auto; line-height: 1.6; }
 .mt-card-footer .mt-tags { flex: 1 1 auto; min-width: 0; margin-top: 0; }
 .mt-comment-count {
   display: inline-flex;

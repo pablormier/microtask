@@ -529,8 +529,9 @@ function taskBoard() {
       return this.isHardKind(task && task.due_kind);
     },
 
+    // Once a card is overdue the red due badge and side rail say so; a full ring would only repeat it.
     showCardDeadlineProgress(task) {
-      return Boolean(this.showDeadlineProgress && task && task.due && task.status !== "done");
+      return Boolean(this.showDeadlineProgress && task && task.due && task.status !== "done" && this.dueState(task) !== "overdue");
     },
 
     // ---------------------------------------------------------------------------

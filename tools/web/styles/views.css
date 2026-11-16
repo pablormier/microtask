@@ -18,7 +18,9 @@
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.mt-focus-card .mt-title { margin: 2px 0; font-size: var(--mt-font-size-lg); }
+.mt-focus-card .mt-title { margin: 0; font-size: var(--mt-font-size-lg); }
+/* Status and the card reference share one quiet row under the title. */
+.mt-focus-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0; }
 .mt-focus-card .mt-due, .mt-followup-item .mt-due { justify-self: start; margin: 2px 0; }
 .mt-focus-card {
   display: grid;

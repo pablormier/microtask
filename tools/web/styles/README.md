@@ -90,8 +90,13 @@ selector specificity as their base and follow it in the stylesheet.
 - **Card activity:** cards with comments show a muted speech-bubble icon and
   count at the trailing edge of the tag row; zero comments shows nothing.
   The count is an indicator, not a control, with a screen-reader label.
+- **Card anatomy:** the title leads the card with priority at the trailing
+  edge of its first line. The `@ref` sits in the last row after tags and the
+  comment count, in muted monospace, so scanning a column reads titles first.
 - **Card urgency:** overdue and due-today cards keep a white surface and add a
-  3px inset side rail; the due badge carries the date color.
+  3px inset side rail; the due badge carries the date color. The deadline
+  progress ring sits beside the due badge and only shows before the deadline
+  passes, so an overdue card signals it once with the rail and badge.
 - **Feedback:** action and capture results appear in the shared bottom toast
   (`notify(text, error)`), never as inline status lines. Confirmations fade
   after a few seconds; errors stay until dismissed. Keep inline messages for
