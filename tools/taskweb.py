@@ -76,6 +76,7 @@ try:
         extract_excerpt,
         included_ids,
         request_query,
+        search_cards,
         task_to_dict,
         workspace_root,
     )
@@ -136,6 +137,7 @@ except ImportError:  # Direct script entry point or file-based test loader.
         extract_excerpt,
         included_ids,
         request_query,
+        search_cards,
         task_to_dict,
         workspace_root,
     )
@@ -219,6 +221,20 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
                 return
             self.send_json(HTTPStatus.OK, payload)
+            return
+        if url.path == "/api/search":
+            params = parse_qs(url.query)
+            q = (params.get("q") or [""])[0]
+            raw_limit = (params.get("limit") or ["12"])[0]
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "limit must be an integer"})
+                return
+            try:
+                self.send_json(HTTPStatus.OK, search_cards(q, limit=limit))
+            except ValueError as error:
+                self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
         if self.path == "/api/drafts":
             try:

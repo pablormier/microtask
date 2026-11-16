@@ -60,6 +60,7 @@ function taskBoard() {
     ...createFilterController(),
     ...createDraftCoordinator(),
     ...createDetailController(),
+    ...createQuickSearchController(),
     filtersOpen: false,
     ...createPicker(),
     showHidden: false,
@@ -165,6 +166,7 @@ function taskBoard() {
       }
       this.updatePageTitle();
       window.addEventListener("scroll", () => this.clearHoverCard(), { passive: true, capture: true });
+      window.addEventListener("keydown", event => this.handleQuickSearchShortcut(event));
       window.addEventListener("popstate", () => this.readCardLocation());
       window.addEventListener("hashchange", () => this.readCardLocation());
       window.addEventListener("beforeunload", event => {

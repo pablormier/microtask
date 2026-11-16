@@ -305,3 +305,45 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
         "include": included,
         "collections": collections,
     }
+
+
+def search_cards(query_text: str, *, limit: int = 12) -> dict:
+    """Return ranked card summaries across the workspace for the quick-search palette."""
+    store.pin_demo_state()
+    store.maybe_seed_demo()
+    cfg = store.policy()
+    rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    ws_root = workspace_root()
+    cards = store.discover(cache=CARD_CACHE)
+    needle = (query_text or "").strip()
+    capped = max(1, min(int(limit), 30))
+
+    def _recency_key(card: store.Card) -> tuple:
+        return (
+            not store.is_archived(card),
+            not store.is_hidden(card),
+            str(card.frontmatter.get("updated") or card.frontmatter.get("created") or ""),
+            str(card.frontmatter.get("id") or card.path.stem),
+        )
+
+    if not needle:
+        matched = sorted(cards, key=_recency_key, reverse=True)[:capped]
+    else:
+        scored: list[tuple[tuple, store.Card]] = []
+        for card in cards:
+            score = card_query.text_score(card, needle, "and")
+            if score is not None:
+                scored.append(((
+                    not store.is_archived(card),
+                    score,
+                    not store.is_hidden(card),
+                    str(card.frontmatter.get("updated") or card.frontmatter.get("created") or ""),
+                    str(card.frontmatter.get("id") or card.path.stem),
+                ), card))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        matched = [card for _, card in scored[:capped]]
+
+    return {
+        "items": [task_to_dict(card, detail=False, cfg=cfg, rank=rank, ws_root=ws_root) for card in matched],
+        "query": needle,
+    }

@@ -1,0 +1,65 @@
+<dialog id="mt-quick-search" class="mt-quick-search" closedby="any" aria-labelledby="mt-quick-search-title"
+        x-ref="quickSearchDialog" @close="onQuickSearchClose()" @cancel="onQuickSearchCancel($event)">
+  <h2 id="mt-quick-search-title" class="mt-sr-only">Quick search cards</h2>
+  <div class="mt-quick-search-shell">
+    <div class="mt-quick-search-bar">
+      <svg class="mt-icon mt-quick-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+      </svg>
+      <label for="mt-quick-search-input" class="mt-sr-only">Search tasks and notes</label>
+      <input id="mt-quick-search-input" class="mt-quick-search-input" type="search"
+             x-ref="quickSearchInput"
+             x-model="quickSearch.query"
+             @input="onQuickSearchInput()"
+             @keydown.arrow-down.prevent="moveQuickSearch(1)"
+             @keydown.arrow-up.prevent="moveQuickSearch(-1)"
+             @keydown.enter.prevent="chooseQuickSearch()"
+             placeholder="Search tasks, notes, @ref…"
+             autocomplete="off" spellcheck="false"
+             role="combobox" aria-autocomplete="list"
+             :aria-expanded="String(quickSearch.open && quickSearch.query.trim().length > 0)"
+             aria-controls="mt-quick-search-results"
+             :aria-activedescendant="quickSearchActiveDescendant()"
+             autofocus>
+      <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact mt-quick-search-clear"
+              x-show="quickSearch.query.length > 0"
+              @click="clearQuickSearchInput()"
+              aria-label="Clear search">
+        <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="m6 6 12 12M6 18 18 6"/>
+        </svg>
+      </button>
+      <button type="button" class="mt-button mt-sr-only" @click="closeQuickSearch()">Close quick search</button>
+    </div>
+    <p class="mt-sr-only" aria-live="polite" x-text="quickSearch.announcement"></p>
+    <div class="mt-quick-search-body" x-show="quickSearch.query.trim().length > 0">
+      <ul id="mt-quick-search-results" class="mt-quick-search-results" role="listbox" aria-label="Matching cards"
+          x-ref="quickSearchList" x-show="quickSearch.results.length > 0">
+        <template x-for="(item, index) in quickSearch.results" :key="item.id">
+          <li role="option" :id="'mt-qs-opt-' + item.id" class="mt-quick-search-item"
+              :class="{ 'is-active': index === quickSearch.active }"
+              :aria-selected="String(index === quickSearch.active)"
+              @mouseenter="quickSearch.active = index"
+              @click="selectQuickSearch(item, $event)">
+            <span class="mt-quick-search-kind" :class="'is-' + item.kind"
+                  x-text="item.kind === 'note' ? 'Note' : (statusLabels[item.status] || item.status)"></span>
+            <span class="mt-quick-search-title" x-text="item.title"></span>
+            <span class="mt-quick-search-meta">
+              <span class="mt-quick-search-project" x-show="item.project" x-text="item.project"></span>
+              <span class="mt-quick-search-archived" x-show="item.archived">Archived</span>
+              <span class="mt-quick-search-ref" x-text="item.ref"></span>
+            </span>
+          </li>
+        </template>
+      </ul>
+      <p class="mt-quick-search-empty" x-show="!quickSearch.loading && quickSearch.results.length === 0">
+        No matches
+      </p>
+    </div>
+    <div class="mt-quick-search-footer" aria-hidden="true" x-show="quickSearch.query.trim().length > 0 && quickSearch.results.length > 0">
+      <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+      <span><kbd>↵</kbd> Open</span>
+      <span><kbd>Esc</kbd> Close</span>
+    </div>
+  </div>
+</dialog>

@@ -50,6 +50,7 @@ def load_css(web_dir: Path = WEB_DIR) -> str:
         "detail.css",
         "composer.css",
         "popover.css",
+        "quick_search.css",
     ]
     return "\n".join((web_dir / "styles" / f).read_text(encoding="utf-8") for f in css_files)
 
@@ -69,6 +70,7 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
         "filters_query.js",
         "draft_coordinator.js",
         "card_detail.js",
+        "quick_search.js",
         "board.js",
     ]
     return "\n".join((web_dir / "js" / f).read_text(encoding="utf-8") for f in js_files)
@@ -137,6 +139,7 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
             input_expr="$refs.composerBody",
         ))
     )
+    quick_search = (templates_dir / "quick_search.html").read_text(encoding="utf-8")
     card_metadata_editor = fill_placeholders(
         (templates_dir / "card_metadata_editor.html").read_text(encoding="utf-8"),
         {
@@ -169,6 +172,7 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
         .replace("{view_drafts}", view_drafts)
         .replace("{drawer}", drawer)
         .replace("{capture_composer}", capture_composer)
+        .replace("{quick_search}", quick_search)
         .replace("{card_metadata_editor}", card_metadata_editor)
     )
 
