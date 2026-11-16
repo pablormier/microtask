@@ -1,6 +1,7 @@
 """Dashboard payload serialization, detail lookup, and query validation."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
 import hashlib
 import json
@@ -50,8 +51,14 @@ def bootstrap_config(token: str) -> dict:
 def extract_excerpt(text: str, max_len: int = 180) -> str:
     cleaned_lines: list[str] = []
     for line in text.splitlines():
-        if re.fullmatch(r"\s*(?:`{3,}|~{3,})[^`~]*", line):
+        if re.fullmatch(r"\s*(?:`{3,}|~{3,})[^`~]*|\s*(?:\$\$|\\\[|\\\])\s*|\s*([-*_])(?:\s*\1){2,}\s*", line):
             continue
+        # Table rows read as their cells; the delimiter row under the header carries no text.
+        if re.fullmatch(r"\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*", line):
+            continue
+        if line.lstrip().startswith("|"):
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            line = " · ".join(cell for cell in cells if cell)
         line = re.sub(r"^\s*#{1,6}\s+", "", line)
         line = re.sub(r"^\s*([-*+]|\d+\.)\s+", "", line)
         line = re.sub(r"^\s*>\s*", "", line)
@@ -60,6 +67,10 @@ def extract_excerpt(text: str, max_len: int = 180) -> str:
     clean_content = " ".join(cleaned_lines)
     clean_content = re.sub(r'''!?\[([^\]]*)\]\((?:[^\s()]|\([^()]*\))*(?:\s+["'][^"']*["'])?\s*\)''', r"\1", clean_content)
     clean_content = re.sub(r"`([^`]+)`", r"\1", clean_content).replace("`", "")
+    # Math keeps its source text without the delimiters the detail view renders with KaTeX.
+    clean_content = re.sub(r"\$\$(.+?)\$\$|\\\((.+?)\\\)|\\\[(.+?)\\\]",
+                           lambda match: (match[1] or match[2] or match[3]).strip(), clean_content)
+    clean_content = re.sub(r"(?<![\w$\\])\$([^\s$](?:[^$]*[^\s$])?)\$(?![\w$])", r"\1", clean_content)
     clean_content = re.sub(r"\*\*([^*]+)\*\*|~~([^~]+)~~", lambda match: match[1] or match[2], clean_content)
     clean_content = re.sub(r"(?<!\w)__([^_]+)__(?!\w)", r"\1", clean_content)
     clean_content = re.sub(r"(?<!\w)\*([^*]+)\*(?!\w)", r"\1", clean_content)
@@ -244,6 +255,27 @@ def request_query(values: object) -> card_query.Query:
     return query
 
 
+def view_topic_trees(cards: list[store.Card], query: card_query.Query, *, now: datetime,
+                     done_cutoff: object, topics: list[str]) -> dict[str, list[dict[str, object]]]:
+    """The topics panel's tree for each view that shows it, counting the cards that view would show.
+
+    Counts follow every filter except the topic itself, so choosing a topic does not zero the
+    others. Every workspace topic stays in each tree, with no count where the view has none.
+    """
+    by_id = {str(card.frontmatter.get("id") or card.path.stem): card for card in cards}
+    found = collection_results(cards, replace(query, topic=()), now=now, done_cutoff=done_cutoff,
+                               open_statuses=store.open_statuses())
+    trees = {}
+    for view in ("tasks", "notes", "archive"):
+        counts: dict[str, int] = {}
+        for identity in found[view]:
+            topic = by_id[identity].frontmatter.get("topic")
+            if topic:
+                counts[str(topic)] = counts.get(str(topic), 0) + 1
+        trees[view] = card_format.topic_tree(counts, topics)
+    return trees
+
+
 def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
@@ -268,10 +300,12 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    done_cutoff = card_query.default_done_cutoff(query, store.done_window(), date.today())
     collections = collection_results(
-        ordered, query, now=now, open_statuses=store.open_statuses(),
-        done_cutoff=card_query.default_done_cutoff(query, store.done_window(), date.today()),
+        ordered, query, now=now, open_statuses=store.open_statuses(), done_cutoff=done_cutoff,
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
+    meta["topic_trees"] = view_topic_trees(ordered, query, now=now, done_cutoff=done_cutoff,
+                                           topics=[*meta["workspace_usage"]["topic"], *operations.suggested_topics(cfg)])
     drafts = draft_store.list_drafts(ws_root)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)

@@ -157,7 +157,15 @@ function createDraftCoordinator() {
 
     cleanExcerpt(text) {
       if (!text) return "";
-      let s = String(text);
+      // Matches extract_excerpt in tools/web_payloads.py: fence, math and rule lines carry no text,
+      // and table rows read as their cells.
+      let s = String(text).split("\n")
+        .filter(line => !/^\s*(?:(?:`{3,}|~{3,})[^`~]*|\$\$|\\\[|\\\]|([-*_])(?:\s*\1){2,})\s*$/.test(line))
+        .filter(line => !/^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/.test(line))
+        .map(line => line.trimStart().startsWith("|")
+          ? line.trim().replace(/^\|+|\|+$/g, "").split("|").map(cell => cell.trim()).filter(Boolean).join(" · ")
+          : line)
+        .join("\n");
       s = s.replace(/^#{1,6}\s+/gm, "");
       s = s.replace(/^\s*([-*+]|\d+\.)\s+/gm, "");
       s = s.replace(/^\s*>\s*/gm, "");
@@ -166,6 +174,8 @@ function createDraftCoordinator() {
       s = s.replace(/\[([^\]]+)$/g, "$1");
       s = s.replace(/`([^`]+)`/g, "$1");
       s = s.replace(/`/g, "");
+      s = s.replace(/\$\$([\s\S]+?)\$\$|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g, (_, a, b, c) => (a || b || c).trim());
+      s = s.replace(/(^|[^\w$\\])\$([^\s$](?:[^$]*[^\s$])?)\$(?![\w$])/g, "$1$2");
       s = s.replace(/~~([^~]+)~~/g, "$1");
       s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
       s = s.replace(/(^|\W)__([^_]+)__(\W|$)/g, "$1$2$3");

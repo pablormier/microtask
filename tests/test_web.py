@@ -481,6 +481,9 @@ view_labels:
             "~~removed~~ and ![alt](image.png)": "removed and alt",
             "# Heading\n- First\n- Second": "Heading First Second",
             "Use **bold**, _emphasis_ and `code`": "Use bold, emphasis and code",
+            "Notes\n\n| a | b |\n| :- | -: |\n| 1 | $x^2$ |": "Notes a · b 1 · x^2",
+            "Area $$\\pi r^2$$ or \\(a+b\\)\n$$\nE=mc^2\n$$": "Area \\pi r^2 or a+b E=mc^2",
+            "Costs $5 and $10\n\n---\n\nAfter the rule": "Costs $5 and $10 After the rule",
         }
         for source, expected in cases.items():
             self.assertEqual(module.extract_excerpt(source), expected)
@@ -1158,6 +1161,24 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertIn("- [x] second", self.tasks[0].read_text())
             status, invalid = self.post_json(url + "api/checkbox", token, {**request, "checked": "yes"})
             self.assertEqual(status, 400, invalid)
+        finally:
+            self.stop_interactive_web(process)
+
+    def test_topic_panel_counts_follow_the_view_and_ignore_the_topic_filter(self) -> None:
+        self.tasks[0].write_text(self.tasks[0].read_text().replace("project: null", "project: null\ntopic: work/ops"))
+        self.tasks[1].write_text(self.tasks[1].read_text().replace("project: null", "project: null\ntopic: work"))
+        self.note.write_text(self.note.read_text().replace("kind: note", "kind: note\ntopic: reading"))
+        process, url = self.start_interactive_web()
+        try:
+            for query in ("", "?topic=work"):
+                trees = self.get_json(url + "api/items" + query)["meta"]["topic_trees"]
+                counts = {view: {node["path"]: node["count"] for node in tree} for view, tree in trees.items()}
+                self.assertEqual((counts["tasks"]["work"], counts["tasks"]["work/ops"], counts["tasks"]["reading"]), (2, 1, 0))
+                self.assertEqual((counts["notes"]["reading"], counts["notes"]["work"]), (1, 0))
+                self.assertEqual(counts["archive"]["work"], 0)
+            # Other filters still narrow the counts.
+            trees = self.get_json(url + "api/items?tag=code")["meta"]["topic_trees"]
+            self.assertEqual({node["path"]: node["count"] for node in trees["tasks"]}["work"], 1)
         finally:
             self.stop_interactive_web(process)
 

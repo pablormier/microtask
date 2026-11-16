@@ -40,6 +40,7 @@ function taskBoard() {
     suggestedTags: [],
     workspaceProjects: [],
     topicTree: [],
+    topicTrees: {},
     topicTreeState: { tasks: false, notes: true, archive: false },
     expandedTopics: {},
     workspaceTags: [],
@@ -309,10 +310,12 @@ function taskBoard() {
     },
 
     visibleTopicNodes() {
-      if (visibleTopicTreeSource !== this.topicTree || visibleTopicExpandedSource !== this.expandedTopics) {
-        visibleTopicTreeSource = this.topicTree;
+      // The panel counts the cards of the current view; pickers keep the workspace-wide tree.
+      const tree = this.topicTrees[this.mode] || this.topicTree;
+      if (visibleTopicTreeSource !== tree || visibleTopicExpandedSource !== this.expandedTopics) {
+        visibleTopicTreeSource = tree;
         visibleTopicExpandedSource = this.expandedTopics;
-        visibleTopicNodesCache = visibleTopicTreeNodes(this.topicTree, this.expandedTopics);
+        visibleTopicNodesCache = visibleTopicTreeNodes(tree, this.expandedTopics);
       }
       return visibleTopicNodesCache;
     },
@@ -887,6 +890,8 @@ function taskBoard() {
         this.queryLoading = false;
       }
       if (payload.collections && matchesQuery) this.collections = payload.collections;
+      // The panel's counts depend on the filters, so take them only from a response to the current ones.
+      if (payload.meta && matchesQuery) this.topicTrees = payload.meta.topic_trees || {};
       if (!fromQuery && !matchesQuery) this.scheduleQuery(0);
       // `tasks` is only what the filters show, so the server reports changes to any card's reference.
       const revision = (payload.meta || {}).reference_revision || "";
