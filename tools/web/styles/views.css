@@ -247,7 +247,14 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 2px 6px 6px;
+  margin-bottom: 4px;
+  padding: 2px 2px 8px 6px;
+  border-bottom: 1px solid var(--mt-border);
+}
+.mt-topic-tree-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 .mt-topic-tree-header h2 {
   margin: 0;
