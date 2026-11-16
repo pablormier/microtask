@@ -37,6 +37,8 @@ function taskBoard() {
     suggestedTags: [],
     workspaceProjects: [],
     topicTree: [],
+    topicTreeState: { tasks: false, notes: true, archive: false },
+    expandedTopics: {},
     workspaceTags: [],
     workspaceUsage: {},
     maxDoingTasks: 1,
@@ -129,6 +131,7 @@ function taskBoard() {
       this.setLayout(savedLayout);
       this.loadSettings();
       this.readFilterLocation();
+      this.expandTopicAncestors(this.filters.topic);
       this.nowAtLoad = Date.now();
       setInterval(() => {
         if (typeof document !== "undefined" && document.hidden) return;
@@ -153,6 +156,7 @@ function taskBoard() {
           });
         }
         this.$watch("settings", () => this.saveSettings());
+        this.$watch("filters.topic", (paths) => this.expandTopicAncestors(paths));
         this.$watch("mode", () => this.updatePageTitle());
         // Action and capture results surface as one transient toast instead of inline labels.
         this.$watch("actionMessage", (text) => { if (text) this.notify(text, this.actionError); });
@@ -238,6 +242,13 @@ function taskBoard() {
       let saved = {};
       try { saved = JSON.parse(localStorage.getItem(VIEW_SETTINGS_KEY) || "{}"); } catch (_) {}
       this.settings = normalizeViewSettings(saved);
+      let savedTree = {};
+      try { savedTree = JSON.parse(localStorage.getItem("mt-topic-tree-v1") || "{}"); } catch (_) {}
+      this.topicTreeState = {
+        tasks: typeof savedTree.tasks === "boolean" ? savedTree.tasks : false,
+        notes: typeof savedTree.notes === "boolean" ? savedTree.notes : true,
+        archive: typeof savedTree.archive === "boolean" ? savedTree.archive : false
+      };
     },
 
     saveSettings() {
@@ -258,6 +269,56 @@ function taskBoard() {
       this.textSize = ["small", "medium", "large"].includes(size) ? size : "medium";
       document.documentElement.dataset.textSize = this.textSize;
       try { localStorage.setItem("mt-text-size-v2", this.textSize); } catch (_) {}
+    },
+
+    topicTreeOpen() {
+      return Boolean(this.topicTreeState[this.mode]);
+    },
+
+    toggleTopicTree() {
+      if (!(this.mode in this.topicTreeState)) return;
+      this.topicTreeState = { ...this.topicTreeState, [this.mode]: !this.topicTreeState[this.mode] };
+      try { localStorage.setItem("mt-topic-tree-v1", JSON.stringify(this.topicTreeState)); } catch (_) {}
+    },
+
+    toggleTopicExpanded(path) {
+      const key = String(path || "").toLowerCase();
+      if (!key) return;
+      this.expandedTopics = { ...this.expandedTopics, [key]: !this.expandedTopics[key] };
+    },
+
+    expandTopicAncestors(paths) {
+      const list = Array.isArray(paths) ? paths : [];
+      if (!list.length) return;
+      const next = { ...this.expandedTopics };
+      let changed = false;
+      for (const path of list) {
+        const parts = topicSegments(path);
+        for (let i = 1; i < parts.length; i += 1) {
+          const ancestor = parts.slice(0, i).join("/").toLowerCase();
+          if (!next[ancestor]) {
+            next[ancestor] = true;
+            changed = true;
+          }
+        }
+      }
+      if (changed) this.expandedTopics = next;
+    },
+
+    visibleTopicNodes() {
+      return visibleTopicTreeNodes(this.topicTree, this.expandedTopics);
+    },
+
+    selectTopicNode(path, event) {
+      if (event && (event.metaKey || event.ctrlKey)) {
+        this.toggleFilter("topic", path);
+        return;
+      }
+      if (this.filters.topic.length === 1 && this.filters.topic[0].toLowerCase() === String(path || "").toLowerCase()) {
+        this.clearFilter("topic");
+      } else {
+        this.filters.topic = [path];
+      }
     },
 
     tasksById() {

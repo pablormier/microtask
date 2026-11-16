@@ -1,6 +1,10 @@
 <template x-if="isCardsView()">
       <section class="mt-cards-view">
         <div class="mt-view-controls">
+          <button type="button" class="mt-button mt-button-compact mt-topic-tree-toggle"
+                  :class="{ 'is-active': topicTreeOpen() }"
+                  :aria-expanded="String(topicTreeOpen())" aria-controls="mt-topic-tree"
+                  @click="toggleTopicTree()">Topics</button>
           <template x-if="mode === 'archive'">
             <div class="mt-segmented" role="group" aria-label="Card kind">
               <button class="mt-segment" type="button" :aria-pressed="settings.archive.kind === 'task'" @click="setKind('task')">Tasks</button>
@@ -45,7 +49,42 @@
           <p class="mt-sync-warning" role="status" x-show="syncWarning" x-text="syncWarning"></p>
           <p class="mt-sync-warning" role="status" x-show="restartNotice" x-text="restartNotice"></p>
         </div>
-        <div class="mt-groups" :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
+        <div class="mt-cards-body" :class="{ 'has-topic-tree': topicTreeOpen() }">
+          <aside id="mt-topic-tree" class="mt-topic-tree mt-surface" aria-label="Topics" x-show="topicTreeOpen()" x-cloak>
+            <div class="mt-topic-tree-header">
+              <h2>Topics</h2>
+              <button type="button" class="mt-button mt-button-quiet mt-button-compact" x-show="filters.topic.length" @click="clearFilter('topic')">Clear</button>
+            </div>
+            <button type="button" class="mt-button mt-button-quiet mt-topic-tree-all" :class="{ 'is-selected': !filters.topic.length }"
+                    :aria-current="!filters.topic.length ? 'true' : null" @click="clearFilter('topic')">
+              <span>All topics</span>
+            </button>
+            <p class="mt-topic-tree-empty" x-show="!topicTree.length">No topics yet.</p>
+            <ul class="mt-topic-tree-list" role="tree" aria-label="Topic folders" x-show="topicTree.length">
+              <template x-for="node in visibleTopicNodes()" :key="node.path">
+                <li class="mt-topic-tree-item" role="treeitem"
+                    :aria-expanded="node.hasChildren ? String(node.expanded) : null"
+                    :aria-selected="String(filterHas('topic', node.path))">
+                  <div class="mt-topic-tree-row" :class="{ 'is-selected': filterHas('topic', node.path) }"
+                       :style="{ paddingLeft: (4 + node.depth * 14) + 'px' }">
+                    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-tree-disclosure"
+                            x-show="node.hasChildren"
+                            :class="{ 'is-expanded': node.expanded }"
+                            :aria-label="(node.expanded ? 'Collapse ' : 'Expand ') + node.name"
+                            @click.stop="toggleTopicExpanded(node.path)">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+                    </button>
+                    <span class="mt-topic-tree-spacer" x-show="!node.hasChildren" aria-hidden="true"></span>
+                    <button type="button" class="mt-button mt-button-quiet mt-topic-tree-label" :title="node.path" @click="selectTopicNode(node.path, $event)">
+                      <span class="mt-topic-tree-name" x-text="node.name"></span>
+                      <span class="mt-picker-count" x-show="node.count" x-text="node.count" :title="node.count === 1 ? '1 card' : node.count + ' cards'"></span>
+                    </button>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </aside>
+          <div class="mt-groups" :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
           <template x-for="group in viewGroups()" :key="group.key">
             <div class="mt-column" :class="group.className">
               <h2 x-show="group.label"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>
@@ -59,6 +98,7 @@
               </div>
             </div>
           </template>
+          </div>
         </div>
       </section>
 </template>

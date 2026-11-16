@@ -214,7 +214,139 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
 .mt-cards-view { display: flex; flex-direction: column; height: 100%; }
 /* Group by sits in a slim row; the board below starts close to it. */
 .mt-cards-view > .mt-view-controls { flex: none; padding: 8px 18px 0; }
-.mt-cards-view > .mt-view-controls + .mt-groups { padding-top: 8px; }
+.mt-cards-view > .mt-view-controls + .mt-cards-body { padding-top: 8px; }
+.mt-cards-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+.mt-cards-body > .mt-groups { flex: 1 1 auto; min-width: 0; }
+.mt-cards-body > .mt-groups.is-flat { overflow-y: auto; }
+
+/* Topic folder tree sidebar */
+.mt-topic-tree-toggle.is-active {
+  border-color: color-mix(in srgb, var(--mt-accent) 45%, var(--mt-control-border));
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent);
+}
+.mt-topic-tree {
+  flex: 0 0 15.5rem;
+  min-width: 13.5rem;
+  max-width: 17.5rem;
+  margin: 0 0 24px 18px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--mt-radius-lg);
+  overflow-y: auto;
+}
+.mt-topic-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 6px;
+}
+.mt-topic-tree-header h2 {
+  margin: 0;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+button.mt-topic-tree-all,
+button.mt-topic-tree-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--mt-radius-sm);
+  background: none;
+  color: var(--mt-text);
+  font-family: inherit;
+  font-size: var(--mt-font-size-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-topic-tree-all:hover,
+.mt-topic-tree-row:hover { background: var(--mt-surface-hover); }
+.mt-topic-tree-all.is-selected,
+.mt-topic-tree-row.is-selected {
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent);
+}
+.mt-topic-tree-all.is-selected,
+.mt-topic-tree-row.is-selected .mt-topic-tree-label {
+  color: var(--mt-accent);
+  font-weight: 600;
+}
+.mt-topic-tree-all:focus-visible,
+.mt-topic-tree-label:focus-visible,
+.mt-topic-tree-disclosure:focus-visible {
+  outline: 2px solid var(--mt-focus);
+  outline-offset: -2px;
+}
+.mt-topic-tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mt-topic-tree-item { margin: 0; padding: 0; }
+.mt-topic-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--mt-radius-sm);
+}
+.mt-topic-tree-row .mt-topic-tree-label { flex: 1 1 auto; padding: 5px 6px 5px 2px; }
+.mt-topic-tree-row .mt-topic-tree-label:hover { background: none; }
+.mt-topic-tree-disclosure,
+.mt-topic-tree-spacer {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+button.mt-topic-tree-disclosure {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mt-radius-sm);
+  background: none;
+  color: var(--mt-text-muted);
+  cursor: pointer;
+}
+.mt-topic-tree-disclosure:hover { color: var(--mt-text); background: color-mix(in srgb, var(--mt-text) 6%, transparent); }
+.mt-topic-tree-disclosure .mt-icon { width: 14px; height: 14px; transition: transform 120ms ease; }
+.mt-topic-tree-disclosure.is-expanded .mt-icon { transform: rotate(90deg); }
+.mt-topic-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mt-topic-tree-empty {
+  margin: 6px 8px;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+}
 .mt-card.is-note { min-height: 8rem; }
 .mt-sync-warning {
   flex-basis: 100%;
@@ -321,6 +453,8 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
 @media (max-width: 70rem) {
   .mt-overview { grid-template-columns: 1fr; padding: 12px 12px 0; }
   .mt-followups { min-height: 0; contain: none; overflow: visible; }
+  .mt-cards-body { flex-direction: column; }
+  .mt-topic-tree { flex: none; min-width: 0; max-width: none; max-height: 15rem; margin: 8px 12px 0; }
 }
 @media (max-width: 38rem) {
   .mt-groups, .mt-focus-list { padding: 12px; }

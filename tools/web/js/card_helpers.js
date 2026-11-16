@@ -196,6 +196,31 @@ function topicPickerRows(tree, query, { create = true } = {}) {
   return rows;
 }
 
+// Flatten visible nodes of the topic tree given an { [lowerPath]: true } expansion map.
+function visibleTopicTreeNodes(tree, expanded) {
+  const nodes = Array.isArray(tree) ? tree : [];
+  const open = expanded && typeof expanded === "object" ? expanded : {};
+  const result = [];
+  let hiddenAboveDepth = Infinity;
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (node.depth > hiddenAboveDepth) continue;
+    hiddenAboveDepth = Infinity;
+    const hasChildren = index + 1 < nodes.length && nodes[index + 1].depth > node.depth;
+    const isExpanded = hasChildren && Boolean(open[String(node.path || "").toLowerCase()]);
+    if (hasChildren && !isExpanded) hiddenAboveDepth = node.depth;
+    result.push({
+      path: node.path,
+      name: node.name,
+      depth: node.depth,
+      count: node.count,
+      hasChildren,
+      expanded: isExpanded
+    });
+  }
+  return result;
+}
+
 // Picker rows for plain names, most-used first. `usage` maps a name to its card count.
 function usageChoices(names, usage) {
   return names.map(name => ({ kind: "option", name, label: name, count: usage[name] || 0 }))

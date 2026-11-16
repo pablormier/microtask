@@ -2363,6 +2363,42 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
+    def test_topic_tree_controls_and_settings_defaults(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        probe = (
+            'const assert = require("assert/strict");\n'
+            'global.document = {getElementById: () => ({textContent: "{}"})};\n'
+            f'eval({json.dumps(load_js(self.root / "tools/web"))} + `\n'
+            'const app = taskBoard();\n'
+            'assert.equal(app.topicTreeOpen(), false);\n'
+            'app.mode = "notes"; assert.equal(app.topicTreeOpen(), true);\n'
+            'app.mode = "archive"; assert.equal(app.topicTreeOpen(), false);\n'
+            'app.toggleTopicTree(); assert.equal(app.topicTreeOpen(), true);\n'
+            'app.mode = "deadlines"; assert.equal(app.topicTreeOpen(), false);\n'
+            'app.toggleTopicTree(); assert.equal(app.topicTreeOpen(), false);\n'
+            'app.mode = "notes";\n'
+            'app.topicTree = [\n'
+            '  { path: "Learning", name: "Learning", depth: 0, count: 2 },\n'
+            '  { path: "Learning/Rust", name: "Rust", depth: 1, count: 1 },\n'
+            '  { path: "Learning/Rust/Async", name: "Async", depth: 2, count: 1 },\n'
+            '];\n'
+            'assert.deepEqual(app.visibleTopicNodes().map(n => n.path), ["Learning"]);\n'
+            'app.selectTopicNode("Learning/Rust/Async");\n'
+            'assert.deepEqual(app.filters.topic, ["Learning/Rust/Async"]);\n'
+            'app.expandTopicAncestors(app.filters.topic);\n'
+            'assert.deepEqual(app.visibleTopicNodes().map(n => n.path), ["Learning", "Learning/Rust", "Learning/Rust/Async"]);\n'
+            'app.selectTopicNode("Learning/Rust/Async");\n'
+            'assert.deepEqual(app.filters.topic, []);\n'
+            'app.selectTopicNode("Learning", { metaKey: true });\n'
+            'app.selectTopicNode("Learning/Rust", { ctrlKey: true });\n'
+            'assert.deepEqual(app.filters.topic, ["Learning", "Learning/Rust"]);\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 class MdvizUnchangedTests(unittest.TestCase):
     def test_mdviz_behavior_remains(self) -> None:
