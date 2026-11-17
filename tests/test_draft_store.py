@@ -131,6 +131,89 @@ for(const status of [409,404]) {
 }
 """)
 
+    def test_canonical_conflict_resets_list_entry_to_server_copy(self) -> None:
+        self.run_store(r"""
+const draft=makeDraft('draft-c'); draft.body='my local text';
+const server={...draft,body:'server text',revision:2,content_hash:'c'.repeat(64),_savedBody:undefined};
+const recovered=[];
+const store=makeStore({initialDrafts:[draft],onRecovery:(d,r)=>recovered.push([d,r])});
+global.fetch=async path=>{
+  if(path==='/api/drafts') return {ok:true,json:async()=>({drafts:[server]})};
+  return {ok:false,status:409,json:async()=>({error:'Draft changed elsewhere'})};
+};
+assert.equal(await store.save(draft),false);
+const canonical=store.drafts.filter(row=>row.id===draft.id);
+assert.equal(canonical.length,1);
+assert.notEqual(canonical[0],draft);
+assert.equal(canonical[0].body,'server text');
+assert.equal(canonical[0].revision,2);
+const recovery=store.drafts.find(row=>row.id===draft.id+':local-recovery');
+assert.equal(recovery.body,'my local text');
+assert.equal(recovered[0][0],draft); assert.equal(recovered[0][1],recovery);
+assert.equal(JSON.parse(entries.get(store.storageKey(null,draft.id))).body,'my local text');
+""")
+
+    def test_conflict_from_a_new_lineage_adds_a_recovery_copy(self) -> None:
+        self.run_store(r"""
+const draft=makeDraft('draft-l'); draft.body='T1';
+const server={...draft,body:'server',revision:2,content_hash:'c'.repeat(64)};
+const store=makeStore({initialDrafts:[draft]});
+global.fetch=async path=>path==='/api/drafts'
+  ?{ok:true,json:async()=>({drafts:[{...server}]})}
+  :{ok:false,status:409,json:async()=>({error:'changed'})};
+await store.save(draft);
+const reopened=store.drafts.find(row=>row.id==='draft-l');
+reopened.body='T2';
+await store.save(reopened);
+const recoveries=store.drafts.filter(row=>row._localRecovery);
+assert.deepEqual(recoveries.map(row=>row.body).sort(),['T1','T2']);
+const first=recoveries.find(row=>row.body==='T1'), second=recoveries.find(row=>row.body==='T2');
+assert.equal(first.id,'draft-l:local-recovery');
+assert.equal(second.id,'draft-l:local-recovery:2');
+assert.equal(second.sourceId,'draft-l');
+assert.equal(JSON.parse(entries.get(store.storageKey(null,'draft-l'))).body,'T1');
+assert.equal(JSON.parse(entries.get(store.storageKey(null,'draft-l:local-recovery:2'))).body,'T2');
+// Reload: both copies come back, and the extra key is not read as a server draft.
+const reloaded=makeStore({initialDrafts:[{...server}]});
+await reloaded.importLocal(); reloaded.restoreLocal();
+assert.deepEqual(reloaded.drafts.filter(row=>row._localRecovery).map(row=>row.body).sort(),['T1','T2']);
+assert.equal(reloaded.drafts.filter(row=>!row._localRecovery).length,1);
+// Dismissing one copy leaves the other.
+reloaded.dismiss(reloaded.drafts.find(row=>row.body==='T2'));
+assert.deepEqual(reloaded.drafts.filter(row=>row._localRecovery).map(row=>row.body),['T1']);
+assert.equal(entries.has(reloaded.storageKey(null,'draft-l:local-recovery:2')),false);
+assert.equal(JSON.parse(entries.get(reloaded.storageKey(null,'draft-l'))).body,'T1');
+const again=makeStore({initialDrafts:[{...server}]});
+again.restoreLocal();
+assert.deepEqual(again.drafts.filter(row=>row._localRecovery).map(row=>row.body),['T1']);
+""")
+
+    def test_same_lineage_conflict_updates_recovery_in_place(self) -> None:
+        self.run_store(r"""
+const draft=makeDraft('draft-i'); draft.body='first';
+const store=makeStore({initialDrafts:[{...draft,body:'server',revision:2}]});
+global.fetch=async()=>({ok:false,status:409,json:async()=>({error:'changed'})});
+await store.save(draft);
+draft.body='first and more';
+await store.markForRecovery(draft,undefined,{conflict:true});
+const recoveries=store.drafts.filter(row=>row._localRecovery);
+assert.equal(recoveries.length,1);
+assert.equal(recoveries[0].body,'first and more');
+assert.equal(JSON.parse(entries.get(store.storageKey(null,draft.id))).body,'first and more');
+""")
+
+    def test_missing_draft_leaves_no_ghost_row_but_keeps_recovery(self) -> None:
+        self.run_store(r"""
+const draft=makeDraft('draft-m'); draft.body='kept text';
+const store=makeStore({initialDrafts:[draft]});
+const paths=[];
+global.fetch=async path=>{paths.push(path);return {ok:false,status:404,json:async()=>({error:'Draft not found'})};};
+assert.equal(await store.save(draft),false);
+assert.equal(store.drafts.some(row=>row.id===draft.id),false);
+assert.equal(store.drafts.find(row=>row._localRecovery).body,'kept text');
+assert.equal(paths.includes('/api/drafts'),false);
+""")
+
     def test_target_conflict_keeps_workspace_draft_editable(self) -> None:
         self.run_store(r"""
 const draft=makeDraft(); draft._savedBody=draft.body;

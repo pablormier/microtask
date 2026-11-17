@@ -154,7 +154,7 @@ input.mt-field-property, select.mt-field-property {
   font-size: var(--mt-font-size-sm);
   font-weight: 450;
 }
-textarea.mt-field { min-height: 5rem; resize: vertical; }
+textarea.mt-field { min-height: 5rem; resize: vertical; cursor: text; }
 .mt-field:hover:enabled:not(:focus) { border-color: var(--mt-border-strong); }
 .mt-field:focus { border-color: var(--mt-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mt-focus) 18%, transparent); }
 .mt-field[aria-invalid="true"], .mt-field.mt-field-error { border-color: var(--mt-danger); }

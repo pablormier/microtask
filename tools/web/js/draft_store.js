@@ -5,6 +5,8 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
   const timers = Object.create(null);
   const pendingSaves = Object.create(null);
   const queuedSaves = Object.create(null);
+  // Maps a conflicting draft object to the recovery record it produced.
+  const recoveryLineage = new WeakMap();
   function setStatus(value) {
     onStatus(value);
   }
@@ -59,7 +61,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       return result;
     } catch (error) {
       if ((error.conflict || error.missing) && !(ignoreTargetConflict && error.targetConflict)) {
-        store.markForRecovery(draft);
+        await store.markForRecovery(draft, undefined, error);
       }
       throw error;
     }
@@ -95,6 +97,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         const localId = local && (local.id || local.draftId) || key.slice(prefix.length);
         if (!local || !localId || !local.kind || !local.mode) continue;
         if (local.mode === "edit" && local.origin !== "card-body") continue;
+        if (local._recoveryExtra) continue;
         const body = draftBodyText(local);
         const current = this.drafts.find(draft => draft.id === localId);
         const title = String(local.title || "");
@@ -168,6 +171,14 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         }
         const body = String(local.body == null ? local.text || "" : local.body);
         const title = String(local.title || "");
+        if (local._recoveryExtra && local.sourceId) {
+          // An additional recovery copy keeps its own key and never matches a server draft.
+          this.drafts.push({
+            ...local, id, body, title, storageId: id,
+            _localRecovery: true, _orphanedLocal: true, _staleLocal: true,
+          });
+          continue;
+        }
         const current = this.drafts.find(draft => draft.id === id);
         if (current) {
           if ((local.kind || "note") === (current.kind || "note") && (local.mode || "new") === (current.mode || "new") &&
@@ -279,9 +290,16 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
     },
 
     removeRecovery(sourceId, selected) {
+      if (selected && selected._recoveryExtra) {
+        // An additional recovery copy is removed alone.
+        const extraId = selected.recoveryId || selected.id;
+        this.drafts = this.drafts.filter(item => item !== selected && !(item && item.id === extraId));
+        return;
+      }
       this.drafts = this.drafts.filter(item => {
         if (item === selected) return false;
         if (!item) return true;
+        if (item._recoveryExtra) return true;
         const itemSourceId = item.sourceId || item.storageId || item.id;
         // An unsaved inline row can coexist with its explicit recovery copy.
         // Remove both local rows while retaining any canonical saved sibling.
@@ -290,35 +308,76 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       });
     },
 
-    markForRecovery(draft, message) {
+    async markForRecovery(draft, message, error) {
       const id = draft && (draft.sourceId || draft.id || draft.draftId);
       if (!draft || !id) return;
-      const recoveryId = id + ":local-recovery";
-      let recoveryRecord = this.drafts.find(item => item.id === recoveryId);
-      if (!recoveryRecord) {
-        recoveryRecord = {
-          ...draft,
-          id: recoveryId,
-          sourceId: id,
-          storageId: id,
-          body: String(draft.body == null ? draft.text || "" : draft.body),
-          _localRecovery: true,
-          _orphanedLocal: true,
-          _staleLocal: true,
-        };
+      const primaryId = id + ":local-recovery";
+      const canonical = this.drafts.includes(draft);
+      // Update a record in place only when this draft produced it. Any other
+      // conflict gets its own record and storage key so no text is overwritten.
+      let recoveryRecord = recoveryLineage.get(draft);
+      if (recoveryRecord && !this.drafts.includes(recoveryRecord)) recoveryRecord = null;
+      const primary = this.drafts.find(item => item.id === primaryId);
+      if (!recoveryRecord && primary === draft) recoveryRecord = primary;
+      const extra = !recoveryRecord && Boolean(primary);
+      const recoveryId = recoveryRecord ? recoveryRecord.id : extra ? this.nextRecoveryId(primaryId) : primaryId;
+      const fields = {
+        ...draft,
+        id: recoveryId,
+        sourceId: id,
+        storageId: recoveryRecord ? recoveryRecord.storageId : extra ? recoveryId : id,
+        body: String(draft.body == null ? draft.text || "" : draft.body),
+        _recoveryExtra: recoveryRecord ? Boolean(recoveryRecord._recoveryExtra) : extra,
+        _localRecovery: true,
+        _orphanedLocal: true,
+        _staleLocal: true,
+      };
+      if (recoveryRecord) {
+        if (recoveryRecord !== draft) Object.assign(recoveryRecord, fields);
+      } else {
+        recoveryRecord = fields;
         this.drafts.push(recoveryRecord);
       }
-      if (!this.drafts.includes(draft)) {
+      recoveryLineage.set(draft, recoveryRecord);
+      if (!canonical) {
         draft.sourceId = id;
-        draft.storageId = id;
+        draft.storageId = recoveryRecord.storageId;
+        if (recoveryRecord._recoveryExtra) {
+          draft._recoveryExtra = true;
+          draft.recoveryId = recoveryRecord.id;
+        }
         draft._orphanedLocal = true;
         draft._localRecovery = true;
         draft._staleLocal = true;
       }
       this.saveLocal(recoveryRecord);
+      // The canonical entry holds the user's text and a stale revision. Drop it
+      // so reopening cannot repeat the conflict, then reload the server copy.
+      if (canonical) this.drafts = this.drafts.filter(item => item !== draft);
       setStatus("Error");
       onWarning(message || "The workspace draft changed or was removed. Recover your local text as a separate draft or dismiss it.");
       onRecovery(draft, recoveryRecord);
+      if (canonical && !(error && error.missing)) await this.refreshDraft(id);
+    },
+
+    nextRecoveryId(primaryId) {
+      for (let n = 2; ; n += 1) {
+        const id = primaryId + ":" + n;
+        const key = this.storageKey(null, id);
+        let stored = false;
+        try { stored = Boolean(key && localStorage.getItem(key)); } catch (_) {}
+        if (!stored && !this.wasDismissed(id) && !this.drafts.some(item => item.id === id)) return id;
+      }
+    },
+
+    async refreshDraft(id) {
+      try {
+        const response = await fetch("/api/drafts", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const fresh = (payload.drafts || []).find(item => item.id === id);
+        if (fresh && !this.drafts.some(item => item.id === id)) this.drafts.push(fresh);
+      } catch (_) {}
     },
 
     isEmpty(draft) {
@@ -408,7 +467,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         return result;
       } catch (error) {
         if (error.conflict || error.missing) {
-          this.markForRecovery(draft);
+          await this.markForRecovery(draft, undefined, error);
         }
         throw error;
       }
@@ -483,7 +542,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
           return true;
         } catch (error) {
           if (error.conflict || error.missing) {
-            this.markForRecovery(draft);
+            await this.markForRecovery(draft, undefined, error);
           } else {
             setStatus("Error");
             onWarning("Workspace save failed. Your local recovery copy is still available.");

@@ -238,6 +238,7 @@ function createDraftCoordinator() {
         originalText: body, draftId: draft.sourceId || draft.id, revision: Number(draft.revision || 0),
         content_hash: draft.content_hash || "", _serverSaved: Boolean(draft._serverSaved || Number(draft.revision || 0) > 0),
         _orphanedLocal: Boolean(draft._orphanedLocal), sourceId: draft.sourceId || draft.id,
+        ...(draft._recoveryExtra ? { storageId: draft.storageId, _recoveryExtra: true, recoveryId: draft.id } : {}),
         base_hash: draft.base_hash || "",
         base_updated: draft.base_updated || "",
         _savedBody: Object.prototype.hasOwnProperty.call(draft, "_savedBody") ? draft._savedBody : body,
@@ -270,16 +271,18 @@ function createDraftCoordinator() {
 
     taskOptionsFromDraft(draft) {
       const nested = draft && (draft.taskOptions || draft.task_options);
-      const saved = nested && typeof nested === "object" ? nested : {};
+      // Editor changes live in taskOptions; top-level fields are server values that go stale.
+      const hasNested = Boolean(nested) && typeof nested === "object";
+      const saved = hasNested ? nested : draft || {};
       const source = {
-        status: draft && draft.status || saved.status,
-        priority: draft && draft.priority || saved.priority,
-        type: draft && draft.type || saved.type,
-        project: draft && draft.project || saved.project,
-        topic: draft && draft.topic || saved.topic,
-        tags: Array.isArray(draft && draft.tags) ? draft.tags : saved.tags,
-        due: draft && Object.prototype.hasOwnProperty.call(draft, "due") ? draft.due : saved.due,
-        due_kind: draft && Object.prototype.hasOwnProperty.call(draft, "due_kind") ? draft.due_kind : saved.due_kind,
+        status: saved.status,
+        priority: saved.priority,
+        type: saved.type,
+        project: saved.project,
+        topic: saved.topic,
+        tags: saved.tags,
+        due: saved.due,
+        due_kind: saved.due_kind,
       };
       return normalizeMetadataValue(source, {
         task_statuses: this.taskStatuses,
@@ -314,7 +317,9 @@ function createDraftCoordinator() {
     dismissLocalWorkspaceDraft(draft) {
       if (!draft || !draft._orphanedLocal) return;
       const recoveryId = this.getDraftStore().dismiss(draft);
-      if (this.captureComposer.draft && (this.captureComposer.draft.draftId === recoveryId || this.captureComposer.draft.id === recoveryId) && this.captureComposer.draft._orphanedLocal) {
+      const copyKey = item => item.storageId || item.sourceId || item.id || item.draftId;
+      const sameCopy = item => copyKey(item) === copyKey(draft);
+      if (this.captureComposer.draft && (this.captureComposer.draft.draftId === recoveryId || this.captureComposer.draft.id === recoveryId) && this.captureComposer.draft._orphanedLocal && sameCopy(this.captureComposer.draft)) {
         this.captureComposer.destroyZenWorkspace();
         this.captureComposer.draft = null;
         this.captureComposer._editOriginal = null;
@@ -326,7 +331,7 @@ function createDraftCoordinator() {
         this.captureComposer.recoveryWarning = "";
         this.captureComposer.open = false;
       }
-      if (this.contentEditor.draft === draft || (this.contentEditor.draft && (this.contentEditor.draft.id === recoveryId || this.contentEditor.draft.sourceId === recoveryId) && this.contentEditor.draft._orphanedLocal)) {
+      if (this.contentEditor.draft === draft || (this.contentEditor.draft && (this.contentEditor.draft.id === recoveryId || this.contentEditor.draft.sourceId === recoveryId) && this.contentEditor.draft._orphanedLocal && sameCopy(this.contentEditor.draft))) {
         this.contentEditor.destroyZenWorkspace();
         this.contentEditor.draft = null;
         this.contentEditor.text = "";
@@ -348,7 +353,8 @@ function createDraftCoordinator() {
       this.draftBusy = true;
       try {
         const saved = await this.getDraftStore().recover(draft, newId, this.captureComposer.localIsoSeconds(new Date()));
-        if (this.captureComposer.draft && this.captureComposer.draft.draftId === sourceId) {
+        if (this.captureComposer.draft && this.captureComposer.draft.draftId === sourceId &&
+            (this.captureComposer.draft.storageId || sourceId) === (draft.storageId || sourceId)) {
           Object.assign(this.captureComposer.draft, {
             id: newId, draftId: newId, sourceId: newId, storageId: newId,
             ...(draft.mode === "new" ? { captureId: saved.capture_id, capture_id: saved.capture_id } : {}),

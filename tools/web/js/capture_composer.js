@@ -418,7 +418,10 @@ function createCaptureComposer() {
       if (ctx.confirm && !ctx.confirm("Discard this draft? This removes it from the workspace.")) return;
       if (draft._orphanedLocal) {
         const sourceId = draft.sourceId || draft.draftId;
-        ctx.dismissLocalWorkspaceDraft({ ...draft, id: sourceId, sourceId, storageId: sourceId, _orphanedLocal: true });
+        ctx.dismissLocalWorkspaceDraft({
+          ...draft, id: draft._recoveryExtra ? draft.recoveryId : sourceId, sourceId,
+          storageId: draft.storageId || sourceId, _orphanedLocal: true,
+        });
         return;
       }
       if (!draft.draftId) return;

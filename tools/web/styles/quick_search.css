@@ -158,6 +158,7 @@ dialog.mt-quick-search input[type="search"].mt-quick-search-input {
   font-weight: 450;
   line-height: 1.4;
   box-shadow: none;
+  cursor: text;
 }
 
 .mt-quick-search-input::-webkit-search-cancel-button {

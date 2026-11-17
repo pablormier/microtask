@@ -823,6 +823,39 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertEqual(result["reopened"], "")
         self.assertEqual(result["requests"][-1], {"body": "", "revision": 1, "hash": "1" * 64})
 
+    def test_reopened_task_draft_saves_changed_composer_metadata(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  location.protocol = "http:";
+  const app = taskBoard();
+  app.$nextTick = callback => callback();
+  app.$refs = {};
+  app.scheduleDraftSave = () => {};
+  const requests = [];
+  global.fetch = async (_path, options) => {
+    const payload = JSON.parse(options.body);
+    requests.push(payload);
+    return { ok: true, json: async () => ({ saved_draft: {
+      ...payload, revision: payload.expected_revision + 1, content_hash: "2".repeat(64),
+    } }) };
+  };
+  const row = { id: "task-draft", kind: "task", mode: "new", title: "T", body: "B",
+    revision: 1, content_hash: "1".repeat(64), capture_id: "cap-1", created: "2026-10-01T10:00:00",
+    priority: "p1", due: "", due_kind: "" };
+  app.getDraftStore().drafts = [row];
+  await app.openWorkspaceDraft(row);
+  const draft = app.captureComposer.draft;
+  const sameObject = draft === row;
+  draft.taskOptions.priority = "p3";
+  draft.text = "B2"; draft.body = "B2";
+  app.captureComposer.persist(app.captureContext());
+  await app.getDraftStore().save(draft);
+  console.log(JSON.stringify({ sameObject, requests: requests.map(p => ({ priority: p.priority, body: p.body })) }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertTrue(result["sameObject"])
+        self.assertEqual(result["requests"][-1], {"priority": "p3", "body": "B2"})
+
     def test_clearing_capture_during_first_save_keeps_the_cleared_revision(self) -> None:
         result = self.run_node(r"""
 (async () => {
