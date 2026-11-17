@@ -1656,12 +1656,89 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
     calls,
     draftsCount: app.drafts.length,
     reopenedText: app.contentEditor.text,
+    statusAfterReopen: app.draftWorkspaceStatus,
   }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
         self.assertEqual(result["calls"], [])
         self.assertEqual(result["draftsCount"], 0)
         self.assertEqual(result["reopenedText"], "Original")
+        self.assertEqual(result["statusAfterReopen"], "")
+
+    def test_new_task_draft_metadata_updates_after_first_persist(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const entries = new Map();
+  localStorage.setItem = (key, value) => entries.set(key, value);
+  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
+  localStorage.removeItem = key => entries.delete(key);
+  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
+  localStorage.key = index => Array.from(entries.keys())[index] || null;
+  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
+  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
+  app.scheduleDraftSave = () => {};
+  const payloads = [];
+  global.fetch = async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    payloads.push(payload);
+    return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "a".repeat(64) } }) };
+  };
+  app.captureComposer.beginNew(app.captureContext(), null, "task");
+  app.captureComposer.draft.text = "Task body";
+  app.captureComposer.draft.taskOptions.priority = "low";
+  app.captureComposer.persist(app.captureContext());
+  app.captureComposer.draft.taskOptions.priority = "high";
+  app.captureComposer.persist(app.captureContext());
+  await app.saveWorkspaceDraft(app.captureComposer.draft);
+  console.log(JSON.stringify({ priority: payloads[0].priority, shared: app.captureComposer.draft === app.drafts[0] }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["priority"], "high")
+        self.assertTrue(result["shared"])
+
+    def test_conflict_on_shared_draft_adds_single_recovery_row_without_orphaning_canonical(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const entries = new Map();
+  localStorage.setItem = (key, value) => entries.set(key, value);
+  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
+  localStorage.removeItem = key => entries.delete(key);
+  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
+  localStorage.key = index => Array.from(entries.keys())[index] || null;
+  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
+  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
+  app.scheduleDraftSave = () => {};
+  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
+    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
+  app.tasks = [target]; app.selected = target;
+  let step = 0;
+  global.fetch = async (_url, options) => {
+    step += 1;
+    const payload = JSON.parse(options.body);
+    if (step === 1) {
+      return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "1".repeat(64) } }) };
+    }
+    return { ok: false, status: 409, json: async () => ({ error: "Draft changed", conflict: true }) };
+  };
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "First edit";
+  app.contentEditor.persist(app.contentContext());
+  const canonical = app.contentEditor.draft;
+  await app.saveWorkspaceDraft(canonical);
+  app.contentEditor.text = "Second edit";
+  app.contentEditor.persist(app.contentContext());
+  await app.saveWorkspaceDraft(canonical);
+  const orphanedRows = app.drafts.filter(d => d._orphanedLocal);
+  console.log(JSON.stringify({
+    canonicalOrphaned: Boolean(canonical._orphanedLocal),
+    orphanedCount: orphanedRows.length,
+    editorPointsToRecovery: app.contentEditor.draft === orphanedRows[0],
+  }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertFalse(result["canonicalOrphaned"])
+        self.assertEqual(result["orphanedCount"], 1)
+        self.assertTrue(result["editorPointsToRecovery"])
 
 
 if __name__ == "__main__":

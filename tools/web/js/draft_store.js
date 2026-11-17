@@ -1,7 +1,7 @@
 // Workspace draft persistence. No editor, modal, DOM or Alpine state lives here.
 // Queues stay private; each store has its own draft list and per-ID requests.
 function createDraftStore({ context, findTarget, captureFields, initialDrafts = [],
-  onStatus = () => {}, onWarning = () => {}, onSaved = () => {} }) {
+  onStatus = () => {}, onWarning = () => {}, onSaved = () => {}, onRecovery = () => {} }) {
   const timers = Object.create(null);
   const pendingSaves = Object.create(null);
   const queuedSaves = Object.create(null);
@@ -133,8 +133,9 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         });
         try {
           const result = await this.post("/api/draft-save", payload);
-          this.upsert(result.saved_draft);
-          applySavedFields(local, result.saved_draft, {
+          const saved = { ...result.saved_draft, _localRecovery: false, _orphanedLocal: false };
+          this.upsert(saved);
+          applySavedFields(local, saved, {
             body, title, kind: payload.kind, metadata: this.metadataSnapshot(local),
           });
           try { localStorage.setItem(key, JSON.stringify(local)); } catch (_) {}
@@ -202,10 +203,16 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
     },
 
     upsert(saved) {
-      if (!saved || !saved.id) return;
+      if (!saved || !saved.id) return null;
       const index = this.drafts.findIndex(draft => draft.id === saved.id);
-      if (index >= 0) this.drafts.splice(index, 1, { ...this.drafts[index], ...saved, _localRecovery: false, _orphanedLocal: false });
-      else this.drafts.push(saved);
+      if (index >= 0) {
+        if (this.drafts[index] !== saved) {
+          Object.assign(this.drafts[index], saved);
+        }
+        return this.drafts[index];
+      }
+      this.drafts.push(saved);
+      return saved;
     },
 
     async post(path, body) {
@@ -286,20 +293,32 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
     markForRecovery(draft, message) {
       const id = draft && (draft.sourceId || draft.id || draft.draftId);
       if (!draft || !id) return;
-      draft.sourceId = id;
-      draft.storageId = id;
-      draft._orphanedLocal = true;
-      draft._localRecovery = true;
-      draft._staleLocal = true;
-      this.saveLocal(draft);
       const recoveryId = id + ":local-recovery";
-      if (!this.drafts.some(item => item.id === recoveryId)) {
-        this.drafts.push({ ...draft, id: recoveryId, sourceId: id, storageId: id,
+      let recoveryRecord = this.drafts.find(item => item.id === recoveryId);
+      if (!recoveryRecord) {
+        recoveryRecord = {
+          ...draft,
+          id: recoveryId,
+          sourceId: id,
+          storageId: id,
           body: String(draft.body == null ? draft.text || "" : draft.body),
-          _localRecovery: true, _orphanedLocal: true, _staleLocal: true });
+          _localRecovery: true,
+          _orphanedLocal: true,
+          _staleLocal: true,
+        };
+        this.drafts.push(recoveryRecord);
       }
+      if (!this.drafts.includes(draft)) {
+        draft.sourceId = id;
+        draft.storageId = id;
+        draft._orphanedLocal = true;
+        draft._localRecovery = true;
+        draft._staleLocal = true;
+      }
+      this.saveLocal(recoveryRecord);
       setStatus("Error");
       onWarning(message || "The workspace draft changed or was removed. Recover your local text as a separate draft or dismiss it.");
+      onRecovery(draft, recoveryRecord);
     },
 
     isEmpty(draft) {
@@ -347,7 +366,7 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       const result = await this.post("/api/draft-save", payload);
       this.markClosed({ ...draft, sourceId });
       this.removeRecovery(sourceId, draft);
-      this.upsert(result.saved_draft);
+      this.upsert({ ...result.saved_draft, _localRecovery: false, _orphanedLocal: false });
       setStatus("Recovered as a separate workspace draft");
       return result.saved_draft;
     },
@@ -446,13 +465,18 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       const request = (async () => {
         try {
           const result = await this.post("/api/draft-save", payload);
-          const saved = result.saved_draft;
+          const saved = { ...result.saved_draft, _localRecovery: false, _orphanedLocal: false };
           const savedFields = { body, title, kind: savedKind, metadata: savedMetadata };
           applySavedFields(draft, saved, savedFields);
           if (queuedSaves[key] && queuedSaves[key] !== draft) {
             applySavedFields(queuedSaves[key], saved, savedFields);
           }
-          this.upsert(saved);
+          if (this.drafts.includes(draft)) {
+            draft._localRecovery = false;
+            draft._orphanedLocal = false;
+          } else {
+            this.upsert(saved);
+          }
           setStatus("Saved in workspace");
           this.saveLocal(draft);
           onSaved(draft);

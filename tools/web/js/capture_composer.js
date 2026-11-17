@@ -170,7 +170,7 @@ function createCaptureComposer() {
       this.draft = {
         version: 1, workspaceKey: ctx.workspaceKey,
         kind: kind === "task" ? "task" : "note", mode: "new",
-        captureId, capture_id: captureId, draftId: captureId, revision: 0,
+        id: captureId, captureId, capture_id: captureId, draftId: captureId, revision: 0,
         createdAt: this.localIsoSeconds(now), created: this.localIsoSeconds(now),
         title: "", text: "", instructions: "", taskOptions: this.newTaskOptions(ctx), ref: "",
         originalText: "",
@@ -187,6 +187,7 @@ function createCaptureComposer() {
       if (this.surface) this.surface.setValue("");
       this.message = "";
       this.messageError = false;
+      if (ctx.clearStatus) ctx.clearStatus();
       this.openComposer(ctx, event);
     },
 
@@ -205,48 +206,55 @@ function createCaptureComposer() {
         : String(existing ? existing.body || "" : card.body);
       const draftId = existing ? existing.id : this.makeId();
       const taskOptions = normalizeMetadataValue(card, { task_defaults: ctx.taskDefaults });
-      this.draft = existing ? {
-        ...existing,
-        version: 1,
-        workspaceKey: ctx.workspaceKey,
-        kind: card.kind,
-        mode: "edit",
-        origin: "card-body",
-        target: card.path,
-        ref: card.ref,
-        base_hash: existing.base_hash || card.content_hash,
-        base_updated: existing.base_updated || card.updated,
-        draftId,
-        title: card.title || "",
-        text: source,
-        originalText: card.body,
-        next_action: card.next_action || "",
-        instructions: card.processing_instructions || "",
-        taskOptions,
-      } : {
-        version: 1,
-        workspaceKey: ctx.workspaceKey,
-        kind: card.kind,
-        mode: "edit",
-        origin: "card-body",
-        target: card.path,
-        ref: card.ref,
-        base_hash: card.content_hash,
-        base_updated: card.updated,
-        id: draftId,
-        draftId,
-        revision: 0,
-        title: card.title || "",
-        text: source,
-        originalText: card.body,
-        next_action: card.next_action || "",
-        instructions: card.processing_instructions || "",
-        taskOptions,
-        _savedBody: source,
-        _savedTitle: card.title || "",
-        _savedKind: card.kind,
-        _savedMetadata: "",
-      };
+      if (existing) {
+        Object.assign(existing, {
+          version: 1,
+          workspaceKey: ctx.workspaceKey,
+          kind: card.kind,
+          mode: "edit",
+          origin: "card-body",
+          target: card.path,
+          ref: card.ref,
+          base_hash: existing.base_hash || card.content_hash,
+          base_updated: existing.base_updated || card.updated,
+          id: draftId,
+          draftId,
+          title: card.title || "",
+          text: source,
+          body: source,
+          originalText: card.body,
+          next_action: card.next_action || "",
+          instructions: card.processing_instructions || "",
+          taskOptions,
+        });
+        this.draft = existing;
+      } else {
+        this.draft = {
+          version: 1,
+          workspaceKey: ctx.workspaceKey,
+          kind: card.kind,
+          mode: "edit",
+          origin: "card-body",
+          target: card.path,
+          ref: card.ref,
+          base_hash: card.content_hash,
+          base_updated: card.updated,
+          id: draftId,
+          draftId,
+          revision: 0,
+          title: card.title || "",
+          text: source,
+          body: source,
+          originalText: card.body,
+          next_action: card.next_action || "",
+          instructions: card.processing_instructions || "",
+          taskOptions,
+          _savedBody: source,
+          _savedTitle: card.title || "",
+          _savedKind: card.kind,
+          _savedMetadata: "",
+        };
+      }
       this._editOriginal = {
         ref: card.ref,
         kind: card.kind,
@@ -264,6 +272,7 @@ function createCaptureComposer() {
       if (this.surface) this.surface.setValue(source);
       this.message = "";
       this.messageError = false;
+      if (ctx.clearStatus) ctx.clearStatus();
       this.openComposer(ctx);
     },
 
@@ -277,18 +286,17 @@ function createCaptureComposer() {
           return false;
         }
         try {
-          const localSaved = Boolean(ctx.store.saveLocal({ ...draft, body: draft.text }));
+          const localSaved = Boolean(ctx.store.saveLocal(draft));
           if (!localSaved) throw new Error("Browser storage unavailable");
           this.persisted = true;
           this.recoveryWarning = "";
           if (typeof ctx.store.upsert === "function") {
-            ctx.store.upsert({ ...draft, body: draft.text, _localRecovery: true });
+            ctx.store.upsert(draft);
           } else {
             const drafts = ctx.getDrafts();
             const existing = drafts.findIndex(item => item.id === draft.id);
-            const record = { ...draft, body: draft.text, _localRecovery: true };
-            if (existing >= 0) drafts.splice(existing, 1, { ...drafts[existing], ...record });
-            else drafts.push(record);
+            if (existing >= 0) Object.assign(drafts[existing], draft);
+            else drafts.push(draft);
           }
           if (!draft._orphanedLocal) ctx.scheduleDraftSave(draft);
           return true;
@@ -298,6 +306,7 @@ function createCaptureComposer() {
           return false;
         }
       }
+      draft.body = String(draft.text || "");
       if (ctx.store.isEmpty(draft)) {
         ctx.store.forgetEmpty(draft);
         this.persisted = false;
@@ -312,25 +321,37 @@ function createCaptureComposer() {
         if (!ctx.store.saveLocal(draft)) throw new Error("Browser storage unavailable");
         this.persisted = true;
         this.recoveryWarning = "";
-        const id = draft.draftId || draft.captureId;
+        const id = draft.id || draft.draftId || draft.captureId;
         const taskOptions = draft.taskOptions || this.newTaskOptions(ctx);
-        const localRecord = {
-          id, kind: draft.kind || "note", mode: draft.mode,
-          title: String(draft.title || ""), body: String(draft.text || ""),
-          instructions: String(draft.instructions || ""), task_options: taskOptions,
-          ...ctx.captureDraftFields(draft), target: draft.target || "", ref: draft.ref || "",
-          base_hash: draft.base_hash || "", base_updated: draft.base_updated || "",
-          content_hash: draft.content_hash || "", capture_id: draft.capture_id || draft.captureId || "",
-          created: draft.created || draft.createdAt || "", revision: Number(draft.revision || 0),
-          updated: draft.updated || "", _serverSaved: Boolean(draft._serverSaved || Number(draft.revision || 0) > 0),
-          _orphanedLocal: Boolean(draft._orphanedLocal), _savedBody: draft._savedBody,
-          _savedTitle: draft._savedTitle, _savedKind: draft._savedKind || draft.kind || "note",
-          _savedMetadata: draft._savedMetadata, _localRecovery: true,
-        };
-        const drafts = ctx.getDrafts();
-        const existing = drafts.findIndex(item => item.id === id);
-        if (existing >= 0) drafts.splice(existing, 1, { ...drafts[existing], ...localRecord });
-        else drafts.push(localRecord);
+        Object.assign(draft, {
+          id,
+          draftId: id,
+          kind: draft.kind || "note",
+          title: String(draft.title || ""),
+          body: String(draft.text || ""),
+          instructions: String(draft.instructions || ""),
+          taskOptions,
+          target: draft.target || "",
+          ref: draft.ref || "",
+          base_hash: draft.base_hash || "",
+          base_updated: draft.base_updated || "",
+          content_hash: draft.content_hash || "",
+          capture_id: draft.capture_id || draft.captureId || "",
+          created: draft.created || draft.createdAt || "",
+          revision: Number(draft.revision || 0),
+          updated: draft.updated || "",
+          _serverSaved: Boolean(draft._serverSaved || Number(draft.revision || 0) > 0),
+          _orphanedLocal: Boolean(draft._orphanedLocal),
+          _savedKind: draft._savedKind || draft.kind || "note",
+        });
+        if (typeof ctx.store.upsert === "function") {
+          ctx.store.upsert(draft);
+        } else {
+          const drafts = ctx.getDrafts();
+          const existing = drafts.findIndex(item => item.id === id);
+          if (existing >= 0) Object.assign(drafts[existing], draft);
+          else drafts.push(draft);
+        }
         if (draft.draftId && !draft._orphanedLocal) ctx.scheduleDraftSave(draft);
         return true;
       } catch (_) {
@@ -342,7 +363,11 @@ function createCaptureComposer() {
 
     // Discard is offered only when the draft holds something; an empty draft just closes.
     hasContent(ctx) {
-      return Boolean(this.draft && !ctx.store.isEmpty(this.draft));
+      if (!this.draft) return false;
+      if (this.isCardEdit()) {
+        return Boolean(Number(this.draft.revision || 0) > 0 || this.draft._serverSaved || this.draft.text !== this.draft.originalText);
+      }
+      return Boolean(!ctx.store.isEmpty(this.draft));
     },
 
     hasUnpersisted(ctx) {
@@ -376,6 +401,12 @@ function createCaptureComposer() {
     async discard(ctx) {
       const draft = this.draft;
       if (!draft || this.saving) return;
+      if (this.isCardEdit() && !this.hasContent(ctx)) {
+        this.close(ctx);
+        this.message = "";
+        this.messageError = false;
+        return;
+      }
       if (draft.mode === "new" && !String(draft.text || "").trim() && !String(draft.title || "").trim() &&
           !String(draft.instructions || "").trim() &&
           Number(draft.revision || 0) === 0) {
@@ -482,6 +513,22 @@ function createCaptureComposer() {
             draft.body = draft.text;
             result = await ctx.finishWorkspaceDraft(draft);
             if (!result) return null;
+            const latest = ctx.getSelected ? ctx.getSelected() : null;
+            const nextId = this.makeId();
+            Object.assign(draft, {
+              id: nextId,
+              draftId: nextId,
+              revision: 0,
+              content_hash: "",
+              _serverSaved: false,
+              base_hash: (latest && latest.content_hash) || draft.base_hash,
+              base_updated: (latest && latest.updated) || draft.base_updated,
+              originalText: draft.text,
+              _savedBody: draft.text,
+            });
+            if (this._editOriginal && latest && latest.content_hash) {
+              this._editOriginal.content_hash = latest.content_hash;
+            }
           }
           if (propsDirty && ctx.saveCardProperties && this._editOriginal) {
             const latest = ctx.getSelected ? ctx.getSelected() : null;

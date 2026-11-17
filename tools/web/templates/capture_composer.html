@@ -133,8 +133,8 @@
             </template>
             <template x-if="captureComposer.draft && !captureComposer.draft._orphanedLocal">
               <footer class="mt-composer-footer">
-                <button type="button" class="mt-button mt-button-danger mt-composer-discard" x-show="!captureComposer.isCardEdit() && captureComposer.hasContent(captureContext())" @click="captureComposer.discard(captureContext())" :disabled="captureComposer.saving || busy" :aria-busy="captureComposer.saving || busy">Discard draft</button>
-                <button type="button" class="mt-button" x-show="captureComposer.isCardEdit()" @click="captureComposer.close(captureContext())" :disabled="captureComposer.saving || busy">Cancel</button>
+                <button type="button" class="mt-button mt-button-danger mt-composer-discard" x-show="captureComposer.hasContent(captureContext())" @click="captureComposer.discard(captureContext())" :disabled="captureComposer.saving || busy" :aria-busy="captureComposer.saving || busy">Discard draft</button>
+                <button type="button" class="mt-button" x-show="captureComposer.isCardEdit()" @click="captureComposer.close(captureContext())" :disabled="captureComposer.saving || busy">Close</button>
                 <span class="mt-composer-shortcut" title="Command or Control + Enter saves"><kbd>⌘/Ctrl</kbd><kbd>Enter</kbd></span>
                 <button type="button" class="mt-button mt-button-primary mt-composer-save" @click="captureComposer.save(captureContext())"
                         :disabled="!captureComposer.canSave(captureContext()) || captureComposer.saving || busy" :aria-busy="captureComposer.saving || busy">

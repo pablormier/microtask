@@ -65,7 +65,7 @@ function createContentEditor() {
       const existing = saved || ctx.getDrafts().find(draft => draft.mode === "edit" &&
         draft.origin === "card-body" && draft.target === card.path && !draft._orphanedLocal);
       const source = String(existing ? existing.body || "" : card.body);
-      this.draft = existing ? { ...existing } : {
+      this.draft = existing ? (existing._orphanedLocal ? { ...existing } : existing) : {
         id: ctx.makeId(), kind: card.kind, mode: "edit", target: card.path,
         ref: card.ref, base_hash: card.content_hash, base_updated: card.updated,
         origin: "card-body", revision: 0, title: card.title, body: source,
@@ -93,8 +93,29 @@ function createContentEditor() {
       draft.body = this.text;
       if (draft.body === this.original && !draft.revision) return;
       this.localSaved = Boolean(ctx.store.saveLocal(draft));
-      ctx.store.upsert({ ...draft, _localRecovery: true });
+      if (typeof ctx.store.upsert === "function") ctx.store.upsert(draft);
       if (!draft._orphanedLocal) ctx.scheduleDraftSave(draft);
+    },
+
+    hasDraft() {
+      const draft = this.draft;
+      if (!draft) return false;
+      return Boolean(Number(draft.revision || 0) > 0 || draft._serverSaved || this.text !== this.original);
+    },
+
+    async discard(ctx) {
+      const draft = this.draft;
+      if (!draft || this.saving || ctx.draftBusy || ctx.busy) return;
+      if (!this.hasDraft()) {
+        this.destroyZenWorkspace();
+        this.draft = null;
+        this.text = "";
+        this.error = "";
+        return;
+      }
+      if (ctx.discardWorkspaceDraft) {
+        await ctx.discardWorkspaceDraft(draft);
+      }
     },
 
     close(ctx) {

@@ -137,7 +137,8 @@
                       </template>
                       <template x-if="!contentEditor.draft?._orphanedLocal">
                         <div class="mt-layout-group" role="group" aria-label="Content draft actions">
-                          <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="draftBusy || contentEditor.saving">Cancel</button>
+                          <button type="button" class="mt-button mt-button-danger" x-show="contentEditor.hasDraft()" @click="contentEditor.discard(contentContext())" :disabled="draftBusy || contentEditor.saving">Discard draft</button>
+                          <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="draftBusy || contentEditor.saving">Close</button>
                           <button type="button" class="mt-button mt-button-primary" @click="contentEditor.save(contentContext())" :disabled="!contentEditor.canSave(contentContext()) || contentEditor.saving" :aria-busy="draftBusy || contentEditor.saving">Save content</button>
                         </div>
                       </template>

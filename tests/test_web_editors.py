@@ -427,7 +427,7 @@ const ctx={
   taskStatuses:['inbox','active'],taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
   metadataSnapshot:()=>'',captureDraftFields:()=>({}),getDrafts:()=>[],
   scheduleDraftSave:draft=>{scheduled.push(draft);draft.revision=1;draft.content_hash='d1';},
-  finishWorkspaceDraft:async draft=>{finished.push(draft);return {saved_ref:'@note-1'};},
+  finishWorkspaceDraft:async draft=>{finished.push({draft,body:draft.body,revision:draft.revision});return {saved_ref:'@note-1'};},
   focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
 };
 composer.beginEdit(ctx,note,{zen:true});
@@ -442,6 +442,30 @@ await composer.save(ctx);
 assert.equal(finished.length,1);
 assert.equal(finished[0].body,'Second edit');
 assert.equal(finished[0].revision,1);
+
+// Partial Zen save (body succeeds, properties fail) resets draft to a fresh edit baseline
+let failProps=true;
+const card2={ref:'@note-2',path:'cards/note2.md',kind:'note',title:'Note 2',content_hash:'h-old',updated:'2026-10-01',body:'Before'};
+const ctx2={
+  ...ctx,
+  getSelected:()=>card2,
+  finishWorkspaceDraft:async draft=>{card2.content_hash='h-new';card2.updated='2026-10-02';return {saved_ref:'@note-2'};},
+  saveCardProperties:async()=>failProps?null:{saved_ref:'@note-2'},
+  actionMessage:()=>'Property conflict',
+};
+composer.beginEdit(ctx2,card2,{zen:true});
+const oldId=composer.draft.id;
+composer.draft.revision=2;
+composer.draft.text='After';
+composer.draft.title='New title';
+assert.equal(await composer.save(ctx2),null);
+assert.notEqual(composer.draft.id,oldId);
+assert.equal(composer.draft.revision,0);
+assert.equal(composer.draft.base_hash,'h-new');
+assert.equal(composer.draft.originalText,'After');
+assert.equal(composer.hasContent(ctx2),false);
+failProps=false;
+assert.deepEqual(await composer.save(ctx2),{saved_ref:'@note-2'});
 """)
 
     def test_zen_edit_discards_the_live_draft_object(self) -> None:
