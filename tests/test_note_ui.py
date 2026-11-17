@@ -989,6 +989,38 @@ console.log(JSON.stringify({results}));
         self.assertIn('x-show="!contentEditor.open"', drawer)
         self.assertIn("Mark reviewed", drawer)
 
+    def test_markdown_math_pass_keeps_task_checkboxes_where_native_sethtml_exists(self) -> None:
+        # Native Element.setHTML() drops <input> by default. The math pass must not use it,
+        # or task-list checkboxes vanish from every preview in browsers that support it.
+        source = r"""
+const fs = require("fs");
+eval(fs.readFileSync("" + __MD_PATH__, "utf8"));
+global.marked = {
+  parse() { return '<ul>\n<li><input disabled="" type="checkbox"> First</li>\n</ul>\n'; },
+  Renderer: function() { this.link = () => ""; this.image = () => ""; }
+};
+global.DOMPurify = { sanitize: s => s };
+global.window = { renderMathInElement() {} };
+const stripInputs = html => html.replace(/<input[^>]*>/g, "");
+global.Element = function() {};
+global.Element.prototype.setHTML = function(html) { this.innerHTML = stripInputs(html); };
+global.document = {
+  createElement() {
+    const el = Object.create(global.Element.prototype);
+    el.innerHTML = "";
+    return el;
+  }
+};
+console.log(JSON.stringify({ html: renderMarkdown({}, "- [ ] First") }));
+"""
+        script = source.replace("__MD_PATH__", json.dumps(str(ROOT / "tools/web/js/markdown.js")))
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        result = subprocess.run([node], input=script, text=True, capture_output=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('<input disabled="" type="checkbox">', json.loads(result.stdout)["html"])
+
     def test_markdown_math_protection_and_restoration(self) -> None:
         source = r"""
 const fs = require("fs");
