@@ -208,3 +208,65 @@ assert.equal(await store.save(draft),false);
 store.saveLocal(draft);
 assert.equal(JSON.parse(entries.get(store.storageKey('workspace-b',draft.id))).body,'new text');
 """)
+
+    def test_queued_copy_receives_updated_revision_and_awaits_its_own_save(self) -> None:
+        self.run_store(r"""
+const store=makeStore();
+const firstCopy=makeDraft('draft-q');
+firstCopy.revision=0;
+delete firstCopy.content_hash;
+firstCopy._savedBody='old text';
+const secondCopy={...firstCopy,body:'second edit'};
+const calls=[];
+let releaseFirst, releaseSecond;
+global.fetch=(path,options)=>{
+  const payload=JSON.parse(options.body);
+  calls.push(payload);
+  if (calls.length===1) return new Promise(resolve=>{releaseFirst=()=>resolve(savedResponse(payload));});
+  return new Promise(resolve=>{releaseSecond=()=>resolve(savedResponse(payload));});
+};
+const firstSave=store.save(firstCopy);
+const secondSave=store.save(secondCopy);
+let secondResolved=false;
+secondSave.then(()=>{secondResolved=true;});
+releaseFirst();
+await firstSave;
+await Promise.resolve();
+assert.equal(secondResolved,false);
+assert.equal(secondCopy.revision,1);
+assert.equal(secondCopy.content_hash,'1'.repeat(64));
+releaseSecond();
+assert.equal(await secondSave,true);
+assert.equal(calls.length,2);
+assert.equal(calls[1].expected_revision,1);
+assert.equal(calls[1].expected_hash,'1'.repeat(64));
+assert.equal(calls[1].body,'second edit');
+""")
+
+    def test_discard_cancels_pending_save_without_flushing_new_edits_to_server(self) -> None:
+        self.run_store(r"""
+const store=makeStore();
+const localOnly=makeDraft('draft-local-only');
+localOnly.revision=0;
+delete localOnly.content_hash;
+const paths=[];
+global.fetch=async(path,options)=>{paths.push(path);return {ok:true,json:async()=>({message:'Draft discarded'})};};
+store.saveLocal(localOnly);
+store.drafts.push(localOnly);
+store.schedule(localOnly,1000);
+await store.discard(localOnly);
+assert.deepEqual(paths,[]);
+assert.equal(store.drafts.length,0);
+assert.equal(store.wasDismissed(localOnly.id),true);
+
+const saved=makeDraft('draft-saved');
+saved._serverSaved=true;
+store.saveLocal(saved);
+store.drafts.push(saved);
+saved.body='unsaved edit that should be discarded';
+store.schedule(saved,1000);
+await store.discard(saved);
+assert.deepEqual(paths,['/api/draft-discard']);
+assert.equal(store.drafts.length,0);
+assert.equal(store.wasDismissed(saved.id),true);
+""")

@@ -356,8 +356,43 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       return runDraftAction(this, "/api/draft-finish", draft, { ignoreTargetConflict: true });
     },
 
-    discard(draft) {
-      return runDraftAction(this, "/api/draft-discard", draft);
+    async discard(draft) {
+      if (!draft || draft._orphanedLocal || !context().available ||
+          (draft.workspaceKey && draft.workspaceKey !== context().workspaceKey)) return null;
+      const id = draft.id || draft.draftId;
+      const key = id ? String(id) : "";
+      if (key) {
+        clearTimeout(timers[key]);
+        delete timers[key];
+        delete queuedSaves[key];
+        if (pendingSaves[key]) await pendingSaves[key];
+        clearTimeout(timers[key]);
+        delete timers[key];
+      }
+      const current = this.drafts.find(item => item.id === id);
+      const revision = Number(draft.revision || (current && current.revision) || 0);
+      const contentHash = draft.content_hash || (current && current.content_hash);
+      const serverSaved = Boolean(draft._serverSaved || (current && current._serverSaved) || revision > 0);
+      if (!serverSaved) {
+        this.drafts = this.drafts.filter(item => item.id !== id);
+        this.markClosed(draft);
+        return { message: "Draft discarded" };
+      }
+      try {
+        const result = await this.post("/api/draft-discard", {
+          id,
+          expected_revision: revision,
+          expected_hash: contentHash,
+        });
+        this.drafts = this.drafts.filter(item => item.id !== id);
+        this.markClosed(draft);
+        return result;
+      } catch (error) {
+        if (error.conflict || error.missing) {
+          this.markForRecovery(draft);
+        }
+        throw error;
+      }
     },
 
     schedule(draft, delay = 450) {
@@ -385,11 +420,14 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         queuedSaves[key] = draft;
         await pending;
         const queued = queuedSaves[key];
-        delete queuedSaves[key];
-        if (queued && this.hasChanges(queued)) {
-          return this.save(queued);
+        if (queued === draft) {
+          delete queuedSaves[key];
+          if (this.hasChanges(queued)) {
+            return this.save(queued);
+          }
+          return true;
         }
-        return true;
+        return pendingSaves[key] ? await pendingSaves[key] : true;
       }
       if (draft.mode === "new" && this.isEmpty(draft)) return false;
       const body = draftBodyText(draft);
@@ -409,7 +447,11 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         try {
           const result = await this.post("/api/draft-save", payload);
           const saved = result.saved_draft;
-          applySavedFields(draft, saved, { body, title, kind: savedKind, metadata: savedMetadata });
+          const savedFields = { body, title, kind: savedKind, metadata: savedMetadata };
+          applySavedFields(draft, saved, savedFields);
+          if (queuedSaves[key] && queuedSaves[key] !== draft) {
+            applySavedFields(queuedSaves[key], saved, savedFields);
+          }
           this.upsert(saved);
           setStatus("Saved in workspace");
           this.saveLocal(draft);

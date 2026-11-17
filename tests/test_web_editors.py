@@ -414,6 +414,64 @@ assert.deepEqual(calls,[
 assert.equal(composer.open,false);
 """)
 
+    def test_zen_edit_schedules_and_finishes_the_live_draft_object(self) -> None:
+        self.run_node(r"""
+const scheduled=[];
+const finished=[];
+const note={ref:'@note-1',path:'cards/note.md',kind:'note',title:'Note',content_hash:'h1',updated:'2026-10-01',body:'Original'};
+const composer=createCaptureComposer();
+const ctx={
+  interactive:true,workspaceKey:'workspace-a',busy:false,
+  store:{saveLocal:()=>true,upsert:()=>{}},
+  taskDefaults:{status:'inbox',priority:'none',type:'task'},
+  taskStatuses:['inbox','active'],taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
+  metadataSnapshot:()=>'',captureDraftFields:()=>({}),getDrafts:()=>[],
+  scheduleDraftSave:draft=>{scheduled.push(draft);draft.revision=1;draft.content_hash='d1';},
+  finishWorkspaceDraft:async draft=>{finished.push(draft);return {saved_ref:'@note-1'};},
+  focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
+};
+composer.beginEdit(ctx,note,{zen:true});
+composer.draft.text='First edit';
+assert.equal(composer.persist(ctx),true);
+assert.equal(scheduled.length,1);
+assert.equal(scheduled[0],composer.draft);
+assert.equal(composer.draft.revision,1);
+assert.equal(composer.draft.content_hash,'d1');
+composer.draft.text='Second edit';
+await composer.save(ctx);
+assert.equal(finished.length,1);
+assert.equal(finished[0].body,'Second edit');
+assert.equal(finished[0].revision,1);
+""")
+
+    def test_zen_edit_discards_the_live_draft_object(self) -> None:
+        self.run_node(r"""
+const discarded=[];
+const note={ref:'@note-1',path:'cards/note.md',kind:'note',title:'Note',content_hash:'h1',updated:'2026-10-01',body:'Original'};
+const composer=createCaptureComposer();
+const ctx={
+  interactive:true,workspaceKey:'workspace-a',busy:false,
+  store:{saveLocal:()=>true,upsert:()=>{}},
+  taskDefaults:{status:'inbox',priority:'none',type:'task'},
+  taskStatuses:['inbox','active'],taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
+  metadataSnapshot:()=>'',captureDraftFields:()=>({}),getDrafts:()=>[],
+  scheduleDraftSave:draft=>{draft.revision=1;draft.content_hash='d1';},
+  discardWorkspaceDraft:async (draft,confirmed)=>{discarded.push({draft,confirmed,revision:draft.revision});},
+  confirm:()=>true,focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
+};
+composer.beginEdit(ctx,note,{zen:true});
+composer.draft.text='Edited';
+assert.equal(composer.persist(ctx),true);
+const live=composer.draft;
+composer.draft.text='Edited again';
+await composer.discard(ctx);
+assert.equal(discarded.length,1);
+assert.equal(discarded[0].draft,live);
+assert.equal(discarded[0].confirmed,true);
+assert.equal(discarded[0].draft.body,'Edited again');
+assert.equal(discarded[0].revision,1);
+""")
+
 
 if __name__ == "__main__":
     unittest.main()

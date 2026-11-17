@@ -12,7 +12,25 @@ function createDraftCoordinator() {
           captureFields: draft => this.captureDraftFields(draft),
           onStatus: status => { this.draftWorkspaceStatus = status; },
           onWarning: message => { this.captureComposer.recoveryWarning = message; },
-          onSaved: draft => { if (draft === this.captureComposer.draft) this.captureComposer.persisted = true; },
+          onSaved: draft => {
+            const syncSaved = target => {
+              if (!target || target === draft || target._orphanedLocal) return;
+              const targetId = target.id || target.draftId;
+              const draftId = draft.id || draft.draftId;
+              if (!targetId || targetId !== draftId) return;
+              target.revision = draft.revision;
+              target.updated = draft.updated;
+              target.content_hash = draft.content_hash;
+              target._serverSaved = true;
+              target._savedBody = draft._savedBody;
+              target._savedTitle = draft._savedTitle;
+              target._savedKind = draft._savedKind;
+              target._savedMetadata = draft._savedMetadata;
+            };
+            syncSaved(this.contentEditor.draft);
+            syncSaved(this.captureComposer.draft);
+            if (draft === this.captureComposer.draft) this.captureComposer.persisted = true;
+          },
         });
       }
       return this.draftStorage;
@@ -301,9 +319,12 @@ function createDraftCoordinator() {
       const recoveryId = this.getDraftStore().dismiss(draft);
       if (this.captureComposer.draft && (this.captureComposer.draft.draftId === recoveryId || this.captureComposer.draft.id === recoveryId) && this.captureComposer.draft._orphanedLocal) {
         this.captureComposer.draft = null;
+        this.captureComposer._editOriginal = null;
+        this.captureComposer.persisted = false;
         this.captureComposer.open = false;
       }
-      if (this.contentEditor.draft === draft) {
+      if (this.contentEditor.draft === draft || (this.contentEditor.draft && (this.contentEditor.draft.id === recoveryId || this.contentEditor.draft.sourceId === recoveryId) && this.contentEditor.draft._orphanedLocal)) {
+        this.contentEditor.destroyZenWorkspace();
         this.contentEditor.draft = null;
         this.contentEditor.text = "";
         this.contentEditor.error = "";
@@ -427,9 +448,18 @@ function createDraftCoordinator() {
       this.draftBusy = true;
       try {
         if (!await this.getDraftStore().discard(draft)) return;
-        if (this.captureComposer.draft && (this.captureComposer.draft.draftId === draft.id || this.captureComposer.draft.draftId === draft.draftId)) {
+        const discardedId = draft.id || draft.draftId;
+        if (this.captureComposer.draft && (this.captureComposer.draft.id === discardedId || this.captureComposer.draft.draftId === discardedId)) {
           this.captureComposer.draft = null;
+          this.captureComposer._editOriginal = null;
+          this.captureComposer.persisted = false;
           this.captureComposer.open = false;
+        }
+        if (this.contentEditor.draft && (this.contentEditor.draft.id === discardedId || this.contentEditor.draft.draftId === discardedId)) {
+          this.contentEditor.destroyZenWorkspace();
+          this.contentEditor.draft = null;
+          this.contentEditor.text = "";
+          this.contentEditor.error = "";
         }
         this.draftWorkspaceStatus = "Draft discarded";
         if (typeof this.notify === "function") this.notify("Draft discarded");

@@ -183,7 +183,7 @@ def save(
             revision = 1
             created = str(fields.get("created") or now)
         else:
-            if expected_revision == 0 and fields.get("origin") and fields.get("origin") == previous.get("origin"):
+            if expected_revision == 0 and fields.get("origin") and fields.get("origin") != "card-body" and fields.get("origin") == previous.get("origin"):
                 if body == previous.get("body") and str(fields.get("title") or "") == str(previous.get("title") or ""):
                     return previous
                 raise DraftConflict("an import with this origin already exists; local changes were retained")

@@ -1570,6 +1570,99 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
         self.assertEqual(result["notices"], [{"text": "Draft discarded", "error": False}])
         self.assertEqual(result["remaining"], ["d2"])
 
+    def test_switching_to_zen_during_inflight_save_syncs_revision_onto_new_editor_draft(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const entries = new Map();
+  localStorage.setItem = (key, value) => entries.set(key, value);
+  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
+  localStorage.removeItem = key => entries.delete(key);
+  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
+  localStorage.key = index => Array.from(entries.keys())[index] || null;
+  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
+  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
+  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
+    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
+  app.tasks = [target]; app.selected = target;
+  let releaseFirst;
+  const requests = [];
+  global.fetch = (url, options) => {
+    const payload = JSON.parse(options.body);
+    requests.push({ url, payload });
+    if (requests.length === 1) {
+      return new Promise(resolve => {
+        releaseFirst = () => resolve({
+          ok: true,
+          json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "1".repeat(64), updated: "2026-10-01T10:00:01" } }),
+        });
+      });
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({ saved_draft: { ...payload, revision: payload.expected_revision + 1, content_hash: "2".repeat(64), updated: "2026-10-01T10:00:02" } }),
+    });
+  };
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "First edit";
+  const inflight = app.saveWorkspaceDraft(Object.assign(app.contentEditor.draft, { body: "First edit" }));
+  app.openSelectedInZen();
+  releaseFirst();
+  await inflight;
+  app.captureComposer.draft.text = "Second edit";
+  app.captureComposer.persist(app.captureContext());
+  const secondOk = await app.saveWorkspaceDraft(app.captureComposer.draft);
+  console.log(JSON.stringify({
+    secondOk,
+    firstRev: requests[0].payload.expected_revision,
+    secondRev: requests[1].payload.expected_revision,
+    secondHash: requests[1].payload.expected_hash,
+    zenRev: app.captureComposer.draft.revision,
+  }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertTrue(result["secondOk"])
+        self.assertEqual(result["firstRev"], 0)
+        self.assertEqual(result["secondRev"], 1)
+        self.assertEqual(result["secondHash"], "1" * 64)
+        self.assertEqual(result["zenRev"], 2)
+
+    def test_discarding_card_edit_draft_clears_open_content_editor_and_does_not_resurrect_on_reopen(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const entries = new Map();
+  localStorage.setItem = (key, value) => entries.set(key, value);
+  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
+  localStorage.removeItem = key => entries.delete(key);
+  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
+  localStorage.key = index => Array.from(entries.keys())[index] || null;
+  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
+  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
+  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
+    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
+  app.tasks = [target]; app.selected = target;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push(String(url));
+    return { ok: true, json: async () => ({ message: "Draft discarded" }) };
+  };
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "Edited text to discard";
+  app.contentEditor.persist(app.contentContext());
+  const draft = app.drafts[0];
+  await app.discardWorkspaceDraft(draft, true);
+  app.contentEditor.close(app.contentContext());
+  app.contentEditor.begin(app.contentContext());
+  console.log(JSON.stringify({
+    calls,
+    draftsCount: app.drafts.length,
+    reopenedText: app.contentEditor.text,
+  }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["calls"], [])
+        self.assertEqual(result["draftsCount"], 0)
+        self.assertEqual(result["reopenedText"], "Original")
+
 
 if __name__ == "__main__":
     unittest.main()

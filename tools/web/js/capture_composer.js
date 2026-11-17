@@ -290,7 +290,7 @@ function createCaptureComposer() {
             if (existing >= 0) drafts.splice(existing, 1, { ...drafts[existing], ...record });
             else drafts.push(record);
           }
-          if (!draft._orphanedLocal) ctx.scheduleDraftSave({ ...draft, body: draft.text });
+          if (!draft._orphanedLocal) ctx.scheduleDraftSave(draft);
           return true;
         } catch (_) {
           this.persisted = false;
@@ -391,8 +391,11 @@ function createCaptureComposer() {
         return;
       }
       if (!draft.draftId) return;
-      const workspaceDraft = { ...draft, id: draft.draftId, kind: draft.kind || "note", body: draft.text };
-      await ctx.discardWorkspaceDraft(workspaceDraft, true);
+      // Discard the live object so a save that finishes during the flush
+      // updates the revision this request sends.
+      draft.kind = draft.kind || "note";
+      draft.body = draft.text;
+      await ctx.discardWorkspaceDraft(draft, true);
     },
 
     meetingTemplateText() {
@@ -476,7 +479,8 @@ function createCaptureComposer() {
         try {
           let result = null;
           if (bodyDirty) {
-            result = await ctx.finishWorkspaceDraft({ ...draft, body: draft.text });
+            draft.body = draft.text;
+            result = await ctx.finishWorkspaceDraft(draft);
             if (!result) return null;
           }
           if (propsDirty && ctx.saveCardProperties && this._editOriginal) {

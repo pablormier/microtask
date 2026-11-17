@@ -146,6 +146,15 @@ class DraftCliTests(unittest.TestCase):
                              expected_revision=True, now=now, expected_content_hash=saved["content_hash"])
         self.assertEqual(path.read_bytes(), original)
 
+        edit_id = "88888888-8888-4888-8888-888888888888"
+        edit_fields = {"kind": "note", "mode": "edit", "target": "cards/note.md",
+                       "base_hash": "a" * 64, "base_updated": now, "origin": "card-body"}
+        draft_store.save(self.root, draft_id=edit_id, fields=edit_fields, body="First edit",
+                         expected_revision=0, now=now)
+        with self.assertRaisesRegex(draft_store.DraftConflict, "draft changed since it was loaded"):
+            draft_store.save(self.root, draft_id=edit_id, fields=edit_fields, body="Second edit",
+                             expected_revision=0, now=now)
+
     def test_new_task_draft_can_be_saved_without_a_target(self) -> None:
         draft = self.json_output(self.run_mt(
             "draft", "create", "task", "--title", "Drafted task", "--file", "-", "--json",
