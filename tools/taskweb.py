@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
 import sys
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
@@ -49,13 +50,6 @@ try:
         valid_utf8,
     )
     from .web_assets import (
-        ALPINE_CDN,
-        DOMPURIFY_CDN,
-        KATEX_AUTO_RENDER_CDN,
-        KATEX_CSS_CDN,
-        KATEX_JS_CDN,
-        MARKED_CDN,
-        PICO_CDN,
         WEB_DIR,
         application_version,
         build_html,
@@ -64,6 +58,7 @@ try:
         load_js,
         load_template,
         safe_json,
+        vendor_file,
     )
     from .web_payloads import (
         CARD_CACHE,
@@ -110,13 +105,6 @@ except ImportError:  # Direct script entry point or file-based test loader.
         valid_utf8,
     )
     from web_assets import (  # noqa: F401
-        ALPINE_CDN,
-        DOMPURIFY_CDN,
-        KATEX_AUTO_RENDER_CDN,
-        KATEX_CSS_CDN,
-        KATEX_JS_CDN,
-        MARKED_CDN,
-        PICO_CDN,
         WEB_DIR,
         application_version,
         build_html,
@@ -125,6 +113,7 @@ except ImportError:  # Direct script entry point or file-based test loader.
         load_js,
         load_template,
         safe_json,
+        vendor_file,
     )
     from web_payloads import (  # noqa: F401
         CARD_CACHE,
@@ -184,8 +173,32 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_vendor_file(self, path: Path, content_type: str) -> None:
+        body = path.read_bytes()
+        etag = '"' + hashlib.sha256(body).hexdigest() + '"'
+        # Cached copies are revalidated on each load, so a changed file is never served stale.
+        status = HTTPStatus.NOT_MODIFIED if self.headers.get("If-None-Match") == etag else HTTPStatus.OK
+        self.send_response(status.value)
+        self.send_header("Content-Type", content_type)
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if status is HTTPStatus.NOT_MODIFIED:
+            self.end_headers()
+            return
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
         url = urlsplit(self.path)
+        if url.path.startswith("/vendor/"):
+            found = vendor_file(unquote(url.path))
+            if found is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            else:
+                self.send_vendor_file(*found)
+            return
         if url.path in ("/", "/index.html"):
             page = build_html(bootstrap_config(self.server.token))
             self.send_html(page)

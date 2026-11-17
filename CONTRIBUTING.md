@@ -29,7 +29,10 @@ Prefer small, explicit code and fewer concepts.
   inputs.
 - Keep the core zero-install with Python 3 and macOS Bash 3.2. The approved
   exception to standard-library-only dependencies is bundled pure-Python PyYAML
-  under `scripts/vendor`, including its license and pinned provenance. Do not
+  under `scripts/vendor`, including its license and pinned provenance. The
+  dashboard's browser libraries (Pico, Alpine, marked, DOMPurify, KaTeX) are
+  bundled the same way under `tools/web/vendor`, each with its license and a
+  `VENDOR.json` provenance record, so the dashboard works offline. Do not
   require a system YAML package, pip installation, or compiled extension.
 - Preserve `scripts/validate` as the trust boundary.
 - Routine card operations must be possible from `mt help`, `mt policy`,
@@ -37,7 +40,7 @@ Prefer small, explicit code and fewer concepts.
   one, treat that as a help gap and fix the help.
 
 Before finishing, run the relevant tests (see the [test guide](tests/README.md)),
-`bash -n mt install.sh`, `python3 -m py_compile scripts/*.py`, and
+`bash -n mt install.sh`, `python3 -m py_compile scripts/*.py tools/*.py`, and
 `./mt validate`.
 
 ## Testing interactive features
@@ -52,6 +55,11 @@ Inspect nearby templates and `tools/web/styles/` first. Reuse shared component
 styles and theme variables. Match related controls' placement, order,
 dimensions, spacing, and icon treatment. Account for Pico's CSS cascade,
 including `role="group"` styling.
+
+The dashboard loads no third-party URLs. To change a browser library, edit its
+version in `tools/vendor_web.py`, run `python3 tools/vendor_web.py` (it verifies
+npm integrity and rewrites `tools/web/vendor`), and review the diff. The server
+serves those files under `/vendor/`. Tests never run the script.
 
 Before finishing, verify the rendered UI in a browser at desktop and narrow
 widths, including hover, focus, and disabled states; fix visual defects and

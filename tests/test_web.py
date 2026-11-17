@@ -211,17 +211,98 @@ print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'exp
         self.assertIn("Some **bold** note content.", payload["body"])
         self.assertNotIn("Concurrent edit", payload["body"])
 
-    def test_output_includes_all_cdn_libraries(self) -> None:
+    def test_output_references_only_local_vendored_libraries(self) -> None:
         self.render_dashboard()
         rendered = self.output.read_text(encoding="utf-8")
-        self.assertIn("@picocss/pico@2.1.1/css/pico.min.css", rendered)
         self.assertIn('layer(vendor)', rendered)
-        self.assertIn("alpinejs@3.15.12/dist/cdn.min.js", rendered)
-        self.assertIn("marked@15.0.12/lib/marked.umd.js", rendered)
-        self.assertIn("dompurify@3.2.6/dist/purify.min.js", rendered)
-        self.assertIn("katex@0.16.10/dist/katex.min.css", rendered)
-        self.assertIn("katex@0.16.10/dist/katex.min.js", rendered)
-        self.assertIn("katex@0.16.10/dist/contrib/auto-render.min.js", rendered)
+        for path in (
+            "/vendor/pico/css/pico.min.css",
+            "/vendor/alpinejs/dist/cdn.min.js",
+            "/vendor/marked/lib/marked.umd.js",
+            "/vendor/dompurify/dist/purify.min.js",
+            "/vendor/katex/dist/katex.min.css",
+            "/vendor/katex/dist/katex.min.js",
+            "/vendor/katex/dist/contrib/auto-render.min.js",
+        ):
+            self.assertIn(path, rendered)
+        self.assertNotIn("cdn.jsdelivr.net", rendered)
+        self.assertEqual(re.findall(r'<(?:script|link)\b[^>]*\b(?:src|href)="(https?:[^"]*)"', rendered), [])
+
+    def test_vendor_manifest_files_exist_and_match_their_hashes(self) -> None:
+        vendor = Path(taskweb.WEB_DIR) / "vendor"
+        manifest = json.loads((vendor / "VENDOR.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            {name: lib["version"] for name, lib in manifest["libraries"].items()},
+            {"pico": "2.1.1", "alpinejs": "3.15.12", "marked": "15.0.12", "dompurify": "3.2.6", "katex": "0.16.10"},
+        )
+        listed = set()
+        for name, library in manifest["libraries"].items():
+            self.assertTrue(library["integrity"].startswith("sha512-"), name)
+            self.assertIn(f"{name}/LICENSE", library["files"])
+            for rel, expected in library["files"].items():
+                listed.add(rel)
+                self.assertEqual(hashlib.sha256((vendor / rel).read_bytes()).hexdigest(), expected, rel)
+        on_disk = {p.relative_to(vendor).as_posix() for p in vendor.rglob("*") if p.is_file()}
+        self.assertEqual(on_disk - {"VENDOR.json"}, listed)
+
+    def test_vendored_css_references_existing_woff2_fonts_first(self) -> None:
+        css_path = Path(taskweb.WEB_DIR) / "vendor" / "katex" / "dist" / "katex.min.css"
+        css = css_path.read_text(encoding="utf-8")
+        sources = re.findall(r"src:(url\([^;}]*)", css)
+        self.assertTrue(sources)
+        for src in sources:
+            first = re.match(r"url\((fonts/[^)]+\.woff2)\)", src)
+            self.assertIsNotNone(first, src)
+            self.assertTrue((css_path.parent / first.group(1)).is_file(), first.group(1))
+
+    def test_server_serves_vendored_files_and_refuses_other_paths(self) -> None:
+        with mock.patch.dict(os.environ, {"MT_WORKSPACE": str(self.root)}):
+            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                host, port = server.server_address
+
+                def fetch(path: str):
+                    request = urllib.request.Request(f"http://{host}:{port}{path}")
+                    try:
+                        with urllib.request.urlopen(request, timeout=5) as response:
+                            return response.status, response.headers, response.read()
+                    except urllib.error.HTTPError as error:
+                        return error.code, error.headers, error.read()
+
+                status, headers, body = fetch("/vendor/pico/css/pico.min.css")
+                self.assertEqual((status, headers["Content-Type"]), (200, "text/css; charset=utf-8"))
+                self.assertTrue(body)
+                status, headers, _ = fetch("/vendor/alpinejs/dist/cdn.min.js")
+                self.assertEqual((status, headers["Content-Type"]), (200, "text/javascript; charset=utf-8"))
+                status, headers, _ = fetch("/vendor/katex/dist/fonts/KaTeX_Main-Regular.woff2")
+                self.assertEqual((status, headers["Content-Type"]), (200, "font/woff2"))
+                etag = headers["ETag"]
+                request = urllib.request.Request(
+                    f"http://{host}:{port}/vendor/katex/dist/fonts/KaTeX_Main-Regular.woff2",
+                    headers={"If-None-Match": etag},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as cached:
+                    urllib.request.urlopen(request, timeout=5)
+                self.assertEqual(cached.exception.code, 304)
+
+                for refused in (
+                    "/vendor/../taskweb.py",
+                    "/vendor/%2e%2e/taskweb.py",
+                    "/vendor/pico/../../taskweb.py",
+                    "/vendor/pico/%2e%2e/%2e%2e/index.html",
+                    "/vendor/%2e%2e%2ftaskweb.py",
+                    "/vendor/pico/missing.css",
+                    "/vendor/pico",
+                    "/vendor/",
+                    "/vendor/VENDOR.json",
+                ):
+                    self.assertEqual(fetch(refused)[0], 404, refused)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
     def test_shared_controls_and_keyboard_paths_are_present(self) -> None:
         self.render_dashboard()
@@ -242,11 +323,11 @@ print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'exp
         for tag in button_tags:
             self.assertRegex(tag, r'class="[^"]*\b(?:mt-button|mt-segment)\b')
 
-    def test_pico_is_pinned_and_imported_in_the_vendor_layer(self) -> None:
+    def test_pico_is_imported_in_the_vendor_layer(self) -> None:
         self.render_dashboard()
         rendered = self.output.read_text(encoding="utf-8")
-        self.assertIn('@import url("https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css") layer(vendor)', rendered)
-        self.assertNotIn('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico', rendered)
+        self.assertIn('@import url("/vendor/pico/css/pico.min.css") layer(vendor)', rendered)
+        self.assertNotIn('<link rel="stylesheet" href="/vendor/pico', rendered)
 
     def test_output_includes_titles_refs_next_actions_bodies(self) -> None:
         self.render_dashboard()

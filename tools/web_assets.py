@@ -8,16 +8,42 @@ import re
 import secrets
 
 
-PICO_CDN = "https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css"
-ALPINE_CDN = "https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js"
-MARKED_CDN = "https://cdn.jsdelivr.net/npm/marked@15.0.12/lib/marked.umd.js"
-DOMPURIFY_CDN = "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
-KATEX_CSS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css"
-KATEX_JS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"
-KATEX_AUTO_RENDER_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"
+# Third-party libraries are served from tools/web/vendor (see VENDOR.json there).
+VENDOR_URL = "/vendor/"
+PICO_CSS = VENDOR_URL + "pico/css/pico.min.css"
+ALPINE_JS = VENDOR_URL + "alpinejs/dist/cdn.min.js"
+MARKED_JS = VENDOR_URL + "marked/lib/marked.umd.js"
+DOMPURIFY_JS = VENDOR_URL + "dompurify/dist/purify.min.js"
+KATEX_CSS = VENDOR_URL + "katex/dist/katex.min.css"
+KATEX_JS = VENDOR_URL + "katex/dist/katex.min.js"
+KATEX_AUTO_RENDER_JS = VENDOR_URL + "katex/dist/contrib/auto-render.min.js"
+
+VENDOR_CONTENT_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".woff2": "font/woff2",
+}
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+
+def vendor_file(url_path: str, web_dir: Path | None = None) -> tuple[Path, str] | None:
+    """Return the file and Content-Type for a `/vendor/...` URL path, or None.
+
+    Only existing regular files of a served type inside web/vendor qualify.
+    """
+    if not url_path.startswith(VENDOR_URL):
+        return None
+    root = ((web_dir or WEB_DIR) / "vendor").resolve()
+    relative = url_path[len(VENDOR_URL):]
+    if not relative or "\\" in relative or "\0" in relative:
+        return None
+    path = (root / relative).resolve()
+    if root not in path.parents or not path.is_file():
+        return None
+    content_type = "text/plain; charset=utf-8" if path.name == "LICENSE" else VENDOR_CONTENT_TYPES.get(path.suffix)
+    return (path, content_type) if content_type else None
 
 
 def application_version(app_root: Path = APP_ROOT) -> str:
@@ -193,13 +219,13 @@ def build_html(config: dict, *, web_dir: Path = WEB_DIR) -> str:
     js = load_js(web_dir)
 
     page = fill_placeholders(template, {
-        "{pico_css}": PICO_CDN,
-        "{katex_css}": KATEX_CSS_CDN,
-        "{alpine_js}": ALPINE_CDN,
-        "{marked_js}": MARKED_CDN,
-        "{dompurify_js}": DOMPURIFY_CDN,
-        "{katex_js}": KATEX_JS_CDN,
-        "{katex_auto_render_js}": KATEX_AUTO_RENDER_CDN,
+        "{pico_css}": PICO_CSS,
+        "{katex_css}": KATEX_CSS,
+        "{alpine_js}": ALPINE_JS,
+        "{marked_js}": MARKED_JS,
+        "{dompurify_js}": DOMPURIFY_JS,
+        "{katex_js}": KATEX_JS,
+        "{katex_auto_render_js}": KATEX_AUTO_RENDER_JS,
         "{dashboard_css}": css,
         "{nonce}": nonce,
         "{app_script}": js,
