@@ -30,7 +30,7 @@ class WebEditorComponentTests(unittest.TestCase):
 const captureA=createCaptureComposer(), captureB=createCaptureComposer();
 const propertiesA=createPropertyEditor(), propertiesB=createPropertyEditor();
 const contentA=createContentEditor(), contentB=createContentEditor();
-captureA.draft={text:'capture A'};
+captureA.draft={body:'capture A'};
 propertiesA.form={project:'property A'};
 contentA.text='content A';
 assert.equal(captureB.draft,null);
@@ -42,8 +42,8 @@ assert.equal(contentB.text,'');
         self.run_node(r"""
 const rows=[];
 const store={
-  isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!Number(d.revision||0),
-  forgetEmpty:()=>{}, saveLocal:()=>true,
+  isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!d.content_hash,
+  forgetEmpty:()=>{}, upsert:d=>{ if(!rows.includes(d)) rows.push(d); },
 };
 const ctx={interactive:true,workspaceKey:'workspace-a',busy:false,store,
   taskDefaults:{status:'inbox',priority:'none',type:'task'},taskStatuses:['inbox','active'],
@@ -53,9 +53,8 @@ const ctx={interactive:true,workspaceKey:'workspace-a',busy:false,store,
 };
 const editor=createCaptureComposer();
 editor.beginNew(ctx,null,'note');
-editor.draft.text='A recoverable capture';
+editor.draft.body='A recoverable capture';
 assert.equal(editor.persist(ctx),true);
-assert.equal(editor.persisted,true);
 assert.equal(rows.length,1);
 assert.equal(editor.canSave(ctx),true);
 assert.equal(editor.draft.taskOptions.project,'');
@@ -82,28 +81,32 @@ assert.equal(editor.error,'offline');
 assert.equal(editor.baselineHash,'base');
 """)
 
-    def test_content_local_save_failure_stays_open_and_save_returns_result(self) -> None:
+    def test_content_conflict_stays_open_and_save_returns_result(self) -> None:
         self.run_node(r"""
 const task={id:'task',ref:'@task',path:'cards/task.md',kind:'task',content_hash:'base',body:'# Existing'};
 const editor=createContentEditor();
-let finish;
-const ctx={selected:task,interactive:true,busy:false,draftBusy:false,getDrafts:()=>[],makeId:()=> 'content-id',
-  store:{saveLocal:()=>false,upsert:()=>{}},scheduleDraftSave:()=>{},needsReconciliation:()=>false,
+let resolveSave;
+const ctx={workspaceKey:'ws-1',selected:task,interactive:true,busy:false,draftBusy:false,
   clearStatus:()=>{},focusInput:()=>{},
-  finishWorkspaceDraft:()=>new Promise(resolve=>{finish=resolve;})};
+  saveCardBody:()=>new Promise(resolve=>{resolveSave=resolve;})};
 editor.begin(ctx);
 editor.text='# Edited';
-editor.persist(ctx);
-assert.equal(editor.localSaved,false);
-assert.equal(editor.close(ctx),false);
-assert.match(editor.error,/could not be saved locally/);
+editor.persist();
 const saving=editor.save(ctx);
 assert.equal(editor.saving,true);
 assert.equal(editor.canSave(ctx),false);
 assert.equal(await editor.save(ctx),null);
-task.content_hash='content-saved-hash';
-finish({saved_ref:'@task'});
-assert.deepEqual(await saving,{saved_ref:'@task'});
+resolveSave({ok:false,conflict:true,error:'stale'});
+assert.equal(await saving,null);
+assert.equal(editor.open,true);
+assert.equal(editor.conflict,true);
+assert.equal(editor.error,'This card changed since you opened it. Copy your text or reload.');
+assert.equal(editor.saving,false);
+
+const savingOk=editor.save(ctx);
+resolveSave({ok:true,payload:{saved_ref:'@task'}});
+assert.deepEqual(await savingOk,{saved_ref:'@task'});
+assert.equal(editor.open,false);
 assert.equal(editor.saving,false);
 """)
 
@@ -155,7 +158,7 @@ try {
     def test_zen_mode_lifecycle_and_escape_hierarchy(self) -> None:
         self.run_node(r"""
 const store={
-  isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!Number(d.revision||0),
+  isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!d.content_hash,
   forgetEmpty:()=>{}, saveLocal:()=>true, upsert:()=>{},
 };
 const captureCtx={interactive:true,workspaceKey:'ws',busy:false,store,
@@ -199,7 +202,7 @@ assert.equal(content.handleEscape(contentCtx),true);
 assert.equal(content.zen,false);
 content.close(contentCtx);
 assert.equal(content.zen,false);
-assert.equal(content.draft,null);
+assert.equal(content.open,false);
 """)
 
     def test_custom_engine_mounts_only_in_zen_and_falls_back_on_null(self) -> None:
@@ -341,161 +344,6 @@ try {
   delete global.document;
 }
 """)
-
-
-    def test_unified_zen_composer_supports_existing_card_edits_and_combined_save(self) -> None:
-        self.run_node(r"""
-const note={
-  id:'note-1',ref:'@note-1',path:'cards/note-1.md',kind:'note',
-  title:'Original',content_hash:'h1',updated:'2026-11-15T10:00:00Z',
-  body:'Initial body',priority:'none',project:'',topic:'',tags:[],due:null,due_kind:null,
-  processing_instructions:'',
-};
-const composer=createCaptureComposer();
-const calls=[];
-const drafts=[];
-const ctx={
-  workspaceKey:'ws-1',
-  busy:false,
-  taskDefaults:{status:'inbox',priority:'none',type:'task'},
-  taskPriorityPolicy:{none:'None',high:'High'},
-  taskTypePolicy:{task:'Task'},
-  getDrafts:()=>drafts,
-  getSelected:()=>note,
-  store:{
-    isEmpty:d=>d.mode==='new'&&!String(d.title||'').trim()&&!String(d.text||'').trim()&&!Number(d.revision||0),
-    forgetEmpty:()=>{},
-    saveLocal:()=>true,
-    upsert:()=>{},
-  },
-  scheduleDraftSave:()=>{},
-  focusInput:()=>{},
-  nextTick:fn=>fn(),
-  finishWorkspaceDraft:async(draft)=>{
-    calls.push(['body',draft.body]);
-    note.content_hash='h2';
-    return {saved_ref:'@note-1'};
-  },
-  saveCardProperties:async(ref,expectedHash,patch)=>{
-    calls.push(['props',ref,expectedHash,patch]);
-    return {saved_ref:ref};
-  },
-};
-
-// beginEdit opens unified Zen editor configured for existing card
-composer.beginEdit(ctx,note,{zen:true});
-assert.equal(composer.open,true);
-assert.equal(composer.zen,true);
-assert.equal(composer.isCardEdit(),true);
-assert.equal(composer.title(),'Edit note');
-assert.equal(composer.saveLabel(),'Save changes');
-assert.equal(composer.canSave(ctx),false);
-
-// Property-only change in Zen is saveable without touching body draft
-composer.draft.title='Updated title';
-composer.draft.taskOptions.tags=['zen'];
-assert.equal(composer.canSave(ctx),true);
-await composer.save(ctx);
-assert.deepEqual(calls,[['props','@note-1','h1',{tags:['zen'],title:'Updated title'}]]);
-assert.equal(composer.open,false);
-
-// Combined body + property change saves body first (updating hash), then properties
-calls.length=0;
-note.content_hash='h1';
-composer.beginEdit(ctx,note,{zen:true});
-composer.draft.text='Updated body';
-composer.draft.instructions='Keep concise';
-assert.equal(composer.canSave(ctx),true);
-await composer.save(ctx);
-assert.deepEqual(calls,[
-  ['body','Updated body'],
-  ['props','@note-1','h2',{processing_instructions:'Keep concise'}],
-]);
-assert.equal(composer.open,false);
-""")
-
-    def test_zen_edit_schedules_and_finishes_the_live_draft_object(self) -> None:
-        self.run_node(r"""
-const scheduled=[];
-const finished=[];
-const note={ref:'@note-1',path:'cards/note.md',kind:'note',title:'Note',content_hash:'h1',updated:'2026-10-01',body:'Original'};
-const composer=createCaptureComposer();
-const ctx={
-  interactive:true,workspaceKey:'workspace-a',busy:false,
-  store:{saveLocal:()=>true,upsert:()=>{}},
-  taskDefaults:{status:'inbox',priority:'none',type:'task'},
-  taskStatuses:['inbox','active'],taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
-  metadataSnapshot:()=>'',captureDraftFields:()=>({}),getDrafts:()=>[],
-  scheduleDraftSave:draft=>{scheduled.push(draft);draft.revision=1;draft.content_hash='d1';},
-  finishWorkspaceDraft:async draft=>{finished.push({draft,body:draft.body,revision:draft.revision});return {saved_ref:'@note-1'};},
-  focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
-};
-composer.beginEdit(ctx,note,{zen:true});
-composer.draft.text='First edit';
-assert.equal(composer.persist(ctx),true);
-assert.equal(scheduled.length,1);
-assert.equal(scheduled[0],composer.draft);
-assert.equal(composer.draft.revision,1);
-assert.equal(composer.draft.content_hash,'d1');
-composer.draft.text='Second edit';
-await composer.save(ctx);
-assert.equal(finished.length,1);
-assert.equal(finished[0].body,'Second edit');
-assert.equal(finished[0].revision,1);
-
-// Partial Zen save (body succeeds, properties fail) resets draft to a fresh edit baseline
-let failProps=true;
-const card2={ref:'@note-2',path:'cards/note2.md',kind:'note',title:'Note 2',content_hash:'h-old',updated:'2026-10-01',body:'Before'};
-const ctx2={
-  ...ctx,
-  getSelected:()=>card2,
-  finishWorkspaceDraft:async draft=>{card2.content_hash='h-new';card2.updated='2026-10-02';return {saved_ref:'@note-2'};},
-  saveCardProperties:async()=>failProps?null:{saved_ref:'@note-2'},
-  actionMessage:()=>'Property conflict',
-};
-composer.beginEdit(ctx2,card2,{zen:true});
-const oldId=composer.draft.id;
-composer.draft.revision=2;
-composer.draft.text='After';
-composer.draft.title='New title';
-assert.equal(await composer.save(ctx2),null);
-assert.notEqual(composer.draft.id,oldId);
-assert.equal(composer.draft.revision,0);
-assert.equal(composer.draft.base_hash,'h-new');
-assert.equal(composer.draft.originalText,'After');
-assert.equal(composer.hasContent(ctx2),false);
-failProps=false;
-assert.deepEqual(await composer.save(ctx2),{saved_ref:'@note-2'});
-""")
-
-    def test_zen_edit_discards_the_live_draft_object(self) -> None:
-        self.run_node(r"""
-const discarded=[];
-const note={ref:'@note-1',path:'cards/note.md',kind:'note',title:'Note',content_hash:'h1',updated:'2026-10-01',body:'Original'};
-const composer=createCaptureComposer();
-const ctx={
-  interactive:true,workspaceKey:'workspace-a',busy:false,
-  store:{saveLocal:()=>true,upsert:()=>{}},
-  taskDefaults:{status:'inbox',priority:'none',type:'task'},
-  taskStatuses:['inbox','active'],taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
-  metadataSnapshot:()=>'',captureDraftFields:()=>({}),getDrafts:()=>[],
-  scheduleDraftSave:draft=>{draft.revision=1;draft.content_hash='d1';},
-  discardWorkspaceDraft:async (draft,confirmed)=>{discarded.push({draft,confirmed,revision:draft.revision});},
-  confirm:()=>true,focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
-};
-composer.beginEdit(ctx,note,{zen:true});
-composer.draft.text='Edited';
-assert.equal(composer.persist(ctx),true);
-const live=composer.draft;
-composer.draft.text='Edited again';
-await composer.discard(ctx);
-assert.equal(discarded.length,1);
-assert.equal(discarded[0].draft,live);
-assert.equal(discarded[0].confirmed,true);
-assert.equal(discarded[0].draft.body,'Edited again');
-assert.equal(discarded[0].revision,1);
-""")
-
 
 if __name__ == "__main__":
     unittest.main()

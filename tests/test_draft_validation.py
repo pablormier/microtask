@@ -22,7 +22,7 @@ class DraftHandlerValidationTests(unittest.TestCase):
         with patch.object(taskweb.draft_store, "save") as save:
             for field, value in cases:
                 with self.subTest(field=field, value=value):
-                    payload = {"expected_revision": 0, "body": "Draft body",
+                    payload = {"body": "Draft body",
                                "kind": "note", "mode": "new"}
                     payload[field] = value
                     status, response = taskweb.handle_draft_save(payload, "test-token")

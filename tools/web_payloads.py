@@ -309,7 +309,6 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
     drafts = draft_store.list_drafts(ws_root)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
-    draft_targets = {draft.get("target") for draft in drafts}
     meta["draft_count"] = len(drafts)
     # The Focus view shows only open cards that pass the filters, so send the focus entries for those.
     shown = set(collections["open"])
@@ -323,12 +322,9 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
         [str(card.frontmatter["id"]), f"@{card.short_ref}", card.title, card.kind] for card in ordered
     )).encode("utf-8")).hexdigest()[:16]
 
-    def _card_relpath(card: store.Card) -> str:
-        return str(card.path.relative_to(ws_root)) if card.path.is_relative_to(ws_root) else str(card.path)
-
     selected_cards = [
         card for card in ordered
-        if str(card.frontmatter["id"]) in wanted or (draft_targets and _card_relpath(card) in draft_targets)
+        if str(card.frontmatter["id"]) in wanted
     ]
     return {
         "tasks": [task_to_dict(card, detail=False, cfg=cfg, rank=rank, ws_root=ws_root) for card in selected_cards],

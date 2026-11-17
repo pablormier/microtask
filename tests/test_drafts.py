@@ -61,7 +61,7 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def test_note_draft_round_trip_and_revision_guard(self) -> None:
+    def test_note_draft_round_trip_and_hash_guard(self) -> None:
         body = "\n  rough note\r\n\r\n---\r\nnot frontmatter\r\n"
         created = self.json_output(self.run_mt("draft", "create", "note", "--file", "-", "--json", input_text=body))
         draft_id = created["id"]
@@ -72,17 +72,17 @@ class DraftCliTests(unittest.TestCase):
 
         changed = "Revised rough note\n\n## Still just Markdown\n"
         edited = self.json_output(self.run_mt(
-            "draft", "edit", draft_id, "--file", "-", "--expected-revision", "1", "--json",
+            "draft", "edit", draft_id, "--file", "-", "--expected-hash", created["content_hash"], "--json",
             input_text=changed,
         ))
-        self.assertEqual(edited["revision"], 2)
-        stale = self.run_mt("draft", "edit", draft_id, "--file", "-", "--expected-revision", "1",
+        self.assertNotEqual(edited["content_hash"], created["content_hash"])
+        stale = self.run_mt("draft", "edit", draft_id, "--file", "-", "--expected-hash", created["content_hash"],
                             input_text="must not replace")
         self.assertNotEqual(stale.returncode, 0)
-        self.assertIn("changed since", stale.stderr)
+        self.assertIn("changed", stale.stderr)
         self.assertEqual(self.json_output(self.run_mt("draft", "read", draft_id, "--json"))["body"], changed)
 
-        receipt = self.json_output(self.run_mt("draft", "save", draft_id, "--expected-revision", "2", "--json"))
+        receipt = self.json_output(self.run_mt("draft", "save", draft_id, "--expected-hash", edited["content_hash"], "--json"))
         self.assertTrue(receipt["changed"])
         self.assertFalse((self.root / "drafts" / f"{draft_id}.md").exists())
         notes = list(card_files(self.root, "note"))
@@ -94,16 +94,16 @@ class DraftCliTests(unittest.TestCase):
     def test_invalid_processing_instructions_do_not_write_a_draft(self) -> None:
         draft_id = "550e8400-e29b-41d4-a716-446655440000"
         with self.assertRaisesRegex(ValueError, "draft instructions must be text or null"):
-            draft_store.save(
+            saved = draft_store.save(
                 self.root, draft_id=draft_id,
                 fields={"kind": "note", "mode": "new", "title": "Bad draft",
                         "capture_id": draft_id, "created": "2026-10-15T10:00:00",
                         "instructions": ["not", "text"]},
-                body="Draft body", expected_revision=0, now="2026-10-15T10:00:00",
+                body="Draft body", now="2026-10-15T10:00:00",
             )
         self.assertFalse((self.root / "drafts" / f"{draft_id}.md").exists())
 
-    def test_draft_store_rejects_untyped_kind_mode_and_boolean_revisions_without_writes(self) -> None:
+    def test_draft_store_rejects_untyped_kind_mode_and_invalid_hashes_without_writes(self) -> None:
         now = "2026-10-15T10:00:00"
         cases = (
             ("11111111-1111-4111-8111-111111111111", "kind", []),
@@ -117,43 +117,37 @@ class DraftCliTests(unittest.TestCase):
             fields[field] = value
             with self.subTest(field=field, value=value):
                 with self.assertRaisesRegex(ValueError, f"draft {field}"):
-                    draft_store.save(self.root, draft_id=draft_id, fields=fields, body="Draft body",
-                                     expected_revision=0, now=now)
+                    saved = draft_store.save(self.root, draft_id=draft_id, fields=fields, body="Draft body", now=now)
                 self.assertFalse((self.root / "drafts" / f"{draft_id}.md").exists())
 
         with self.assertRaisesRegex(ValueError, "fields must be a mapping"):
-            draft_store.save(self.root, draft_id="55555555-5555-4555-8555-555555555555",
-                             fields=[], body="Draft body", expected_revision=0, now=now)
-        with self.assertRaisesRegex(ValueError, "expected_revision"):
-            draft_store.save(self.root, draft_id="66666666-6666-4666-8666-666666666666",
+            saved = draft_store.save(self.root, draft_id="55555555-5555-4555-8555-555555555555",
+                             fields=[], body="Draft body", now=now)
+        with self.assertRaisesRegex(ValueError, "expected_content_hash"):
+            saved = draft_store.save(self.root, draft_id="66666666-6666-4666-8666-666666666666",
                              fields={"kind": "note", "mode": "new"}, body="Draft body",
-                             expected_revision=False, now=now)
+                             expected_content_hash="not-a-hash", now=now)
 
         draft_id = "77777777-7777-4777-8777-777777777777"
         valid_fields = {"kind": "note", "mode": "new", "title": "Imported",
                         "capture_id": draft_id, "created": now, "origin": "same-import"}
-        saved = draft_store.save(self.root, draft_id=draft_id, fields=valid_fields, body="Same body",
-                                 expected_revision=0, now=now)
+        saved = draft_store.save(self.root, draft_id=draft_id, fields=valid_fields, body="Same body", now=now)
         path = self.root / "drafts" / f"{draft_id}.md"
         original = path.read_bytes()
         malformed_replay = {**valid_fields, "kind": []}
         with self.assertRaisesRegex(ValueError, "draft kind"):
-            draft_store.save(self.root, draft_id=draft_id, fields=malformed_replay, body="Same body",
-                             expected_revision=0, now=now)
+            saved = draft_store.save(self.root, draft_id=draft_id, fields=malformed_replay, body="Same body", now=now)
         self.assertEqual(path.read_bytes(), original)
-        with self.assertRaisesRegex(ValueError, "expected_revision"):
-            draft_store.save(self.root, draft_id=draft_id, fields=valid_fields, body="Changed body",
-                             expected_revision=True, now=now, expected_content_hash=saved["content_hash"])
+        with self.assertRaisesRegex(ValueError, "expected_content_hash"):
+            saved = draft_store.save(self.root, draft_id=draft_id, fields=valid_fields, body="Changed body",
+                             now=now, expected_content_hash="bad")
         self.assertEqual(path.read_bytes(), original)
 
         edit_id = "88888888-8888-4888-8888-888888888888"
         edit_fields = {"kind": "note", "mode": "edit", "target": "cards/note.md",
                        "base_hash": "a" * 64, "base_updated": now, "origin": "card-body"}
-        draft_store.save(self.root, draft_id=edit_id, fields=edit_fields, body="First edit",
-                         expected_revision=0, now=now)
-        with self.assertRaisesRegex(draft_store.DraftConflict, "draft changed since it was loaded"):
-            draft_store.save(self.root, draft_id=edit_id, fields=edit_fields, body="Second edit",
-                             expected_revision=0, now=now)
+        with self.assertRaisesRegex(ValueError, "draft mode must be new"):
+            saved = draft_store.save(self.root, draft_id=edit_id, fields=edit_fields, body="First edit", now=now)
 
     def test_new_task_draft_can_be_saved_without_a_target(self) -> None:
         draft = self.json_output(self.run_mt(
@@ -163,7 +157,7 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(draft["mode"], "new")
         self.assertEqual(draft["kind"], "task")
         receipt = self.json_output(self.run_mt(
-            "draft", "save", draft["id"], "--expected-revision", str(draft["revision"]), "--json",
+            "draft", "save", draft["id"], "--expected-hash", draft["content_hash"], "--json",
         ))
         path = self.root / receipt["path"]
         self.assertTrue(path.is_file())
@@ -172,67 +166,6 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(metadata["status"], "inbox")
         self.assertFalse((self.root / "drafts" / f"{draft['id']}.md").exists())
         self.assertEqual(self.run_mt("validate").returncode, 0)
-
-    def test_task_and_note_edit_drafts_replace_exactly_the_main_content(self) -> None:
-        task = self.json_output(self.run_mt(
-            "add", "Draft task target", "--next-action", "Keep this action", "--json",
-        ))
-        note = self.json_output(self.run_mt(
-            "note", "--title", "Draft note target", "--file", "-",
-            "--json", input_text="Initial note body\n",
-        ))
-        changed = {
-            task["ref"]: "Shared draft content",
-            note["ref"]: "Shared draft content\n",
-        }
-        for reference, body in changed.items():
-            with self.subTest(reference=reference):
-                kind = "task" if reference == task["ref"] else "note"
-                draft = self.json_output(self.run_mt(
-                    "draft", "create", kind, "--target", reference, "--json",
-                ))
-                edited = self.json_output(self.run_mt(
-                    "draft", "edit", draft["id"], "--file", "-", "--expected-revision", "1", "--json",
-                    input_text=body,
-                ))
-                saved = self.json_output(self.run_mt(
-                    "draft", "save", draft["id"], "--expected-revision", str(edited["revision"]), "--json",
-                ))
-                self.assertTrue(saved["changed"])
-                self.assertEqual(self.run_mt("read", reference, "--body").stdout, body)
-                card_path = self.root / saved["path"]
-                properties, saved_body = card_format.parse_document(card_path.read_bytes().decode("utf-8"))
-                if kind == "task":
-                    self.assertEqual(properties["next_action"], "Keep this action")
-                self.assertEqual(saved_body, body)
-        self.assertEqual(self.run_mt("validate").returncode, 0)
-
-    def test_target_draft_uses_supplied_file_body_and_keeps_stale_target_protection(self) -> None:
-        note = self.json_output(self.run_mt(
-            "note", "--title", "Seeded target", "--file", "-", "--json", input_text="Original body\n"))
-        task = self.json_output(self.run_mt("add", "Seeded task", "--json"))
-        for reference, kind in ((note["ref"], "note"), (task["ref"], "task")):
-            with self.subTest(kind=kind):
-                before = self.run_mt("read", reference, "--body").stdout
-                seeded = self.json_output(self.run_mt("draft", "create", kind, "--target", reference, "--json"))
-                self.assertEqual(seeded["body"], before)
-                supplied = self.json_output(self.run_mt(
-                    "draft", "create", kind, "--target", reference, "--file", "-", "--json",
-                    input_text="New body\n"))
-                self.assertEqual(supplied["body"], "New body\n")
-                self.assertEqual(supplied["base_hash"], seeded["base_hash"])
-                self.assertEqual(supplied["base_updated"], seeded["base_updated"])
-                self.assertEqual(self.run_mt("read", reference, "--body").stdout, before)
-                self.json_output(self.run_mt(
-                    "draft", "save", supplied["id"], "--expected-revision", str(supplied["revision"]), "--json"))
-                self.assertEqual(self.run_mt("read", reference, "--body").stdout, "New body\n")
-                stale = self.json_output(self.run_mt(
-                    "draft", "create", kind, "--target", reference, "--file", "-", "--json",
-                    input_text="Stale body\n"))
-                self.assertEqual(self.run_mt("comment", reference, "-m", "changes the card").returncode, 0)
-                result = self.run_mt("draft", "save", stale["id"], "--expected-revision", str(stale["revision"]), "--json")
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(self.run_mt("read", reference, "--body").stdout, "New body\n")
 
     def test_new_capture_draft_can_switch_to_task_and_promotes_with_metadata_once(self) -> None:
         capture_id = str(uuid.uuid4())
@@ -248,12 +181,12 @@ class DraftCliTests(unittest.TestCase):
         }
         draft = draft_store.save(
             self.root, draft_id=capture_id, fields=fields, body=body,
-            expected_revision=0, now=created,
+            now=created,
         )
         switched_fields = {**fields, "kind": "task"}
         switched = draft_store.save(
             self.root, draft_id=capture_id, fields=switched_fields, body=body,
-            expected_revision=int(draft["revision"]), expected_content_hash=str(draft["content_hash"]),
+            expected_content_hash=str(draft["content_hash"]),
             now="2026-10-15T09:31:00",
         )
         self.assertEqual(switched["capture_id"], capture_id)
@@ -262,7 +195,7 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(switched["tags"], ["code", "custom-tag"])
 
         receipt = self.json_output(self.run_mt(
-            "draft", "save", capture_id, "--expected-revision", str(switched["revision"]),
+            "draft", "save", capture_id, "--expected-hash", switched["content_hash"],
             "--expected-hash", str(switched["content_hash"]), "--json",
         ))
         task_path = self.root / receipt["path"]
@@ -283,7 +216,7 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(len(list(card_files(self.root, "task"))), 1)
         self.assertEqual(list(card_files(self.root, "note")), [])
         repeated = self.run_mt(
-            "draft", "save", capture_id, "--expected-revision", str(switched["revision"]),
+            "draft", "save", capture_id, "--expected-hash", switched["content_hash"],
             "--expected-hash", str(switched["content_hash"]), "--json",
         )
         self.assertNotEqual(repeated.returncode, 0)
@@ -297,16 +230,16 @@ class DraftCliTests(unittest.TestCase):
             (str(uuid.uuid4()), "Title only task", "", "Title only task"),
         ]
         for capture_id, title, body, expected_title in captures:
-            draft_store.save(
+            saved = draft_store.save(
                 self.root, draft_id=capture_id,
                 fields={"kind": "task", "mode": "new", "title": title,
                         "capture_id": capture_id, "created": created,
                         "status": "inbox", "priority": "none", "type": "task",
                         "tags": [], "due": None, "due_kind": None},
-                body=body, expected_revision=0, now=created,
+                body=body, now=created,
             )
             receipt = self.json_output(self.run_mt(
-                "draft", "save", capture_id, "--expected-revision", "1", "--json",
+                "draft", "save", capture_id, "--expected-hash", saved["content_hash"], "--json",
             ))
             raw = (self.root / receipt["path"]).read_text(encoding="utf-8")
             metadata, saved_body = card_format.parse_document(raw)
@@ -320,10 +253,10 @@ class DraftCliTests(unittest.TestCase):
                     "capture_id": invalid_id, "created": created,
                     "status": "inbox", "priority": "none", "type": "not-in-policy",
                     "tags": [], "due": None, "due_kind": None},
-            body="Do not create this task", expected_revision=0, now=created,
+            body="Do not create this task", now=created,
         )
         failed = self.run_mt(
-            "draft", "save", invalid_id, "--expected-revision", "1",
+            "draft", "save", invalid_id,
             "--expected-hash", str(invalid["content_hash"]), "--json",
         )
         self.assertNotEqual(failed.returncode, 0)
@@ -350,12 +283,12 @@ class DraftCliTests(unittest.TestCase):
             }
             if status is not None:
                 fields["status"] = status
-            draft_store.save(
+            saved = draft_store.save(
                 self.root, draft_id=capture_id, fields=fields, body=text,
-                expected_revision=0, now=created,
+                now=created,
             )
             receipt = self.json_output(self.run_mt(
-                "draft", "save", capture_id, "--expected-revision", "1", "--json", env=env,
+                "draft", "save", capture_id, "--expected-hash", saved["content_hash"], "--json", env=env,
             ))
             return receipt
 
@@ -384,10 +317,10 @@ class DraftCliTests(unittest.TestCase):
                     "capture_id": blocked_id, "created": created,
                     "status": "doing", "priority": "none", "type": "task",
                     "tags": [], "due": None, "due_kind": None},
-            body="Over limit capture", expected_revision=0, now=created,
+            body="Over limit capture", now=created,
         )
         failed = self.run_mt(
-            "draft", "save", blocked_id, "--expected-revision", "1",
+            "draft", "save", blocked_id,
             "--expected-hash", str(blocked["content_hash"]), "--json", env=env,
         )
         self.assertNotEqual(failed.returncode, 0)
@@ -442,7 +375,7 @@ class DraftCliTests(unittest.TestCase):
         env = dict(self.env, VISUAL=str(self.editor), EDITOR_BODY="from editor\n")
         edited = self.json_output(self.run_mt("draft", "edit", created["id"], "--json", env=env))
         self.assertEqual(edited["body"], "from editor\n")
-        self.assertEqual(edited["revision"], 2)
+        self.assertNotEqual(edited["content_hash"], created["content_hash"])
 
         next_created = self.json_output(self.run_mt("draft", "create", "note", "--file", "-", "--json",
                                                     input_text="before conflict\n"))
@@ -454,10 +387,10 @@ import os, subprocess, sys
 path = sys.argv[-1]
 open(path, "w").write(os.environ["EDITOR_BODY"])
 subprocess.run([os.environ["MT_PATH"], "draft", "edit", os.environ["DRAFT_ID"], "--file", "-",
-                "--expected-revision", "1"], input="other window\\n", text=True, check=True)
+                "--expected-hash", os.environ["DRAFT_HASH"]], input="other window\\n", text=True, check=True)
 ''', encoding="utf-8")
         race_editor.chmod(0o755)
-        conflict_env.update(VISUAL=str(race_editor), MT_PATH=str(self.root / "mt"), DRAFT_ID=next_created["id"])
+        conflict_env.update(VISUAL=str(race_editor), MT_PATH=str(self.root / "mt"), DRAFT_ID=next_created["id"], DRAFT_HASH=next_created["content_hash"])
         conflict = self.run_mt("draft", "edit", next_created["id"], env=conflict_env)
         self.assertNotEqual(conflict.returncode, 0)
         self.assertIn("edits were kept as draft", conflict.stderr)
@@ -545,22 +478,6 @@ canonical.write_text(header + separator + "Manual edit\\n", encoding="utf-8")
         copies = self.json_output(self.run_mt("draft", "list", "--json"))["drafts"]
         self.assertIn("CLI overwrite\n", [draft["body"] for draft in copies])
 
-    def test_demo_note_edit_draft_uses_demo_note_format_and_stays_out_of_real_cards(self) -> None:
-        created = self.json_output(self.run_mt(
-            "draft", "create", "note", "--target", "microtask workflow cheatsheet", "--json",
-        ))
-        self.assertEqual(created["target"], ".mt/demo/cards/2026-01-04-120000-microtask-workflow-cheatsheet.md")
-        self.assertEqual(created["mode"], "edit")
-        body = "Edited demo note\n"
-        edited = self.json_output(self.run_mt("draft", "edit", created["id"], "--file", "-",
-                                              "--expected-revision", "1", "--json", input_text=body))
-        saved = self.json_output(self.run_mt("draft", "save", created["id"],
-                                             "--expected-revision", str(edited["revision"]), "--json"))
-        self.assertTrue(saved["changed"])
-        target = self.root / str(created["target"])
-        self.assertIn("Edited demo note", target.read_text(encoding="utf-8"))
-        self.assertEqual(list(card_files(self.root, "note")), [])
-
     def test_draft_directory_symlink_is_rejected(self) -> None:
         outside = Path(self.temporary.name) / "outside"
         outside.mkdir()
@@ -595,7 +512,7 @@ canonical.write_text(header + separator + "Manual edit\\n", encoding="utf-8")
                                 cwd=Path(self.temporary.name))
         self.assertEqual(remote_draft.returncode, 0, remote_draft.stderr)
 
-        discarded = self.run_mt("draft", "discard", draft_id, "--expected-revision", "1")
+        discarded = self.run_mt("draft", "discard", draft_id, "--expected-hash", draft["content_hash"])
         self.assertEqual(discarded.returncode, 0, discarded.stderr)
         deletion_sync = self.run_mt("sync")
         self.assertEqual(deletion_sync.returncode, 0, deletion_sync.stderr)
@@ -603,6 +520,40 @@ canonical.write_text(header + separator + "Manual edit\\n", encoding="utf-8")
         remote_deleted = self.git("--git-dir", str(remote), "cat-file", "-e", f"refs/heads/main:drafts/{draft_id}.md",
                                   cwd=Path(self.temporary.name))
         self.assertNotEqual(remote_deleted.returncode, 0)
+
+    def test_retired_edit_draft_is_skipped_by_list_drafts_with_warning_and_flagged_by_validate(self) -> None:
+        self.assertEqual(self.run_mt("note", "Real card").returncode, 0)
+        retired_id = str(uuid.uuid4())
+        draft_path = self.root / "drafts" / f"{retired_id}.md"
+        draft_path.parent.mkdir(parents=True, exist_ok=True)
+        draft_path.write_text(
+            "---\n"
+            f"id: {retired_id}\n"
+            "kind: note\n"
+            "mode: edit\n"
+            "revision: 1\n"
+            "created: 2026-10-15T09:30:00\n"
+            "updated: 2026-10-15T09:30:00\n"
+            "title: Old edit\n"
+            "target: cards/note.md\n"
+            f"base_hash: {'a' * 64}\n"
+            "origin: card-body\n"
+            "---\n"
+            "Retired edit body\n",
+            encoding="utf-8",
+        )
+        listed = self.run_mt("draft", "list", "--json")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(json.loads(listed.stdout)["drafts"], [])
+        self.assertIn("retired edit draft", listed.stderr)
+
+        validated = self.run_mt("validate")
+        self.assertNotEqual(validated.returncode, 0)
+        self.assertIn("retired edit draft", validated.stderr)
+
+        discarded = self.run_mt("draft", "discard", retired_id)
+        self.assertEqual(discarded.returncode, 0, discarded.stderr)
+        self.assertFalse(draft_path.exists())
 
 
 if __name__ == "__main__":

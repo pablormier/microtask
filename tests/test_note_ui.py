@@ -15,68 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NoteUiTests(unittest.TestCase):
-    def test_unpersisted_capture_survives_every_editor_replacement(self) -> None:
-        result = self.run_node(r"""
-(() => {
-  const app=taskBoard(); app.$nextTick=()=>{}; app.$refs={}; app.scheduleDraftSave=()=>{};
-  app.captureComposer.beginNew(app.captureContext());
-  const original=app.captureComposer.draft;
-  original.text='Only copy'; localStorage.failWrite=true;
-  app.captureComposer.persist(app.captureContext());
-  app.captureComposer.close(app.captureContext());
-  app.beginNewCapture();
-  const newBlocked=app.captureComposer.draft===original && app.captureComposer.open && app.hasUnsavedChanges();
-  app.beginNewCapture();
-  const editBlocked=app.captureComposer.draft===original;
-  app.openWorkspaceDraft({id:'other',kind:'note',mode:'new',title:'Other draft',body:'Other text'});
-  const draftBlocked=app.captureComposer.draft===original;
-  localStorage.failWrite=false;
-  app.beginNewCapture();
-  console.log(JSON.stringify({newBlocked,editBlocked,draftBlocked,
-    resumed:app.captureComposer.draft!==original,
-    retained:app.drafts.some(d=>d.id===original.draftId && d.body==='Only copy')}));
-})()
-""")
-        self.assertEqual(result, dict.fromkeys(["newBlocked", "editBlocked", "draftBlocked", "resumed", "retained"], True))
-
-    def test_inline_content_recovery_and_dismissal_keep_target_baseline(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  location.protocol='http:';
-  const results=[];
-  for(const kind of ['task','note']) {
-    const app=taskBoard(); app.$nextTick=()=>{}; app.$refs={}; app.scheduleDraftSave=()=>{};
-    const target={id:kind,ref:'@'+kind,path:kind+'s/item.md',kind,content_hash:'target-hash',body:'# Before'};
-    app.tasks=[target]; app.select=item=>{app.selected=item;app.selectedId=item.id;};
-    const orphan={id:'old-'+kind+':local-recovery',sourceId:'old-'+kind,storageId:'old-'+kind,
-      kind,mode:'edit',origin:'card-body',target:target.path,body:'# My edit',base_hash:'original-baseline',
-      base_updated:'2026-10-01',revision:2,content_hash:'stale-hash',_orphanedLocal:true,_localRecovery:true};
-    app.drafts=[orphan]; await app.openWorkspaceDraft(orphan);
-    const editor=app.contentEditor.draft; let sent;
-    global.fetch=async (_path,options)=>{sent=JSON.parse(options.body);
-      return {ok:true,json:async()=>({saved_draft:{...sent,id:sent.id,revision:1,content_hash:'fresh-hash'}})};};
-    await app.recoverLocalWorkspaceDraft(editor);
-    const recovered=app.contentEditor.draft;
-    const recovery={kind,fresh:recovered.id!==editor.id,origin:recovered.origin,
-      baseline:sent.base_hash,body:app.contentEditor.text,canSave:app.contentEditor.canSave(app.contentContext()),
-      oldClosed:app.getDraftStore().wasDismissed(orphan.sourceId)};
-    app.contentEditor.close(app.contentContext());
-    await app.openWorkspaceDraft({...orphan,id:'dismiss-'+kind,sourceId:'dismiss-'+kind,storageId:'dismiss-'+kind});
-    const dismissed=app.contentEditor.draft;
-    app.drafts.push({id:'dismiss-'+kind,kind,mode:'edit',body:'# My edit',revision:0});
-    app.dismissLocalWorkspaceDraft(dismissed);
-    recovery.dismissed=app.contentEditor.draft===null && app.getDraftStore().wasDismissed('dismiss-'+kind)
-      && !app.drafts.some(d=>d.id==='dismiss-'+kind);
-    results.push(recovery);
-  }
-  console.log(JSON.stringify({results}));
-})().catch(error=>{console.error(error);process.exitCode=1;});
-""")
-        for row in result["results"]:
-            self.assertEqual(row, {"kind": row["kind"], "fresh": True, "origin": "card-body",
-                                   "baseline": "original-baseline", "body": "# My edit", "canSave": True,
-                                   "oldClosed": True, "dismissed": True})
-
     def test_content_save_does_not_rebase_properties_changed_by_another_writer(self) -> None:
         result = self.run_node(r"""
 (async () => {
@@ -89,13 +27,15 @@ class NoteUiTests(unittest.TestCase):
   app.propertyEditor.form.project = 'My pending project';
   app.contentEditor.begin(app.contentContext());
   app.contentEditor.text = '# Changed content';
-  app.contentEditor.persist(app.contentContext());
-  app.finishWorkspaceDraft = async () => {
-    app.applyPayload({tasks:[{...app.selected,project:'Concurrent project',content_hash:'server-hash'}],
-      meta:{interactive:true}});
-    app.contentEditor.draft = null;
-    return {saved:true};
-  };
+  app.contentEditor.persist();
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      message: 'Content saved',
+      tasks: [{...app.selected, project:'Concurrent project', content_hash:'server-hash'}],
+      meta: {interactive:true},
+    }),
+  });
   await app.contentEditor.save(app.contentContext());
   console.log(JSON.stringify({project:app.propertyEditor.form.project,
     baseline:app.propertyEditor.baselineHash,conflict:app.propertyEditor.conflict,
@@ -104,39 +44,6 @@ class NoteUiTests(unittest.TestCase):
 """)
         self.assertEqual(result, {"project": "My pending project", "baseline": "base",
                                   "conflict": True, "canSave": False})
-
-    def test_recovered_capture_uses_new_identity_for_storage_and_promotion(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  location.protocol = 'http:';
-  const app = taskBoard(); app.$nextTick = () => {};
-  app.scheduleDraftSave = () => {};
-  app.captureComposer.beginNew(app.captureContext()); app.captureComposer.draft.text = 'Local divergent text';
-  const originalId = app.captureComposer.draft.draftId;
-  app.captureComposer.draft.sourceId = originalId; app.captureComposer.draft.storageId = originalId;
-  app.captureComposer.draft._orphanedLocal = true;
-  const calls = [];
-  global.fetch = async (path, options) => {
-    const payload = JSON.parse(options.body); calls.push({path,payload});
-    return {ok:true,json:async()=>path === '/api/draft-finish'
-      ? {saved_ref:'@recovered',tasks:[],meta:{interactive:true}}
-      : {saved_draft:{...payload,revision:1,content_hash:'a'.repeat(64)}}};
-  };
-  await app.recoverLocalWorkspaceDraft(app.captureComposer.draft);
-  const recovered = app.captureComposer.draft;
-  const newId = recovered.draftId;
-  const aligned = ['id','sourceId','storageId','captureId','capture_id'].every(field=>recovered[field]===newId);
-  app.captureComposer.persist(app.captureContext());
-  const local = store.has(app.noteDraftStorageKey(app.workspaceKey,newId));
-  const oldRemoved = !store.has(app.noteDraftStorageKey(app.workspaceKey,originalId));
-  const saved = await app.captureComposer.save(app.captureContext());
-  console.log(JSON.stringify({aligned,local,oldRemoved,fresh:newId!==originalId,
-    saved:!!saved,closed:app.captureComposer.draft===null,finishId:calls[calls.length-1].payload.id,newId}));
-})().catch(error=>{console.error(error);process.exitCode=1;});
-""")
-        for field in ("aligned", "local", "oldRemoved", "fresh", "saved", "closed"):
-            self.assertTrue(result[field], field)
-        self.assertEqual(result["finishId"], result["newId"])
 
     def test_property_edits_are_kept_when_navigation_is_cancelled(self) -> None:
         result = self.run_node(r"""
@@ -173,16 +80,22 @@ class NoteUiTests(unittest.TestCase):
   app.contentEditor.begin(app.contentContext());
   const hiddenFrontmatter = !app.contentEditor.text.startsWith("---");
   app.contentEditor.text = app.contentEditor.text.replace("Before", "After");
-  app.contentEditor.persist(app.contentContext());
-  const preservedPrefix = app.contentEditor.draft.body.startsWith('## Review\n\n');
+  app.contentEditor.persist();
+  const preservedPrefix = app.contentEditor.text.startsWith('## Review\n\n');
   const propertiesBlocked = !app.propertyEditor.canApply(app.propertyContext());
-  const draftId = app.contentEditor.draft.id;
-  app.contentEditor.close(app.contentContext()); app.contentEditor.begin(app.contentContext());
-  const resumed = app.contentEditor.draft.id === draftId && app.contentEditor.text.includes("After");
-  app.finishWorkspaceDraft = async draft => {
-    app.applyPayload({tasks:[{...app.selected,content_hash:"saved-hash",body:draft.body}],meta:{interactive:true}});
-    app.contentEditor.draft = null;
-    return {saved:true};
+  // Simulate crash/reopen without close(): unsaved text is offered and can be restored.
+  app.contentEditor.open = false;
+  app.contentEditor.begin(app.contentContext());
+  const offered = app.contentEditor.unsavedOffer.includes("After");
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const resumed = offered && app.contentEditor.text.includes("After");
+  global.fetch = async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    return { ok: true, json: async () => ({
+      message: "Content saved",
+      tasks: [{...app.selected, content_hash:"saved-hash", body:payload.body}],
+      meta: {interactive:true},
+    }) };
   };
   await app.contentEditor.save(app.contentContext());
   const saved = {project:app.propertyEditor.form.project,hash:app.propertyEditor.baselineHash,
@@ -209,15 +122,15 @@ class NoteUiTests(unittest.TestCase):
   app.beginNewCapture();
   const tasksTab = {kind: app.captureComposer.draft.kind, title: app.captureComposer.title(), save: app.captureComposer.saveLabel()};
   app.captureComposer.draft.title = "Keep my title";
-  app.captureComposer.draft.text = "Keep my text";
+  app.captureComposer.draft.body = "Keep my text";
   app.captureComposer.draft.instructions = "Keep my instructions";
   app.captureComposer.draft.taskOptions.project = "Keep my project";
-  const id = app.captureComposer.draft.captureId;
+  const id = app.captureComposer.draft.id;
   app.captureComposer.setKind(app.captureContext(), "note");
   const note = {title: app.captureComposer.title(), save: app.captureComposer.saveLabel()};
   app.captureComposer.setKind(app.captureContext(), "task");
-  const preserved = {id: id === app.captureComposer.draft.captureId, title: app.captureComposer.draft.title,
-    text: app.captureComposer.draft.text, instructions: app.captureComposer.draft.instructions,
+  const preserved = {id: id === app.captureComposer.draft.id, title: app.captureComposer.draft.title,
+    text: app.captureComposer.draft.body, instructions: app.captureComposer.draft.instructions,
     project: app.captureComposer.draft.taskOptions.project};
   app.captureComposer.saving = true;
   app.captureComposer.setKind(app.captureContext(), "note");
@@ -545,7 +458,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   const respond=(index,item,ok=true)=>requests[index].resolve({ok,json:async()=>ok?{item}:{error:'Card unavailable'}});
   const first=app.showCard(cards[0]);
   app.contentEditor.begin(app.contentContext());
-  const blocked=app.contentEditor.draft===null;
+  const blocked=!app.contentEditor.open;
   const second=app.showCard(cards[1]);
   respond(1,detail(cards[1],'B content')); await second;
   requests[0].reject(new Error('stale failure')); await first;
@@ -562,7 +475,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   const stayedClosed=app.selected===null;
   const failure=app.showCard(cards[1]);respond(4,null,false);await failure;
   app.contentEditor.begin(app.contentContext());
-  const failed={error:app.detailError,blocked:app.contentEditor.draft===null};
+  const failed={error:app.detailError,blocked:!app.contentEditor.open};
   const retry=app.loadSelectedDetails(true);respond(5,detail(cards[1],'Recovered'));await retry;
   app.contentEditor.begin(app.contentContext());
   console.log(JSON.stringify({blocked,opened,unchangedRequests,conflict,stayedClosed,failed,
@@ -650,9 +563,8 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
     pending.push({ payload: JSON.parse(options.body), resolve });
   });
   const makeDraft = (id, body) => ({
-    id, kind: "note", mode: "new", capture_id: id, created: "2026-10-15T10:00:00",
-    revision: 1, content_hash: "1".repeat(64), body, title: "",
-    _savedBody: "before", _savedTitle: "",
+    id, kind: "note", capture_id: id, created: "2026-10-15T10:00:00",
+    content_hash: "1".repeat(64), body, title: "", _saved: "before",
   });
   const a = makeDraft("draft-a", "A first");
   const b = makeDraft("draft-b", "B text");
@@ -674,7 +586,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   const queuedRequest = pending[2] && { id: pending[2].payload.id, body: pending[2].payload.body, hash: pending[2].payload.expected_hash };
   if (pending[2]) reply(pending[2], 3, "3".repeat(64));
   await wait(10);
-  console.log(JSON.stringify({ firstRequests, queuedRequest, finalBody: a._savedBody, finalRevision: a.revision }));
+  console.log(JSON.stringify({ firstRequests, queuedRequest, finalBody: JSON.parse(a._saved).body, finalHash: a.content_hash }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
         self.assertEqual([request["id"] for request in result["firstRequests"]], ["draft-a", "draft-b"])
@@ -683,7 +595,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertEqual(result["queuedRequest"]["body"], "A newest")
         self.assertEqual(result["queuedRequest"]["hash"], "2" * 64)
         self.assertEqual(result["finalBody"], "A newest")
-        self.assertEqual(result["finalRevision"], 3)
+        self.assertEqual(result["finalHash"], "3" * 64)
 
     def test_empty_capture_stays_ephemeral_and_task_options_survive_kind_switches(self) -> None:
         result = self.run_node(r"""
@@ -705,33 +617,34 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   location.protocol = "http:";
   const startCount = store.size;
   let requests = [];
+  let seq = 0;
   global.fetch = async (_path, options) => {
     const payload = JSON.parse(options.body);
     requests.push(payload);
-    const revision = payload.expected_revision + 1;
+    seq += 1;
     return { ok: true, json: async () => ({ saved_draft: {
-      ...payload, id: payload.id, revision, updated: "2026-10-15T10:00:00",
-      content_hash: String(revision).repeat(64),
+      ...payload, id: payload.id, updated: "2026-10-15T10:00:00",
+      content_hash: String(seq).repeat(64),
     } }) };
   };
 
   const empty = makeApp();
   const originalMode = empty.mode;
   empty.captureComposer.beginNew(empty.captureContext());
-  const emptyId = empty.captureComposer.draft.draftId;
+  const emptyId = empty.captureComposer.draft.id;
   empty.captureComposer.setKind(empty.captureContext(), "task");
   empty.captureComposer.close(empty.captureContext());
-  const emptyStayedEphemeral = !store.has("mt-note-draft-v2:workspace-a:" + emptyId)
-    && !empty.drafts.some(draft => draft.id === emptyId) && empty.captureComposer.draft === null
+  const emptyStayedEphemeral = !empty.drafts.some(draft => draft.id === emptyId)
+    && empty.captureComposer.draft === null
     && empty.mode === originalMode && requests.length === 0;
 
   const app = makeApp();
   app.captureComposer.beginNew(app.captureContext());
   app.captureComposer.setKind(app.captureContext(), "task");
-  const captureId = app.captureComposer.draft.captureId;
-  const created = app.captureComposer.draft.createdAt;
+  const captureId = app.captureComposer.draft.capture_id;
+  const created = app.captureComposer.draft.created;
   app.captureComposer.draft.title = "A task capture";
-  app.captureComposer.draft.text = "Raw task text\n## Literal heading";
+  app.captureComposer.draft.body = "Raw task text\n## Literal heading";
   app.captureComposer.draft.taskOptions = {
     status: "active", priority: "high", type: "bug", project: "custom project",
     topic: "custom topic", tags: ["code", "custom-tag"], due: "2026-12-31T09:45:00", due_kind: "target",
@@ -766,63 +679,6 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertTrue(result["metadataRetained"], result.get("lastPayload"))
         self.assertTrue(result["bodyRetained"])
 
-    def test_cleared_capture_survives_close_autosave_and_offline_recovery(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  location.protocol = "http:";
-  Object.defineProperty(localStorage, "length", { get: () => store.size });
-  localStorage.key = index => Array.from(store.keys())[index];
-  const app = taskBoard();
-  app.$nextTick = callback => callback();
-  app.scheduleDraftSave = () => {};
-  const requests = [];
-  global.fetch = async (_path, options) => {
-    const payload = JSON.parse(options.body);
-    requests.push(payload);
-    return { ok: true, json: async () => ({ saved_draft: {
-      ...payload, revision: payload.expected_revision + 1,
-      content_hash: String(payload.expected_revision + 1).repeat(64),
-    } }) };
-  };
-  app.captureComposer.beginNew(app.captureContext());
-  const draft = app.captureComposer.draft;
-  draft.text = "Text to erase";
-  app.captureComposer.persist(app.captureContext());
-  await app.saveWorkspaceDraft(draft);
-  const previous = { ...app.drafts.find(item => item.id === draft.draftId) };
-  draft.text = "";
-  app.captureComposer.persist(app.captureContext());
-  app.captureComposer.close(app.captureContext());
-  const key = app.noteDraftStorageKey(app.workspaceKey, draft.draftId);
-  const local = JSON.parse(localStorage.getItem(key));
-  const retained = app.captureComposer.draft === draft && local.text === "";
-
-  global.fetch = async () => { throw new Error("offline"); };
-  await app.saveWorkspaceDraft(draft);
-  app.drafts = [previous];
-  app.restoreLocalWorkspaceDrafts();
-  const recovery = app.drafts.find(item => item._localRecovery);
-  const recoveredEmpty = !!recovery && recovery.body === "";
-
-  global.fetch = async (_path, options) => {
-    const payload = JSON.parse(options.body);
-    requests.push(payload);
-    return { ok: true, json: async () => ({ saved_draft: {
-      ...payload, revision: payload.expected_revision + 1, content_hash: "2".repeat(64),
-    } }) };
-  };
-  await app.flushWorkspaceDraft(draft);
-  const saved = app.drafts.find(item => item.id === draft.draftId);
-  app.openWorkspaceDraft(saved);
-  console.log(JSON.stringify({ retained, recoveredEmpty, reopened: app.captureComposer.draft.text,
-    requests: requests.map(p => ({ body: p.body, revision: p.expected_revision, hash: p.expected_hash })) }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertTrue(result["retained"])
-        self.assertTrue(result["recoveredEmpty"])
-        self.assertEqual(result["reopened"], "")
-        self.assertEqual(result["requests"][-1], {"body": "", "revision": 1, "hash": "1" * 64})
-
     def test_reopened_task_draft_saves_changed_composer_metadata(self) -> None:
         result = self.run_node(r"""
 (async () => {
@@ -836,7 +692,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
     const payload = JSON.parse(options.body);
     requests.push(payload);
     return { ok: true, json: async () => ({ saved_draft: {
-      ...payload, revision: payload.expected_revision + 1, content_hash: "2".repeat(64),
+      ...payload, content_hash: "2".repeat(64),
     } }) };
   };
   const row = { id: "task-draft", kind: "task", mode: "new", title: "T", body: "B",
@@ -847,7 +703,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   const draft = app.captureComposer.draft;
   const sameObject = draft === row;
   draft.taskOptions.priority = "p3";
-  draft.text = "B2"; draft.body = "B2";
+  draft.body = "B2";
   app.captureComposer.persist(app.captureContext());
   await app.getDraftStore().save(draft);
   console.log(JSON.stringify({ sameObject, requests: requests.map(p => ({ priority: p.priority, body: p.body })) }));
@@ -855,56 +711,6 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
 """)
         self.assertTrue(result["sameObject"])
         self.assertEqual(result["requests"][-1], {"priority": "p3", "body": "B2"})
-
-    def test_clearing_capture_during_first_save_keeps_the_cleared_revision(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  location.protocol = "http:";
-  const app = taskBoard();
-  app.$nextTick = callback => callback();
-  app.scheduleDraftSave = () => {};
-  const requests = [];
-  let finishFirst;
-  global.fetch = (_path, options) => {
-    const payload = JSON.parse(options.body);
-    requests.push(payload);
-    const response = { ok: true, json: async () => ({ saved_draft: {
-      ...payload, revision: payload.expected_revision + 1,
-      content_hash: String(payload.expected_revision + 1).repeat(64),
-    } }) };
-    return requests.length === 1 ? new Promise(resolve => { finishFirst = () => resolve(response); })
-      : Promise.resolve(response);
-  };
-  app.captureComposer.beginNew(app.captureContext());
-  const draft = app.captureComposer.draft;
-  draft.text = "Text sent before clearing";
-  app.captureComposer.persist(app.captureContext());
-  const firstSave = app.saveWorkspaceDraft(draft);
-  draft.text = "";
-  app.captureComposer.persist(app.captureContext());
-  app.captureComposer.close(app.captureContext());
-  const retained = app.captureComposer.draft === draft;
-  const flushed = app.flushWorkspaceDraft(draft);
-  finishFirst();
-  await firstSave;
-  await flushed;
-
-  app.captureComposer.beginNew(app.captureContext());
-  app.captureComposer.draft.text = "Never sent";
-  app.captureComposer.persist(app.captureContext());
-  const unsentId = app.captureComposer.draft.draftId;
-  app.captureComposer.draft.text = "";
-  app.captureComposer.persist(app.captureContext());
-  app.captureComposer.close(app.captureContext());
-  console.log(JSON.stringify({ retained, bodies: requests.map(p => p.body), revision: draft.revision,
-    unsentRemoved: !store.has(app.noteDraftStorageKey(app.workspaceKey, unsentId))
-      && !app.drafts.some(item => item.id === unsentId) && app.captureComposer.draft === null }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertTrue(result["retained"])
-        self.assertEqual(result["bodies"], ["Text sent before clearing", ""])
-        self.assertEqual(result["revision"], 2)
-        self.assertTrue(result["unsentRemoved"])
 
     def test_metadata_editor_defaults_and_unrelated_edits_preserve_exact_tags_and_due(self) -> None:
         result = self.run_node(r"""
@@ -1101,287 +907,17 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertFalse(result["reopenedConflict"])
         self.assertEqual(result["baselineHash"], "hash-two")
 
-    def test_local_draft_recovery_preserves_kind_only_switches_in_both_directions(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  async function scenario(canonicalKind, localKind) {
-    const entries = new Map();
-    localStorage.setItem = (key, value) => entries.set(key, value);
-    localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-    localStorage.removeItem = key => entries.delete(key);
-    Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
-    localStorage.key = index => Array.from(entries.keys())[index] || null;
-    const id = "capture-kind-switch";
-    const key = "mt-note-draft-v2:workspace-a:" + id;
-    const metadata = { status: "active", priority: "none", type: "task", project: "", topic: "", tags: [], due: null, due_kind: null };
-    entries.set(key, JSON.stringify({
-      id, kind: localKind, mode: "new", capture_id: id, created: "2026-10-15T10:00:00",
-      revision: 1, content_hash: "a".repeat(64), title: "same title", body: "same body",
-      ...metadata, _serverSaved: true, _savedKind: canonicalKind,
-    }));
-    const app = taskBoard();
-    app.$nextTick = callback => callback();
-    app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-    app.drafts = [{
-      id, kind: canonicalKind, mode: "new", capture_id: id, created: "2026-10-15T10:00:00",
-      revision: 1, content_hash: "a".repeat(64), title: "same title", body: "same body", ...metadata,
-    }];
-    location.protocol = "http:";
-    let sentKind = null;
-    global.fetch = async (_path, options) => {
-      sentKind = JSON.parse(options.body).kind;
-      throw new Error("offline");
-    };
-    await app.importLocalWorkspaceDrafts();
-    app.restoreLocalWorkspaceDrafts();
-    const recovery = app.drafts.find(draft => draft._orphanedLocal);
-    return { sentKind, recoveryKind: recovery && recovery.kind, canonicalKind };
-  }
-  console.log(JSON.stringify({
-    noteToTask: await scenario("note", "task"),
-    taskToNote: await scenario("task", "note"),
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertEqual(result["noteToTask"], {"sentKind": "task", "recoveryKind": "task", "canonicalKind": "note"})
-        self.assertEqual(result["taskToNote"], {"sentKind": "note", "recoveryKind": "note", "canonicalKind": "task"})
-
-    def test_local_body_edit_recovery_preserves_text_and_origin(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
-  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-  const original = "## Capture\n\nSource text.\n\nOld instructions.\n\n## Notes\n\nHistory.\n";
-  const edited = original.replace("Old instructions.", "Triage this source before action.");
-  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",content_hash:"a".repeat(64),
-    updated:"2026-10-01",body:original};
-  app.tasks = [target]; app.selected = target;
-  const id = "81c67d7e-12f7-43cc-8279-08e970e94aa0";
-  entries.set("mt-note-draft-v2:workspace-a:" + id, JSON.stringify({id,kind:"note",mode:"edit",
-    origin:"card-body",target:target.path,ref:target.ref,base_hash:target.content_hash,
-    base_updated:target.updated,revision:0,title:"",body:edited}));
-  let sent;
-  global.fetch = async (_path, options) => {
-    sent = JSON.parse(options.body);
-    return {ok:true,json:async()=>({saved_draft:{...sent,revision:1,content_hash:"b".repeat(64)}})};
-  };
-  await app.importLocalWorkspaceDrafts();
-  const saved = app.drafts.find(draft => draft.id === id);
-  app.contentEditor.begin(app.contentContext(), saved);
-  console.log(JSON.stringify({sentOrigin:sent.origin,savedOrigin:saved.origin,
-    editorOrigin:app.contentEditor.draft.origin,
-    text:app.contentEditor.text,canSave:app.contentEditor.canSave(app.contentContext())}));
-})().catch(error=>{console.error(error);process.exitCode=1;});
-""")
-        self.assertEqual(result["sentOrigin"], "card-body")
-        self.assertEqual(result["savedOrigin"], "card-body")
-        self.assertEqual(result["editorOrigin"], "card-body")
-        self.assertIn("## Capture", result["text"])
-        self.assertIn("Triage this source before action.", result["text"])
-        self.assertTrue(result["canSave"])
-
-    def test_removed_workspace_draft_becomes_explicit_local_recovery(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard();
-  app.$nextTick = callback => callback();
-  app.interactive = true;
-  app.workspaceKey = "workspace-a";
-  app.apiToken = "token";
-  app.tasks = [{ id:"note", title:"Note", body:"Before", ref: "@note", path: "cards/example.md", kind: "note" }];
-  location.protocol = "http:";
-  const id = "81c67d7e-12f7-43cc-8279-08e970e94aa0";
-  const key = "mt-note-draft-v2:workspace-a:" + id;
-  const local = {
-    id, kind: "note", mode: "edit", origin: "card-body", target: "cards/example.md", ref: "@note",
-    base_hash: "a".repeat(64), base_updated: "2026-10-01", revision: 2,
-    content_hash: "b".repeat(64), _serverSaved: true, title: "", body: "saved locally",
-  };
-  entries.set(key, JSON.stringify(local));
-  let calls = [];
-  global.fetch = async (_path, options) => {
-    const payload = JSON.parse(options.body); calls.push(payload);
-    return { ok: true, json: async () => ({ saved_draft: {
-      ...payload, revision: 1, updated: "2026-10-15T10:00:00", content_hash: "c".repeat(64),
-    } }) };
-  };
-  await app.importLocalWorkspaceDrafts();
-  app.restoreLocalWorkspaceDrafts();
-  const recovery = app.drafts.find(draft => draft._orphanedLocal);
-  const firstState = { count: calls.length, orphaned: !!recovery, text: recovery && recovery.body };
-  await app.recoverLocalWorkspaceDraft(recovery);
-  const fork = calls[0];
-  entries.set(key, JSON.stringify(local)); // simulate an old tab writing after recovery
-  const next = taskBoard(); next.workspaceKey = "workspace-a"; next.drafts = [];
-  next.restoreLocalWorkspaceDrafts();
-  await next.importLocalWorkspaceDrafts();
-  const stale = next.drafts.find(draft => draft._orphanedLocal);
-  next.dismissLocalWorkspaceDraft(stale);
-  console.log(JSON.stringify({
-    firstState, forkIdDiffers: fork.id !== id, baseline: fork.base_hash,
-    staleStillRecoverable: !!stale, dismissed: !next.drafts.some(draft => draft._orphanedLocal),
-    draftKeyRemoved: !entries.has(key), tombstone: !!entries.get("mt-draft-closed-v1:workspace-a:" + id),
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertEqual(result["firstState"], {"count": 0, "orphaned": True, "text": "saved locally"})
-        self.assertTrue(result["forkIdDiffers"])
-        self.assertEqual(result["baseline"], "a" * 64)
-        self.assertFalse(result["staleStillRecoverable"])
-        self.assertTrue(result["dismissed"])
-        self.assertTrue(result["draftKeyRemoved"])
-        self.assertTrue(result["tombstone"])
-
-    def test_recovered_new_note_uses_fresh_capture_id_and_keeps_canonical_sibling(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard();
-  app.$nextTick = callback => callback();
-  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-  app.captureComposer.makeId = () => "recovered-capture-id";
-  const id = "already-applied-capture";
-  const key = "mt-note-draft-v2:workspace-a:" + id;
-  const local = { id, kind: "note", mode: "new", capture_id: id, _serverSaved: true,
-    revision: 2, content_hash: "a".repeat(64), title: "Local divergence", body: "divergent body" };
-  const canonical = { id, kind: "note", mode: "new", capture_id: id, revision: 2,
-    content_hash: "b".repeat(64), title: "Canonical", body: "original body" };
-  entries.set(key, JSON.stringify(local));
-  app.drafts = [canonical];
-  app.restoreLocalWorkspaceDrafts();
-  const recovery = app.drafts.find(draft => draft._orphanedLocal);
-  let sent = null;
-  global.fetch = async (_path, options) => {
-    sent = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ saved_draft: { ...sent, revision: 1,
-      content_hash: "c".repeat(64), updated: "2026-10-15T10:00:00" } }) };
-  };
-  await app.recoverLocalWorkspaceDraft(recovery);
-  const canonicalAfterFork = app.drafts.find(draft => draft.id === id);
-
-  const dismissedId = "canonical-to-retain";
-  const dismissedKey = "mt-note-draft-v2:workspace-a:" + dismissedId;
-  const dismissedCanonical = { id: dismissedId, kind: "note", mode: "new", revision: 1,
-    body: "server version", content_hash: "d".repeat(64) };
-  entries.set(dismissedKey, JSON.stringify({ ...local, id: dismissedId, body: "stale version" }));
-  const other = taskBoard();
-  other.workspaceKey = "workspace-a"; other.drafts = [dismissedCanonical];
-  other.restoreLocalWorkspaceDrafts();
-  const stale = other.drafts.find(draft => draft._orphanedLocal);
-  other.dismissLocalWorkspaceDraft(stale);
-  entries.set(dismissedKey, JSON.stringify({ ...local, id: dismissedId, body: "old tab write" }));
-  const afterDismiss = taskBoard();
-  afterDismiss.workspaceKey = "workspace-a"; afterDismiss.drafts = [dismissedCanonical];
-  afterDismiss.restoreLocalWorkspaceDrafts();
-  console.log(JSON.stringify({
-    freshCaptureId: sent.capture_id, forkId: sent.id,
-    originalKeptAfterFork: canonicalAfterFork && canonicalAfterFork.body === "original body",
-    originalKeptAfterDismiss: other.drafts.some(draft => draft.id === dismissedId && !draft._orphanedLocal),
-    staleNotResurrected: !afterDismiss.drafts.some(draft => draft._orphanedLocal),
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertEqual(result["freshCaptureId"], result["forkId"])
-        self.assertEqual(result["freshCaptureId"], "recovered-capture-id")
-        self.assertTrue(result["originalKeptAfterFork"])
-        self.assertTrue(result["originalKeptAfterDismiss"])
-        self.assertTrue(result["staleNotResurrected"])
-
-    def test_missing_canonical_orphan_is_removed_after_editor_clone_recovery_or_dismissal(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const makeApp = id => {
-    const app = taskBoard();
-    app.$nextTick = callback => callback();
-    app.$refs = {};
-    app.select = item => { app.selected=item; app.selectedId=item.id; };
-    app.interactive = true; app.workspaceKey = "workspace-" + id; app.apiToken = "token";
-    app.tasks = [{ id:"task", title:"Task", body:"Before", ref: "@task", path: "cards/example.md", kind: "task" }];
-    entries.set("mt-note-draft-v2:" + app.workspaceKey + ":" + id, JSON.stringify({
-      id, kind: "task", mode: "edit", origin: "card-body", target: "cards/example.md", ref: "@task",
-      base_hash: "a".repeat(64), base_updated: "2026-10-01", revision: 2,
-      content_hash: "b".repeat(64), _serverSaved: true, body: "saved locally", title: "",
-    }));
-    app.restoreLocalWorkspaceDrafts();
-    return app;
-  };
-  const recoverApp = makeApp("recover-orphan");
-  const recoverRow = recoverApp.drafts.find(draft => draft._orphanedLocal);
-  await recoverApp.openWorkspaceDraft(recoverRow);
-  const recoverEditor = recoverApp.contentEditor.draft;
-  global.fetch = async (_path, options) => {
-    const payload = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1,
-      content_hash: "c".repeat(64), updated: "2026-10-15T10:00:00" } }) };
-  };
-  await recoverApp.recoverLocalWorkspaceDraft(recoverEditor);
-
-  const dismissApp = makeApp("dismiss-orphan");
-  const dismissRow = dismissApp.drafts.find(draft => draft._orphanedLocal);
-  await dismissApp.openWorkspaceDraft(dismissRow);
-  const dismissEditor = dismissApp.contentEditor.draft;
-  dismissApp.dismissLocalWorkspaceDraft(dismissEditor);
-  console.log(JSON.stringify({
-    clonedRecoverEditor: recoverEditor !== recoverRow,
-    recoveredOrphanRemoved: !recoverApp.drafts.some(draft => draft._orphanedLocal),
-    recoveredDraftKept: recoverApp.drafts.some(draft => draft.id !== "recover-orphan" && !draft._orphanedLocal),
-    clonedDismissEditor: dismissEditor !== dismissRow,
-    dismissedOrphanRemoved: !dismissApp.drafts.some(draft => draft._orphanedLocal),
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertTrue(result["clonedRecoverEditor"])
-        self.assertTrue(result["recoveredOrphanRemoved"])
-        self.assertTrue(result["recoveredDraftKept"])
-        self.assertTrue(result["clonedDismissEditor"])
-        self.assertTrue(result["dismissedOrphanRemoved"])
-
-    def test_capture_recovery_preserves_whitespace_and_meeting_template_guard(self) -> None:
+    def test_meeting_template_guard_requires_content(self) -> None:
         result = self.run_node(r"""
 const makeApp=()=>{const app=taskBoard();app.$nextTick=()=>{};app.$refs={};app.scheduleDraftSave=()=>{};return app;};
-const app=makeApp();app.captureComposer.beginNew(app.captureContext());
-app.captureComposer.setKind(app.captureContext(),'note');
-app.captureComposer.draft.title='Standup';
-app.captureComposer.draft.text='  Source text.\r\n\r\n';
-app.captureComposer.persist(app.captureContext());
-const id=app.captureComposer.draft.draftId;
-app.captureComposer.close(app.captureContext());
-const reopened=makeApp();reopened.restoreLocalWorkspaceDrafts();
-const recovered=reopened.drafts.find(draft=>draft.id===id);
-const other=makeApp();other.workspaceKey='another-workspace';other.restoreLocalWorkspaceDrafts();
 const template=makeApp();template.captureComposer.beginNew(template.captureContext());
 template.captureComposer.setKind(template.captureContext(),'note');
 template.captureComposer.applyMeetingTemplate(template.captureContext());
 const blocked=!template.captureComposer.canSave(template.captureContext());
-template.captureComposer.draft.text+='\n\nAn actual decision.';
-console.log(JSON.stringify({title:recovered.title,body:recovered.body,kind:recovered.kind,
-isolated:other.drafts.length===0,blocked,ready:template.captureComposer.canSave(template.captureContext())}));
+template.captureComposer.draft.body+='\n\nAn actual decision.';
+console.log(JSON.stringify({blocked,ready:template.captureComposer.canSave(template.captureContext())}));
 """)
-        self.assertEqual(result, {'title':'Standup','body':'  Source text.\r\n\r\n','kind':'note',
-                                  'isolated':True,'blocked':True,'ready':True})
+        self.assertEqual(result, {'blocked':True,'ready':True})
 
     def test_only_body_preview_checkboxes_are_enabled_with_indexes(self) -> None:
         result = self.run_node(r"""
@@ -1450,7 +986,7 @@ console.log(JSON.stringify({results}));
         self.assertIn("@keydown.meta.enter", composer)
         self.assertIn("@keydown.ctrl.enter", composer)
         self.assertIn("What do you want to accomplish?", composer)
-        self.assertIn('x-show="!contentEditor.draft"', drawer)
+        self.assertIn('x-show="!contentEditor.open"', drawer)
         self.assertIn("Mark reviewed", drawer)
 
     def test_markdown_math_protection_and_restoration(self) -> None:
@@ -1557,7 +1093,7 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
         self.assertEqual(len(spans),1)
         self.assertEqual(body[spans[0]['start']:spans[0]['end']],ref)
 
-    def test_drafts_view_filtering_target_ref_and_discard_toast(self) -> None:
+    def test_drafts_view_search_and_discard_toast(self) -> None:
         drafts_html = (Path(__file__).resolve().parents[1] / "tools" / "web" / "templates" / "views" / "drafts.html").read_text(encoding="utf-8")
         self.assertIn('class="mt-panel mt-surface"', drafts_html)
         self.assertIn('class="mt-view-controls"', drafts_html)
@@ -1570,133 +1106,368 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
   const app = taskBoard();
   const notices = [];
   app.notify = (text, error = false) => notices.push({ text, error });
-  app.tasks = [{ path: "cards/task-42.md", ref: "TASK-42", title: "API migration" }];
   app.drafts = [
-    { id: "d1", kind: "task", mode: "new", title: "New draft", body: "Alpha", updated: "2026-11-15T10:00:00" },
-    { id: "d2", kind: "task", mode: "edit", target: "cards/task-42.md", title: "", body: "Beta", updated: "2026-11-15T11:00:00" },
+    { id: "d1", kind: "task", mode: "new", title: "Alpha draft", body: "Alpha", updated: "2026-11-15T10:00:00" },
+    { id: "d2", kind: "note", mode: "new", title: "Beta draft", body: "Beta", updated: "2026-11-15T11:00:00" },
   ];
   const allCount = app.visibleDrafts().length;
-  app.draftModeFilter = "new";
-  const newIds = app.visibleDrafts().map(d => d.id);
-  app.draftModeFilter = "edit";
-  const editIds = app.visibleDrafts().map(d => d.id);
-  app.draftModeFilter = "all";
-  const editRef = app.draftTargetRef(app.drafts[1]);
-  const newRef = app.draftTargetRef(app.drafts[0]);
+  app.draftSearch = "alpha";
+  const filteredIds = app.visibleDrafts().map(d => d.id);
+  app.draftSearch = "";
 
-  global.fetch = async (url, options) => {
-    if (String(url).includes("draft-save")) {
-      const payload = JSON.parse(options.body);
-      return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "a".repeat(64), updated: "2026-11-15T10:00:00" } }) };
-    }
-    return { ok: true, json: async () => ({ message: "Draft discarded" }) };
-  };
+  global.fetch = async () => ({ ok: true, json: async () => ({ message: "Draft discarded" }) });
   await app.discardWorkspaceDraft(app.drafts[0], true);
-  console.log(JSON.stringify({ allCount, newIds, editIds, editRef, newRef, notices, remaining: app.drafts.map(d => d.id) }));
+  console.log(JSON.stringify({ allCount, filteredIds, notices, remaining: app.drafts.map(d => d.id) }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
         self.assertEqual(result["allCount"], 2)
-        self.assertEqual(result["newIds"], ["d1"])
-        self.assertEqual(result["editIds"], ["d2"])
-        self.assertEqual(result["editRef"], "TASK-42")
-        self.assertEqual(result["newRef"], "")
+        self.assertEqual(result["filteredIds"], ["d1"])
         self.assertEqual(result["notices"], [{"text": "Draft discarded", "error": False}])
         self.assertEqual(result["remaining"], ["d2"])
 
-    def test_switching_to_zen_during_inflight_save_syncs_revision_onto_new_editor_draft(self) -> None:
+    def test_card_edit_unsaved_crash_safety_and_conflict(self) -> None:
         result = self.run_node(r"""
 (async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
-  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
-    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
-  app.tasks = [target]; app.selected = target;
-  let releaseFirst;
-  const requests = [];
-  global.fetch = (url, options) => {
-    const payload = JSON.parse(options.body);
-    requests.push({ url, payload });
-    if (requests.length === 1) {
-      return new Promise(resolve => {
-        releaseFirst = () => resolve({
-          ok: true,
-          json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "1".repeat(64), updated: "2026-10-01T10:00:01" } }),
-        });
-      });
-    }
-    return Promise.resolve({
-      ok: true,
-      json: async () => ({ saved_draft: { ...payload, revision: payload.expected_revision + 1, content_hash: "2".repeat(64), updated: "2026-10-01T10:00:02" } }),
-    });
-  };
-  app.contentEditor.begin(app.contentContext());
-  app.contentEditor.text = "First edit";
-  const inflight = app.saveWorkspaceDraft(Object.assign(app.contentEditor.draft, { body: "First edit" }));
-  app.openSelectedInZen();
-  releaseFirst();
-  await inflight;
-  app.captureComposer.draft.text = "Second edit";
-  app.captureComposer.persist(app.captureContext());
-  const secondOk = await app.saveWorkspaceDraft(app.captureComposer.draft);
-  console.log(JSON.stringify({
-    secondOk,
-    firstRev: requests[0].payload.expected_revision,
-    secondRev: requests[1].payload.expected_revision,
-    secondHash: requests[1].payload.expected_hash,
-    zenRev: app.captureComposer.draft.revision,
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertTrue(result["secondOk"])
-        self.assertEqual(result["firstRev"], 0)
-        self.assertEqual(result["secondRev"], 1)
-        self.assertEqual(result["secondHash"], "1" * 64)
-        self.assertEqual(result["zenRev"], 2)
+  const app = taskBoard();
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  app.selected = { id: "card-1", ref: "@card-1", path: "cards/card-1.md", kind: "note", content_hash: "hash-1", body: "Original" };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
 
-    def test_discarding_card_edit_draft_clears_open_content_editor_and_does_not_resurrect_on_reopen(self) -> None:
+  // Typing writes mt-unsaved:<ws>:<card id> and never adds to drafts.
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "Unsaved edit";
+  app.contentEditor.persist();
+  const key = "mt-unsaved:ws-1:card-1";
+  const storedAfterType = JSON.parse(localStorage.getItem(key));
+  const notInDrafts = app.drafts.length === 0;
+
+  // Crash/reopen offers "Restore unsaved text?" and restores on accept.
+  app.contentEditor.open = false;
+  app.contentEditor.begin(app.contentContext());
+  const offered = app.contentEditor.unsavedOffer === "Unsaved edit";
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const restored = app.contentEditor.text === "Unsaved edit" && app.contentEditor.unsavedOffer === "";
+
+  // Conflict on /api/card-edit keeps editor open with clear message and preserves unsaved text.
+  global.fetch = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: "conflict: item changed", conflict: true }),
+  });
+  const conflictSave = await app.contentEditor.save(app.contentContext());
+  const conflictState = {
+    result: conflictSave,
+    open: app.contentEditor.open,
+    conflict: app.contentEditor.conflict,
+    error: app.contentEditor.error,
+    textKept: app.contentEditor.text === "Unsaved edit",
+    keyKept: JSON.parse(localStorage.getItem(key)).text === "Unsaved edit",
+  };
+
+  // Reload card, keep my text updates hash and original while keeping edited text.
+  app.loadSelectedDetails = async () => {
+    app.selected = { ...app.selected, content_hash: "hash-2", body: "Server updated body" };
+  };
+  await app.contentEditor.reloadKeepingText(app.contentContext());
+  const reloadedState = {
+    conflict: app.contentEditor.conflict,
+    error: app.contentEditor.error,
+    contentHash: app.contentEditor.contentHash,
+    original: app.contentEditor.original,
+    text: app.contentEditor.text,
+  };
+
+  // Cancel confirms when dirty; cancelling keeps editor open, confirming closes and clears key.
+  window.confirm = () => false;
+  const closeCancelled = app.contentEditor.close(app.contentContext()) === false && app.contentEditor.open;
+  window.confirm = () => true;
+  app.contentEditor.close(app.contentContext());
+  const clearedOnCancel = localStorage.getItem(key) === null && !app.contentEditor.open;
+  console.log(JSON.stringify({ storedAfterType, notInDrafts, offered, restored, conflictState, reloadedState, closeCancelled, clearedOnCancel }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["storedAfterType"], {"text": "Unsaved edit", "baseHash": "hash-1"})
+        self.assertTrue(result["notInDrafts"])
+        self.assertTrue(result["offered"])
+        self.assertTrue(result["restored"])
+        self.assertEqual(result["conflictState"], {
+            "result": None,
+            "open": True,
+            "conflict": True,
+            "error": "This card changed since you opened it. Copy your text or reload.",
+            "textKept": True,
+            "keyKept": True,
+        })
+        self.assertEqual(result["reloadedState"], {
+            "conflict": False,
+            "error": "",
+            "contentHash": "hash-2",
+            "original": "Server updated body",
+            "text": "Unsaved edit",
+        })
+        self.assertTrue(result["closeCancelled"])
+        self.assertTrue(result["clearedOnCancel"])
+
+    def test_zen_switch_preserves_original_content_hash_and_quick_search_guard(self) -> None:
+        result = self.run_node(r"""
+(() => {
+  const app = taskBoard();
+  app.ready = true;
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  app.selected = { id: "card-1", ref: "@card-1", kind: "note", title: "Note", content_hash: "H1", body: "Body v1", tags: [] };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
+
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "User edit based on H1";
+  app.contentEditor.persist();
+  app.contentEditor.zen = true;
+  const quickSearchBlockedInInlineZen = !app.canOpenQuickSearch();
+  app.contentEditor.zen = false;
+
+  // Simulate another tab updating the card to H2 before user switches to Zen.
+  app.selected.content_hash = "H2";
+  app.selected.body = "Body v2 from other tab";
+
+  app.openSelectedInZen();
+  const backupKeptOnSwitch = JSON.parse(localStorage.getItem("mt-unsaved:ws-1:card-1")).text === "User edit based on H1";
+  console.log(JSON.stringify({
+    quickSearchBlockedInInlineZen,
+    backupKeptOnSwitch,
+    zen: app.contentEditor.zen,
+    composerOpen: app.captureComposer.open,
+    zenHash: app.contentEditor.contentHash,
+    zenOriginal: app.contentEditor.original,
+    zenText: app.contentEditor.text,
+  }));
+})()
+""")
+        self.assertTrue(result["quickSearchBlockedInInlineZen"])
+        self.assertTrue(result["backupKeptOnSwitch"])
+        self.assertTrue(result["zen"])
+        self.assertFalse(result["composerOpen"])
+        self.assertEqual(result["zenHash"], "H1")
+        self.assertEqual(result["zenOriginal"], "Body v1")
+        self.assertEqual(result["zenText"], "User edit based on H1")
+
+    def test_inline_retry_after_failed_property_save_uses_saved_body_hash(self) -> None:
         result = self.run_node(r"""
 (async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
-  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
-    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
-  app.tasks = [target]; app.selected = target;
-  const calls = [];
-  global.fetch = async (url, options) => {
-    calls.push(String(url));
-    return { ok: true, json: async () => ({ message: "Draft discarded" }) };
+  const app = taskBoard();
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  app.selected = { id: "card-1", ref: "@card-1", kind: "note", content_hash: "H1", body: "Original" };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "Edited";
+  app.contentEditor.zen = true;
+  const bodyHashes = [];
+  app.saveCardBody = async (ref, hash, body) => {
+    bodyHashes.push(hash);
+    app.selected = { ...app.selected, content_hash: "H2", body };
+    return { ok: true, payload: {} };
   };
+  let propsFail = true;
+  const ctx = () => ({
+    ...app.contentContext(),
+    hasPropertyChanges: () => true,
+    canSaveProperties: () => true,
+    saveProperties: async () => (propsFail ? null : { ok: true }),
+    propertyError: () => "properties failed",
+  });
+  const first = await app.contentEditor.save(ctx());
+  const afterFirst = { open: app.contentEditor.open, hash: app.contentEditor.contentHash,
+    original: app.contentEditor.original, error: app.contentEditor.error };
+  propsFail = false;
+  await app.contentEditor.save(ctx());
+  console.log(JSON.stringify({ first, afterFirst, bodyHashes, closed: !app.contentEditor.open }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertIsNone(result["first"])
+        self.assertEqual(result["afterFirst"], {"open": True, "hash": "H2", "original": "Edited", "error": "properties failed"})
+        # The retry saves only the properties; the body is not resent against H1.
+        self.assertEqual(result["bodyHashes"], ["H1"])
+        self.assertTrue(result["closed"])
+
+    def test_drawer_zen_saves_body_then_properties_against_rebased_hash(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const app = taskBoard();
+  app.ready = true;
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  app.taskPriorityPolicy = { none: "None", high: "High" };
+  app.selected = { id: "card-1", ref: "@card-1", kind: "note", title: "Title", content_hash: "H1",
+    body: "Original", tags: [], priority: "none", project: "", topic: "", due: null, due_kind: null,
+    processing_instructions: "" };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
+  app.propertyEditor.begin(app.selected, app.taskDefaults);
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ url, expected_hash: JSON.parse(options.body).expected_hash, body: JSON.parse(options.body).body });
+    return { ok: true, status: 200, json: async () => ({ message: "saved" }) };
+  };
+  // The server returns the card with the new body and hash.
+  app.applyPayload = async () => { app.selected = { ...app.selected, content_hash: "H2", body: "Edited" }; };
+  app.apiPost = async (path, body) => {
+    requests.push({ url: path, expected_hash: body.expected_hash, patch: body.patch });
+    app.selected = { ...app.selected, ...body.patch, content_hash: "H3" };
+    return { saved_ref: "@card-1" };
+  };
+
+  // Outside Zen, property edits are not saved from the content editor.
   app.contentEditor.begin(app.contentContext());
-  app.contentEditor.text = "Edited text to discard";
-  app.contentEditor.persist(app.contentContext());
-  const draft = app.drafts[0];
-  await app.discardWorkspaceDraft(draft, true);
-  app.contentEditor.close(app.contentContext());
-  app.contentEditor.begin(app.contentContext());
+  app.propertyEditor.form = { ...app.propertyEditor.form, title: "New title" };
+  const outsideZen = {
+    canSave: app.contentEditor.canSave(app.contentContext()),
+    canApply: app.propertyEditor.canApply(app.propertyContext()),
+  };
+
+  app.openSelectedInZen();
+  app.contentEditor.text = "Edited";
+  const inZen = {
+    zen: app.contentEditor.zen,
+    textKept: app.contentEditor.text,
+    canSave: app.contentEditor.canSave(app.contentContext()),
+    canApplyWhileOpen: app.propertyEditor.canApply(app.propertyContext()),
+  };
+  await app.contentEditor.save(app.contentContext());
+  console.log(JSON.stringify({ outsideZen, inZen, requests, closed: !app.contentEditor.open,
+    title: app.selected.title, formTitle: app.propertyEditor.form.title, changed: app.propertyEditor.changed() }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["outsideZen"], {"canSave": False, "canApply": False})
+        self.assertEqual(result["inZen"], {"zen": True, "textKept": "Edited", "canSave": True, "canApplyWhileOpen": False})
+        self.assertEqual(result["requests"], [
+            {"url": "/api/card-edit", "expected_hash": "H1", "body": "Edited"},
+            {"url": "/api/card-metadata", "expected_hash": "H2", "patch": {"title": "New title"}},
+        ])
+        self.assertTrue(result["closed"])
+        self.assertEqual(result["title"], "New title")
+        self.assertEqual(result["formTitle"], "New title")
+        self.assertFalse(result["changed"])
+
+    def test_drawer_zen_property_conflict_does_not_block_body_save(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const app = taskBoard();
+  app.ready = true;
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  app.selected = { id: "card-1", ref: "@card-1", kind: "note", title: "Title", content_hash: "H1",
+    body: "Original", tags: [], priority: "none", project: "", topic: "", due: null, due_kind: null,
+    processing_instructions: "" };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
+  app.propertyEditor.begin(app.selected, app.taskDefaults);
+  const requests = [];
+  global.fetch = async (url, options) => {
+    requests.push({ url, expected_hash: JSON.parse(options.body).expected_hash });
+    return { ok: true, status: 200, json: async () => ({ message: "saved" }) };
+  };
+  app.applyPayload = async () => { app.selected = { ...app.selected, content_hash: "H3", body: "Edited", title: "Other title" }; };
+  app.apiPost = async (path, body) => { requests.push({ url: path }); return { saved_ref: "@card-1" }; };
+
+  app.openSelectedInZen();
+  app.contentEditor.text = "Edited";
+  app.propertyEditor.form = { ...app.propertyEditor.form, title: "My title" };
+  // Another tab changes the card's properties; the refresh marks a property conflict.
+  app.propertyEditor.conflict = true;
+  const canSaveWithConflict = app.contentEditor.canSave(app.contentContext());
+  await app.contentEditor.save(app.contentContext());
   console.log(JSON.stringify({
-    calls,
-    draftsCount: app.drafts.length,
-    reopenedText: app.contentEditor.text,
-    statusAfterReopen: app.draftWorkspaceStatus,
+    canSaveWithConflict,
+    requests,
+    closed: !app.contentEditor.open,
+    propertiesStillChanged: app.propertyEditor.changed(),
+    formTitle: app.propertyEditor.form.title,
   }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)
-        self.assertEqual(result["calls"], [])
-        self.assertEqual(result["draftsCount"], 0)
-        self.assertEqual(result["reopenedText"], "Original")
-        self.assertEqual(result["statusAfterReopen"], "")
+        self.assertTrue(result["canSaveWithConflict"])
+        # The body is saved; the conflicting properties are not sent and stay in the panel.
+        self.assertEqual(result["requests"], [{"url": "/api/card-edit", "expected_hash": "H1"}])
+        self.assertTrue(result["closed"])
+        self.assertTrue(result["propertiesStillChanged"])
+        self.assertEqual(result["formTitle"], "My title")
+
+    def test_restoring_backup_from_older_card_version_reports_conflict(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const app = taskBoard();
+  app.workspaceKey = "ws-1";
+  app.$nextTick = fn => fn();
+  app.$refs = {};
+  const key = "mt-unsaved:ws-1:card-1";
+  app.selected = { id: "card-1", ref: "@card-1", kind: "note", title: "Note", content_hash: "H2", body: "Changed elsewhere", tags: [] };
+  app.tasks = [app.selected];
+  app.selectedId = "card-1";
+  const sentHashes = [];
+  app.saveCardBody = async (ref, hash) => {
+    sentHashes.push(hash);
+    return hash === "H2" ? { ok: true, payload: {} } : { ok: false, conflict: true, error: "changed" };
+  };
+
+  // Inline editor: a backup written against H1 restores into the conflict state.
+  localStorage.setItem(key, JSON.stringify({ text: "Crash text", baseHash: "H1" }));
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const inlineRestored = { text: app.contentEditor.text, hash: app.contentEditor.contentHash,
+    conflict: app.contentEditor.conflict };
+  await app.contentEditor.save(app.contentContext());
+  const inlineAfterSave = { conflict: app.contentEditor.conflict, open: app.contentEditor.open };
+  app.loadSelectedDetails = async () => {};
+  await app.contentEditor.reloadKeepingText(app.contentContext());
+  const backupAfterReload = JSON.parse(localStorage.getItem(key));
+  app.contentEditor.close(app.contentContext(), { force: true });
+
+  // A backup on the current version restores normally.
+  localStorage.setItem(key, JSON.stringify({ text: "Fresh text", baseHash: "H2" }));
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const freshRestore = { hash: app.contentEditor.contentHash, conflict: app.contentEditor.conflict };
+  app.contentEditor.close(app.contentContext(), { force: true });
+
+  // A plain-text backup from before base hashes is treated as stale.
+  localStorage.setItem(key, "Legacy text");
+  app.contentEditor.begin(app.contentContext());
+  const legacyOffer = app.contentEditor.unsavedOffer;
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const legacy = { hash: app.contentEditor.contentHash, conflict: app.contentEditor.conflict };
+  app.contentEditor.close(app.contentContext(), { force: true });
+
+  // Opening straight into Zen applies the same rule.
+  localStorage.setItem(key, JSON.stringify({ text: "Zen crash text", baseHash: "H1" }));
+  app.openSelectedInZen();
+  app.contentEditor.restoreUnsaved(app.contentContext());
+  const zen = { text: app.contentEditor.text, hash: app.contentEditor.contentHash,
+    conflict: app.contentEditor.conflict, error: app.contentEditor.error, isZen: app.contentEditor.zen };
+  console.log(JSON.stringify({ inlineRestored, inlineAfterSave, sentHashes, backupAfterReload,
+    freshRestore, legacyOffer, legacy, zen }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["inlineRestored"], {"text": "Crash text", "hash": "H1", "conflict": True})
+        self.assertEqual(result["inlineAfterSave"], {"conflict": True, "open": True})
+        self.assertEqual(result["sentHashes"], ["H1"])
+        self.assertEqual(result["backupAfterReload"], {"text": "Crash text", "baseHash": "H2"})
+        self.assertEqual(result["freshRestore"], {"hash": "H2", "conflict": False})
+        self.assertEqual(result["legacyOffer"], "Legacy text")
+        self.assertEqual(result["legacy"], {"hash": "0" * 64, "conflict": True})
+        self.assertEqual(result["zen"], {
+            "text": "Zen crash text", "hash": "H1", "conflict": True, "isZen": True,
+            "error": "This text was written against an older version of the card. "
+                     "Reload the card to save it over the current version.",
+        })
 
     def test_new_task_draft_metadata_updates_after_first_persist(self) -> None:
         result = self.run_node(r"""
@@ -1717,7 +1488,7 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
     return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "a".repeat(64) } }) };
   };
   app.captureComposer.beginNew(app.captureContext(), null, "task");
-  app.captureComposer.draft.text = "Task body";
+  app.captureComposer.draft.body = "Task body";
   app.captureComposer.draft.taskOptions.priority = "low";
   app.captureComposer.persist(app.captureContext());
   app.captureComposer.draft.taskOptions.priority = "high";
@@ -1728,51 +1499,6 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
 """)
         self.assertEqual(result["priority"], "high")
         self.assertTrue(result["shared"])
-
-    def test_conflict_on_shared_draft_adds_single_recovery_row_without_orphaning_canonical(self) -> None:
-        result = self.run_node(r"""
-(async () => {
-  const entries = new Map();
-  localStorage.setItem = (key, value) => entries.set(key, value);
-  localStorage.getItem = key => entries.has(key) ? entries.get(key) : null;
-  localStorage.removeItem = key => entries.delete(key);
-  Object.defineProperty(localStorage, "length", { configurable: true, get() { return entries.size; } });
-  localStorage.key = index => Array.from(entries.keys())[index] || null;
-  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
-  app.interactive = true; app.workspaceKey = "workspace-a"; app.apiToken = "token";
-  app.scheduleDraftSave = () => {};
-  const target = {id:"note",ref:"@note",path:"cards/note.md",kind:"note",title:"Note",
-    content_hash:"a".repeat(64),updated:"2026-10-01",body:"Original"};
-  app.tasks = [target]; app.selected = target;
-  let step = 0;
-  global.fetch = async (_url, options) => {
-    step += 1;
-    const payload = JSON.parse(options.body);
-    if (step === 1) {
-      return { ok: true, json: async () => ({ saved_draft: { ...payload, revision: 1, content_hash: "1".repeat(64) } }) };
-    }
-    return { ok: false, status: 409, json: async () => ({ error: "Draft changed", conflict: true }) };
-  };
-  app.contentEditor.begin(app.contentContext());
-  app.contentEditor.text = "First edit";
-  app.contentEditor.persist(app.contentContext());
-  const canonical = app.contentEditor.draft;
-  await app.saveWorkspaceDraft(canonical);
-  app.contentEditor.text = "Second edit";
-  app.contentEditor.persist(app.contentContext());
-  await app.saveWorkspaceDraft(canonical);
-  const orphanedRows = app.drafts.filter(d => d._orphanedLocal);
-  console.log(JSON.stringify({
-    canonicalOrphaned: Boolean(canonical._orphanedLocal),
-    orphanedCount: orphanedRows.length,
-    editorPointsToRecovery: app.contentEditor.draft === orphanedRows[0],
-  }));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-""")
-        self.assertFalse(result["canonicalOrphaned"])
-        self.assertEqual(result["orphanedCount"], 1)
-        self.assertTrue(result["editorPointsToRecovery"])
-
 
 if __name__ == "__main__":
     unittest.main()

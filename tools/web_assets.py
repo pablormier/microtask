@@ -146,7 +146,7 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
     view_drafts = (templates_dir / "views" / "drafts.html").read_text(encoding="utf-8")
     drawer = (
         (templates_dir / "drawer.html").read_text(encoding="utf-8")
-        .replace("{timer_menu}", timer_menu.replace("{timer_task}", "selected").replace("{timer_blocked}", " || !!contentEditor.draft"))
+        .replace("{timer_menu}", timer_menu.replace("{timer_task}", "selected").replace("{timer_blocked}", " || !!contentEditor.open"))
         .replace("{detail_mention_menu}", _render_mention_menu(
             mention_menu,
             mention_id="mt-detail-mention",

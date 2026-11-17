@@ -2,22 +2,17 @@
       <section class="mt-drafts-view">
         <article class="mt-panel mt-surface">
           <h2>Drafts <span class="mt-panel-count" x-show="drafts.length" x-text="drafts.length"></span></h2>
-          <p class="mt-drafts-help">Incomplete writing is saved here until you create a card or apply an edit.</p>
+          <p class="mt-drafts-help">Incomplete new cards are saved here until you create them.</p>
           <div class="mt-view-controls" x-show="drafts.length > 0">
             <label class="mt-view-control">
               <span class="mt-sr-only">Search drafts</span>
               <input class="mt-field mt-field-compact" type="search" x-model="draftSearch" aria-label="Search drafts" placeholder="Search drafts">
             </label>
-            <div class="mt-segmented" role="group" aria-label="Draft mode">
-              <button class="mt-segment" type="button" :aria-pressed="draftModeFilter === 'all'" @click="draftModeFilter = 'all'">All</button>
-              <button class="mt-segment" type="button" :aria-pressed="draftModeFilter === 'new'" @click="draftModeFilter = 'new'">New</button>
-              <button class="mt-segment" type="button" :aria-pressed="draftModeFilter === 'edit'" @click="draftModeFilter = 'edit'">Edits</button>
-            </div>
           </div>
           <template x-if="visibleDrafts().length === 0">
             <div class="mt-drafts-empty">
-              <p class="mt-drafts-empty-title" x-text="drafts.length === 0 ? 'No drafts yet' : 'No drafts match this filter'"></p>
-              <p class="mt-empty" x-text="drafts.length === 0 ? 'Use + New in the toolbar or edit any card to start a draft.' : 'Clear the search or switch back to All.'"></p>
+              <p class="mt-drafts-empty-title" x-text="drafts.length === 0 ? 'No drafts yet' : 'No drafts match this search'"></p>
+              <p class="mt-empty" x-text="drafts.length === 0 ? 'Use + New in the toolbar to start a draft.' : 'Clear the search to see all drafts.'"></p>
             </div>
           </template>
           <div class="mt-draft-list" role="list" aria-label="Workspace drafts" x-show="visibleDrafts().length > 0">
@@ -28,16 +23,14 @@
                    @keydown.space.self.prevent="openWorkspaceDraft(draft)">
                 <div class="mt-draft-main">
                   <div class="mt-draft-heading">
-                    <span class="mt-ref" x-show="draftTargetRef(draft)" x-text="draftTargetRef(draft)"></span>
                     <span class="mt-draft-title" x-text="draftDisplayTitle(draft)"></span>
                   </div>
                   <span class="mt-draft-excerpt" x-show="draftExcerpt(draft)" x-text="draftExcerpt(draft)"></span>
                 </div>
                 <div class="mt-draft-meta">
-                  <span class="mt-badge mt-badge-neutral mt-badge-square" x-text="draft.kind + (draft.mode === 'new' ? ' · new' : ' · edit')"></span>
-                  <span class="mt-draft-saved" x-show="!draft._localRecovery" x-text="'Saved ' + draftSavedLabel(draft.updated)"></span>
-                  <span class="mt-draft-saved mt-draft-local-label" x-show="draft._localRecovery"
-                        x-text="draft._orphanedLocal ? 'Local copy · workspace draft changed or removed' : (draft._staleLocal ? 'Local copy · workspace revision changed' : 'Local recovery copy')"></span>
+                  <span class="mt-badge mt-badge-neutral mt-badge-square" x-text="draft.kind"></span>
+                  <span class="mt-draft-saved mt-draft-local-label" x-show="draft.state === 'conflict'">Conflict</span>
+                  <span class="mt-draft-saved" x-show="draft.state !== 'conflict'" x-text="'Saved ' + draftSavedLabel(draft.updated)"></span>
                   <button type="button" class="mt-button mt-button-compact mt-button-danger"
                           @click.stop="discardWorkspaceDraft(draft)"
                           :disabled="draftBusy"

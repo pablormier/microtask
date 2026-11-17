@@ -1,4 +1,4 @@
-// Draft store wiring, editor context adapters, and draft recovery orchestration.
+// Draft store wiring and editor context adapters.
 function createDraftCoordinator() {
   return {
 
@@ -8,17 +8,9 @@ function createDraftCoordinator() {
           initialDrafts: [],
           context: () => ({ workspaceKey: this.workspaceKey, apiToken: this.apiToken,
             available: true }),
-          findTarget: (ref, path) => this.tasks.find(item => ref ? item.ref === ref : item.path === path),
           captureFields: draft => this.captureDraftFields(draft),
           onStatus: status => { this.draftWorkspaceStatus = status; },
           onWarning: message => { this.captureComposer.recoveryWarning = message; },
-          onSaved: draft => {
-            if (draft === this.captureComposer.draft) this.captureComposer.persisted = true;
-          },
-          onRecovery: (draft, recoveryRecord) => {
-            if (this.contentEditor.draft === draft) this.contentEditor.draft = recoveryRecord;
-            if (this.captureComposer.draft === draft) this.captureComposer.draft = recoveryRecord;
-          },
         });
       }
       return this.draftStorage;
@@ -39,7 +31,6 @@ function createDraftCoordinator() {
           topic: this.filters.topic.length === 1 ? this.filters.topic[0] : "",
         },
         taskOptionsFromDraft: draft => this.taskOptionsFromDraft(draft),
-        metadataSnapshot: draft => this.draftMetadataSnapshot(draft),
         captureDraftFields: draft => this.captureDraftFields(draft),
         getDrafts: () => this.drafts,
         getCards: () => this.tasks,
@@ -47,12 +38,8 @@ function createDraftCoordinator() {
         setMode: mode => { this.mode = mode; },
         openWorkspaceDraft: draft => this.openWorkspaceDraft(draft),
         finishWorkspaceDraft: draft => this.finishWorkspaceDraft(draft),
+        saveConflictAsNewDraft: draft => this.saveConflictAsNewDraft(draft),
         clearStatus: () => { this.draftWorkspaceStatus = ""; this.captureComposer.message = ""; this.captureComposer.messageError = false; },
-        getSelected: () => this.selected,
-        saveCardProperties: (ref, expectedHash, patch) => this.apiPost("/api/card-metadata", {
-          ref, expected_hash: expectedHash, patch,
-        }),
-        actionMessage: () => this.actionMessage,
         nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => {
           const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
@@ -60,9 +47,7 @@ function createDraftCoordinator() {
         }),
         confirm: message => typeof window !== "undefined" && typeof window.confirm === "function"
           ? window.confirm(message) : true,
-        dismissLocalWorkspaceDraft: draft => this.dismissLocalWorkspaceDraft(draft),
         discardWorkspaceDraft: (draft, confirmed) => this.discardWorkspaceDraft(draft, confirmed),
-        markLocalDraftClosed: draft => this.markLocalDraftClosed(draft),
       };
     },
 
@@ -71,7 +56,7 @@ function createDraftCoordinator() {
         selected: this.selected,
         busy: this.busy,
         draftBusy: this.draftBusy,
-        contentOpen: Boolean(this.contentEditor.draft),
+        contentOpen: Boolean(this.contentEditor.open),
         defaults: this.taskDefaults,
         priorityPolicy: this.taskPriorityPolicy,
         typePolicy: this.taskTypePolicy,
@@ -84,81 +69,92 @@ function createDraftCoordinator() {
 
     contentContext() {
       return {
+        workspaceKey: this.workspaceKey,
         selected: this.selected,
         busy: this.busy,
         draftBusy: this.draftBusy,
-        store: this.getDraftStore(),
-        getDrafts: () => this.drafts,
+        getSelected: () => this.selected,
         getCards: () => this.tasks,
-        makeId: () => this.captureComposer.makeId(),
-        scheduleDraftSave: draft => this.scheduleDraftSave(draft),
-        needsReconciliation: draft => this.draftNeedsReconciliation(draft),
-        finishWorkspaceDraft: draft => this.finishContentDraft(draft),
-        discardWorkspaceDraft: (draft, confirmed) => this.discardWorkspaceDraft(draft, confirmed),
+        saveCardBody: (ref, expectedHash, body) => this.saveCardBody(ref, expectedHash, body),
+        // Property saves read a fresh context: the body save has just replaced the selected card.
+        hasPropertyChanges: () => this.propertyEditor.changed(),
+        canSaveProperties: () => this.propertyEditor.canApply(this.propertyContext(), { allowContentOpen: true }),
+        saveProperties: () => this.propertyEditor.apply(this.propertyContext(), { allowContentOpen: true }),
+        propertyError: () => this.actionMessage,
+        reloadSelected: async () => {
+          await this.loadSelectedDetails(true);
+          return this.selected;
+        },
+        confirm: message => typeof window !== "undefined" && typeof window.confirm === "function"
+          ? window.confirm(message) : true,
         clearStatus: () => { this.draftWorkspaceStatus = ""; this.captureComposer.message = ""; this.captureComposer.messageError = false; },
         nextTick: callback => this.$nextTick(callback),
         focusInput: () => this.$nextTick(() => this.$refs.detailContentInput?.focus()),
       };
     },
 
-    openSelectedInZen() {
-      if (!this.selected || this.busy || this.draftBusy || this.detailLoading || this.detailError || typeof this.selected.body !== "string") return;
-      const card = this.selected;
-      const currentText = this.contentEditor.draft ? this.contentEditor.text : undefined;
-      if (this.contentEditor.draft) {
-        if (this.contentEditor.close(this.contentContext()) === false) return;
+    async saveCardBody(ref, expectedHash, body) {
+      this.busy = true;
+      this.actionMessage = "";
+      this.actionError = false;
+      try {
+        const query = this.collectionQuery();
+        const response = await fetch("/api/card-edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Microtask-Token": this.apiToken },
+          body: JSON.stringify({ ref, expected_hash: expectedHash, body, query, include: this.includedCardIds() }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          return {
+            ok: false,
+            conflict: Boolean(payload.conflict || response.status === 409),
+            error: payload.error || "Could not save card content",
+          };
+        }
+        await this.saveBodyKeepingProperties(async () => {
+          await this.applyPayload(payload, false, query);
+          return payload;
+        });
+        if (!Object.prototype.hasOwnProperty.call(payload, "sync_warning")) {
+          this.syncWarning = "";
+        }
+        this.actionMessage = payload.message || "Content saved";
+        this.actionError = false;
+        return { ok: true, payload };
+      } catch (error) {
+        return { ok: false, conflict: false, error: (error && error.message) || "Could not save card content" };
+      } finally {
+        this.busy = false;
       }
-      this.captureComposer.beginEdit(this.captureContext(), card, {
-        zen: true,
-        currentText,
-      });
     },
 
-    noteDraftStorageKey(workspaceKey, draftId) {
-      return this.getDraftStore().storageKey(workspaceKey, draftId);
+    openSelectedInZen() {
+      if (!this.selected || this.busy || this.draftBusy || this.detailLoading || this.detailError || typeof this.selected.body !== "string") return;
+      if (this.contentEditor.open) this.contentEditor.toggleZen(this.contentContext(), true);
+      else this.contentEditor.beginZen(this.contentContext());
     },
 
     async loadWorkspaceDrafts() {
       try {
         await this.getDraftStore().load();
-        await this.importLocalWorkspaceDrafts();
-        this.restoreLocalWorkspaceDrafts();
       } catch (_) {
         this.draftWorkspaceStatus = "Error";
       }
     },
 
-    importLocalWorkspaceDrafts() {
-      return this.getDraftStore().importLocal();
-    },
-
-    restoreLocalWorkspaceDrafts() {
-      return this.getDraftStore().restoreLocal();
-    },
-
     visibleDrafts() {
       const query = this.draftSearch.trim().toLowerCase();
-      const modeFilter = this.draftModeFilter || "all";
       return this.drafts.filter(draft => {
-        if (modeFilter !== "all" && draft.mode !== modeFilter) return false;
         if (!query) return true;
-        const target = this.tasks.find(item => item.path === draft.target);
-        return [draft.title, draft.kind, draft.mode, draft.body, target && target.title, target && target.ref, draft.target]
+        return [draft.title, draft.kind, draft.body]
           .some(value => String(value || "").toLowerCase().includes(query));
       }).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
-    },
-
-    draftTargetRef(draft) {
-      if (!draft || !draft.target) return "";
-      const target = this.tasks.find(item => item.path === draft.target);
-      return target ? (target.ref || "") : "";
     },
 
     draftDisplayTitle(draft) {
       if (!draft) return "Untitled draft";
       if (String(draft.title || "").trim()) return String(draft.title).trim();
-      const target = this.tasks.find(item => item.path === draft.target);
-      if (target) return target.title;
       const firstLine = String(draft.body || "").split(/\r?\n/).find(line => line.trim());
       return firstLine ? firstLine.trim() : "Untitled draft";
     },
@@ -205,68 +201,49 @@ function createDraftCoordinator() {
       return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     },
 
-    draftNeedsReconciliation(draft) {
-      const hash = String(draft && draft.base_hash || "");
-      return Boolean(draft && draft.mode === "edit" && hash === "0".repeat(64));
-    },
-
     async openWorkspaceDraft(draft) {
       if (!draft) return;
-      if (this.captureComposer.saving || !this.captureComposer.preserveBeforeReplace(this.captureContext())) return;
-      if (draft.mode === "edit" && draft.origin === "card-body") {
-        const target = this.tasks.find(item => item.path === draft.target);
-        if (target) {
-          await this.select(target);
-          if (this.selectedId === target.id && this.detailLoading) await this.loadSelectedDetails();
-          if (this.selectedId === target.id && !this.detailLoading && !this.detailError) {
-            this.contentEditor.begin(this.contentContext(), draft);
-          }
-          return;
-        }
-      }
-      this.draftWorkspaceStatus = "Saved in workspace";
-      const target = this.tasks.find(item => item.path === draft.target);
-      const body = String(draft.body || "");
-      const taskOptions = this.taskOptionsFromDraft(draft);
-      const editorFields = {
-        version: 1, workspaceKey: this.workspaceKey, mode: draft.mode,
-        kind: draft.kind || "note",
-        taskOptions,
-        captureId: String(draft.capture_id || ""), createdAt: String(draft.created || ""),
-        title: String(draft.title || ""), text: body, body,
-        instructions: String(draft.instructions || ""), ref: target ? target.ref : "",
-        originalText: body, draftId: draft.sourceId || draft.id, revision: Number(draft.revision || 0),
-        content_hash: draft.content_hash || "", _serverSaved: Boolean(draft._serverSaved || Number(draft.revision || 0) > 0),
-        _orphanedLocal: Boolean(draft._orphanedLocal), sourceId: draft.sourceId || draft.id,
-        ...(draft._recoveryExtra ? { storageId: draft.storageId, _recoveryExtra: true, recoveryId: draft.id } : {}),
-        base_hash: draft.base_hash || "",
-        base_updated: draft.base_updated || "",
-        _savedBody: Object.prototype.hasOwnProperty.call(draft, "_savedBody") ? draft._savedBody : body,
-        _savedTitle: Object.prototype.hasOwnProperty.call(draft, "_savedTitle") ? draft._savedTitle : String(draft.title || ""),
-        _savedKind: Object.prototype.hasOwnProperty.call(draft, "_savedKind") ? draft._savedKind : (draft.kind || "note"),
-        _savedMetadata: Object.prototype.hasOwnProperty.call(draft, "_savedMetadata")
-          ? draft._savedMetadata
-          : this.draftMetadataSnapshot({ taskOptions }),
-      };
-      if (draft._orphanedLocal) {
-        this.captureComposer.draft = { ...editorFields };
-      } else {
-        Object.assign(draft, editorFields);
-        this.captureComposer.draft = draft;
-      }
+      if (this.captureComposer.saving) return;
+      if (this.captureComposer.draft !== draft) this.captureComposer.persist(this.captureContext());
+      this.prepareDraftForEditing(draft);
+      this.captureComposer.draft = draft;
+      this.captureComposer.recoveryWarning = draft.state === "conflict"
+        ? "This draft changed since you opened it. Copy your text or save as a new draft."
+        : "";
+      this.draftWorkspaceStatus = draft.state === "conflict" ? "Error" : "Saved in workspace";
       this.captureComposer.zen = false;
       this.captureComposer.zenView = "write";
       this.captureComposer.zenMetaOpen = false;
       this.captureComposer.previewHtml = "";
-      if (this.captureComposer.surface) this.captureComposer.surface.setValue(body);
+      if (this.captureComposer.surface) this.captureComposer.surface.setValue(draft.body);
       this.captureComposer.open = true;
       this.$nextTick(() => {
         const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
         if (input) input.focus();
       });
-      if (this.draftChangedFromSaved(this.captureComposer.draft)) {
-        this.scheduleDraftSave(this.captureComposer.draft, 0);
+    },
+
+    // A draft loaded from the workspace carries metadata as top-level fields; the composer
+    // edits it in taskOptions. Fill in what the composer needs, keeping any existing edits.
+    prepareDraftForEditing(draft) {
+      // A draft straight from the workspace has no edits yet, so its saved snapshot is
+      // taken after normalizing; otherwise opening it would look like an unsaved change.
+      const fromWorkspace = !draft.taskOptions && draft.state !== "dirty" && draft.state !== "conflict";
+      Object.assign(draft, {
+        workspaceKey: this.workspaceKey,
+        kind: draft.kind || "note",
+        state: draft.state || "clean",
+        taskOptions: this.taskOptionsFromDraft(draft),
+        created: String(draft.created || ""),
+        title: String(draft.title || ""),
+        body: String(draft.body || ""),
+        instructions: String(draft.instructions || ""),
+        content_hash: draft.content_hash || "",
+      });
+      if (fromWorkspace || !Object.prototype.hasOwnProperty.call(draft, "_saved")) {
+        draft._saved = this.getDraftStore().snapshot(draft);
       }
+      return draft;
     },
 
     taskOptionsFromDraft(draft) {
@@ -290,100 +267,12 @@ function createDraftCoordinator() {
       });
     },
 
-    draftMetadataSnapshot(draft) {
-      return this.getDraftStore().metadataSnapshot(draft);
-    },
-
-    draftChangedFromSaved(draft) {
-      return this.getDraftStore().hasChanges(draft);
-    },
-
     captureDraftFields(draft) {
-      if (!draft || draft.mode !== "new") return {};
+      if (!draft) return {};
       return {
         ...metadataCoreObject(this.taskOptionsFromDraft(draft)),
         instructions: String(draft.instructions || ""),
       };
-    },
-
-    saveDraftLocally(draft) {
-      return this.getDraftStore().saveLocal(draft);
-    },
-
-    markLocalDraftClosed(draft) {
-      return this.getDraftStore().markClosed(draft);
-    },
-
-    dismissLocalWorkspaceDraft(draft) {
-      if (!draft || !draft._orphanedLocal) return;
-      const recoveryId = this.getDraftStore().dismiss(draft);
-      const copyKey = item => item.storageId || item.sourceId || item.id || item.draftId;
-      const sameCopy = item => copyKey(item) === copyKey(draft);
-      if (this.captureComposer.draft && (this.captureComposer.draft.draftId === recoveryId || this.captureComposer.draft.id === recoveryId) && this.captureComposer.draft._orphanedLocal && sameCopy(this.captureComposer.draft)) {
-        this.captureComposer.destroyZenWorkspace();
-        this.captureComposer.draft = null;
-        this.captureComposer._editOriginal = null;
-        this.captureComposer.persisted = false;
-        this.captureComposer.zen = false;
-        this.captureComposer.previewHtml = "";
-        this.captureComposer.message = "";
-        this.captureComposer.messageError = false;
-        this.captureComposer.recoveryWarning = "";
-        this.captureComposer.open = false;
-      }
-      if (this.contentEditor.draft === draft || (this.contentEditor.draft && (this.contentEditor.draft.id === recoveryId || this.contentEditor.draft.sourceId === recoveryId) && this.contentEditor.draft._orphanedLocal && sameCopy(this.contentEditor.draft))) {
-        this.contentEditor.destroyZenWorkspace();
-        this.contentEditor.draft = null;
-        this.contentEditor.text = "";
-        this.contentEditor.original = "";
-        this.contentEditor.zen = false;
-        this.contentEditor.previewHtml = "";
-        this.contentEditor.localSaved = true;
-        this.contentEditor.error = "";
-        this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
-      }
-      this.draftWorkspaceStatus = "";
-      if (typeof this.notify === "function") this.notify("Local recovery copy dismissed");
-    },
-
-    async recoverLocalWorkspaceDraft(draft) {
-      if (!draft || !draft._orphanedLocal || this.draftBusy) return null;
-      const sourceId = draft.sourceId || draft.storageId || draft.id;
-      const newId = this.captureComposer.makeId();
-      this.draftBusy = true;
-      try {
-        const saved = await this.getDraftStore().recover(draft, newId, this.captureComposer.localIsoSeconds(new Date()));
-        if (this.captureComposer.draft && this.captureComposer.draft.draftId === sourceId &&
-            (this.captureComposer.draft.storageId || sourceId) === (draft.storageId || sourceId)) {
-          Object.assign(this.captureComposer.draft, {
-            id: newId, draftId: newId, sourceId: newId, storageId: newId,
-            ...(draft.mode === "new" ? { captureId: saved.capture_id, capture_id: saved.capture_id } : {}),
-            revision: saved.revision,
-            content_hash: saved.content_hash, updated: saved.updated,
-            _serverSaved: true, _orphanedLocal: false, _localRecovery: false, _staleLocal: false,
-            _savedBody: this.captureComposer.draft.text, _savedTitle: this.captureComposer.draft.title || "",
-            _savedKind: this.captureComposer.draft.kind || "note",
-            _savedMetadata: this.draftMetadataSnapshot(this.captureComposer.draft),
-          });
-          this.saveDraftLocally({ ...this.captureComposer.draft, id: newId, body: this.captureComposer.draft.text });
-        }
-        if (this.contentEditor.draft === draft) {
-          this.contentEditor.draft = { ...saved,
-            _savedBody: saved.body, _savedTitle: saved.title || "",
-            _savedKind: saved.kind, _savedMetadata: this.draftMetadataSnapshot(saved) };
-          this.contentEditor.error = "";
-          this.saveDraftLocally(this.contentEditor.draft);
-        }
-        this.draftWorkspaceStatus = "Recovered as a separate workspace draft";
-        this.captureComposer.recoveryWarning = "The recovered edit keeps its original target baseline and may need reconciliation before applying.";
-        return saved;
-      } catch (error) {
-        this.draftWorkspaceStatus = "Error";
-        this.captureComposer.recoveryWarning = error.message || "Could not recover this local copy.";
-        return null;
-      } finally {
-        this.draftBusy = false;
-      }
     },
 
     scheduleDraftSave(draft, delay = 450) {
@@ -398,34 +287,50 @@ function createDraftCoordinator() {
       return this.getDraftStore().flush(draft);
     },
 
+    async saveConflictAsNewDraft(draft) {
+      if (!draft || this.draftBusy) return null;
+      const newId = this.captureComposer.makeId();
+      const created = this.captureComposer.localIsoSeconds(new Date());
+      this.draftBusy = true;
+      try {
+        const saved = await this.getDraftStore().saveAsNew(draft, newId, created);
+        this.prepareDraftForEditing(saved);
+        if (this.captureComposer.draft === draft) {
+          this.captureComposer.draft = saved;
+        }
+        this.captureComposer.recoveryWarning = "";
+        this.captureComposer.message = "Saved as a new draft";
+        this.captureComposer.messageError = false;
+        this.draftWorkspaceStatus = "Saved in workspace";
+        return saved;
+      } catch (error) {
+        this.draftWorkspaceStatus = "Error";
+        this.captureComposer.recoveryWarning = (error && error.message) || "Could not save as a new draft.";
+        return null;
+      } finally {
+        this.draftBusy = false;
+      }
+    },
+
     async finishWorkspaceDraft(draft) {
-      if (!draft || draft._orphanedLocal || this.draftBusy) return null;
+      if (!draft || draft.state === "conflict" || this.draftBusy) return null;
       this.draftBusy = true;
       try {
         const result = await this.getDraftStore().finish(draft);
         if (!result) return null;
         await this.applyPayload(result);
-        if (draft === this.contentEditor.draft) {
-          this.contentEditor.draft = null;
-          this.contentEditor.text = "";
-          this.$nextTick(() => ((this.$refs && this.$refs.contentEditButton) || this.$refs.detailDialog?.querySelector('.mt-content-edit'))?.focus());
-        } else if ((draft === this.captureComposer.draft || (this.captureComposer.draft && this.captureComposer.draft.draftId === draft.id)) && draft.origin !== "card-body") {
-          const wasEdit = draft.mode === "edit";
+        if (this.captureComposer.draft === draft) {
           this.captureComposer.draft = null;
-          this.captureComposer.persisted = false;
           this.captureComposer.close(this.captureContext());
-          if (wasEdit) this.mode = draft.kind === "task" ? "tasks" : "notes";
         }
         this.draftWorkspaceStatus = "";
         this.captureComposer.recoveryWarning = "";
-        this.captureComposer.message = draft.origin === "card-body" ? "Content saved" : draft.mode === "new"
-          ? (result.saved_ref ? "Created " + result.saved_ref : "Capture created")
-          : (result.saved_ref ? "Draft applied to " + result.saved_ref : "Draft applied");
+        this.captureComposer.message = result.saved_ref ? "Created " + result.saved_ref : "Capture created";
         this.captureComposer.messageError = false;
         return result;
       } catch (error) {
         this.draftWorkspaceStatus = "Error";
-        this.captureComposer.message = error.message || "Could not apply draft";
+        this.captureComposer.message = (error && error.message) || "Could not apply draft";
         this.captureComposer.messageError = true;
         return null;
       } finally {
@@ -446,27 +351,17 @@ function createDraftCoordinator() {
       return result;
     },
 
-    finishContentDraft(draft) {
-      return this.saveBodyKeepingProperties(() => this.finishWorkspaceDraft(draft));
-    },
-
     async discardWorkspaceDraft(draft, confirmed = false) {
-      if (draft && draft._orphanedLocal) {
-        this.dismissLocalWorkspaceDraft(draft);
-        return;
-      }
       if (!draft || this.draftBusy) return;
       if (typeof window !== "undefined" && typeof window.confirm === "function" &&
           !confirmed && !window.confirm("Discard this draft? This removes it from the workspace.")) return;
       this.draftBusy = true;
       try {
         if (!await this.getDraftStore().discard(draft)) return;
-        const discardedId = draft.id || draft.draftId;
-        if (this.captureComposer.draft && (this.captureComposer.draft.id === discardedId || this.captureComposer.draft.draftId === discardedId)) {
+        const discardedId = draft.id;
+        if (this.captureComposer.draft && this.captureComposer.draft.id === discardedId) {
           this.captureComposer.destroyZenWorkspace();
           this.captureComposer.draft = null;
-          this.captureComposer._editOriginal = null;
-          this.captureComposer.persisted = false;
           this.captureComposer.zen = false;
           this.captureComposer.previewHtml = "";
           this.captureComposer.message = "";
@@ -474,21 +369,11 @@ function createDraftCoordinator() {
           this.captureComposer.recoveryWarning = "";
           this.captureComposer.open = false;
         }
-        if (this.contentEditor.draft && (this.contentEditor.draft.id === discardedId || this.contentEditor.draft.draftId === discardedId)) {
-          this.contentEditor.destroyZenWorkspace();
-          this.contentEditor.draft = null;
-          this.contentEditor.text = "";
-          this.contentEditor.original = "";
-          this.contentEditor.zen = false;
-          this.contentEditor.previewHtml = "";
-          this.contentEditor.localSaved = true;
-          this.contentEditor.error = "";
-        }
         this.draftWorkspaceStatus = "";
         if (typeof this.notify === "function") this.notify("Draft discarded");
       } catch (error) {
         this.draftWorkspaceStatus = "Error";
-        const message = error.message || "Could not discard draft";
+        const message = (error && error.message) || "Could not discard draft";
         this.captureComposer.message = message;
         this.captureComposer.messageError = true;
         if (typeof this.notify === "function") this.notify(message, true);

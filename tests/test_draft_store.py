@@ -11,20 +11,11 @@ SOURCES = [
 ]
 HARNESS = r"""
 const assert = require('assert/strict');
-const entries = new Map();
-global.localStorage = {
-  get length() { return entries.size; },
-  key: index => Array.from(entries.keys())[index] || null,
-  getItem: key => entries.get(key) || null,
-  setItem: (key, value) => entries.set(key, value),
-  removeItem: key => entries.delete(key),
-};
 const workspace = {workspaceKey:'workspace-a',apiToken:'token',available:true};
 const notifications = [];
 function makeStore(options = {}) {
   return createDraftStore({
     context: () => workspace,
-    findTarget: () => ({ref:'@target'}),
     captureFields: () => ({}),
     onStatus: status => notifications.push(status),
     onWarning: warning => notifications.push(warning),
@@ -32,13 +23,17 @@ function makeStore(options = {}) {
   });
 }
 function makeDraft(id = 'draft-a') {
-  return {id,kind:'note',mode:'edit',target:'cards/a.md',ref:'@target',body:'new text',title:'',
-    revision:1,content_hash:'a'.repeat(64),base_hash:'b'.repeat(64),base_updated:'2026-10-01',
-    origin:'card-body',_savedBody:'old text',_savedTitle:''};
+  return {
+    id, kind:'note', state:'dirty', body:'new text', title:'',
+    capture_id:'22222222-2222-4222-8222-222222222222', created:'2026-10-01T10:00:00',
+    content_hash:'a'.repeat(64), _saved:'before this test',
+  };
 }
+let hashSeq = 1;
 function savedResponse(payload) {
-  return {ok:true,json:async () => ({saved_draft:{...payload,revision:payload.expected_revision+1,
-    content_hash:String(payload.expected_revision+1).repeat(64)}})};
+  hashSeq += 1;
+  return {ok:true,json:async () => ({saved_draft:{...payload,
+    content_hash:String(hashSeq % 10).repeat(64)}})};
 }
 """
 
@@ -62,19 +57,17 @@ global.fetch = (path, options) => {
   if (path === '/api/draft-finish') return Promise.resolve({ok:true,json:async()=>({saved_ref:'@target'})});
   return Promise.resolve(savedResponse(payload));
 };
-store.saveLocal(draft);
 const first = store.save(draft);
-draft.body = 'latest text'; store.saveLocal(draft);
+assert.equal(draft.state, 'saving');
+draft.body = 'latest text';
 const finished = store.finish(draft);
 release(); await first; const result = await finished;
 assert.equal(result.saved_ref,'@target');
+assert.equal(draft.state, 'closed');
 assert.deepEqual(calls.map(call=>call.path),['/api/draft-save','/api/draft-save','/api/draft-finish']);
 assert.equal(calls[1].payload.body,'latest text');
 assert.equal(calls[1].payload.expected_hash,'2'.repeat(64));
-assert.equal(calls[2].payload.expected_revision,3);
 assert.equal(calls[2].payload.expected_hash,'3'.repeat(64));
-assert.equal(entries.has(store.storageKey(null,draft.id)),false);
-assert.equal(store.wasDismissed(draft.id),true);
 assert.equal(store.drafts.length,0);
 """)
 
@@ -94,262 +87,109 @@ assert.equal(second.drafts[0].body,'other store text');
 assert.equal(initial.length,0);
 """)
 
-    def test_network_failure_preserves_local_text_and_blocks_promotion(self) -> None:
+    def test_network_failure_keeps_dirty_state_and_blocks_finish(self) -> None:
         self.run_store(r"""
 const store=makeStore(), draft=makeDraft(); const paths=[];
-store.saveLocal(draft);
 global.fetch=async path=>{paths.push(path);throw new Error('offline');};
 assert.equal(await store.save(draft),false);
+assert.equal(draft.state,'dirty');
 assert.equal(await store.finish(draft),null);
-assert.equal(draft.revision,1);
-assert.equal(draft._orphanedLocal,undefined);
-assert.equal(JSON.parse(entries.get(store.storageKey(null,draft.id))).body,'new text');
+assert.equal(draft.content_hash,'a'.repeat(64));
 assert.equal(paths.includes('/api/draft-finish'),false);
-assert.ok(notifications.some(value=>value.includes('local recovery copy')));
+assert.ok(notifications.some(value=>value.includes('Workspace save failed')));
 """)
 
-    def test_conflicting_draft_is_recovered_without_overwriting_canonical(self) -> None:
+    def test_conflict_sets_conflict_state_and_save_as_new_creates_fresh_draft(self) -> None:
         self.run_store(r"""
 for(const status of [409,404]) {
   const draft=makeDraft('draft-'+status);
-  const canonical={...draft,body:'other device text',revision:2,content_hash:'c'.repeat(64)};
-  const store=makeStore({initialDrafts:[canonical]});
+  const store=makeStore({initialDrafts:[draft]});
   global.fetch=async()=>({ok:false,status,json:async()=>({error:'Draft changed elsewhere'})});
   assert.equal(await store.save(draft),false);
-  assert.equal(draft._orphanedLocal,true);
-  assert.equal(store.drafts.find(row=>row.id===draft.id).body,'other device text');
-  assert.equal(store.drafts.find(row=>row._orphanedLocal).body,'new text');
+  assert.equal(draft.state,'conflict');
+  assert.equal(store.drafts.length,1);
+  assert.equal(store.drafts[0],draft);
   assert.equal(await store.finish(draft),null);
+  assert.ok(notifications.some(value=>value.includes('This draft changed since you opened it')));
   const posted=[];
   global.fetch=async(_path,options)=>{const payload=JSON.parse(options.body);posted.push(payload);return savedResponse(payload);};
-  await store.recover(draft,'recovered-'+status,'2026-10-16T12:00:00');
-  assert.equal(posted[0].base_hash,'b'.repeat(64));
-  assert.equal(posted[0].expected_revision,0);
-  assert.equal(store.drafts.find(row=>row.id===draft.id).body,'other device text');
-  assert.equal(store.drafts.some(row=>row._orphanedLocal),false);
-  assert.equal(store.wasDismissed(draft.id),true);
+  const saved = await store.saveAsNew(draft,'new-'+status,'2026-10-16T12:00:00');
+  assert.equal(posted[0].expected_hash,undefined);
+  assert.equal(posted[0].id,'new-'+status);
+  assert.equal(posted[0].capture_id,'new-'+status);
+  assert.equal(saved.state,'clean');
+  assert.equal(draft.state,'closed');
+  assert.equal(store.drafts.length,1);
+  assert.equal(store.drafts[0].id,'new-'+status);
 }
-""")
-
-    def test_canonical_conflict_resets_list_entry_to_server_copy(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft('draft-c'); draft.body='my local text';
-const server={...draft,body:'server text',revision:2,content_hash:'c'.repeat(64),_savedBody:undefined};
-const recovered=[];
-const store=makeStore({initialDrafts:[draft],onRecovery:(d,r)=>recovered.push([d,r])});
-global.fetch=async path=>{
-  if(path==='/api/drafts') return {ok:true,json:async()=>({drafts:[server]})};
-  return {ok:false,status:409,json:async()=>({error:'Draft changed elsewhere'})};
-};
-assert.equal(await store.save(draft),false);
-const canonical=store.drafts.filter(row=>row.id===draft.id);
-assert.equal(canonical.length,1);
-assert.notEqual(canonical[0],draft);
-assert.equal(canonical[0].body,'server text');
-assert.equal(canonical[0].revision,2);
-const recovery=store.drafts.find(row=>row.id===draft.id+':local-recovery');
-assert.equal(recovery.body,'my local text');
-assert.equal(recovered[0][0],draft); assert.equal(recovered[0][1],recovery);
-assert.equal(JSON.parse(entries.get(store.storageKey(null,draft.id))).body,'my local text');
-""")
-
-    def test_conflict_from_a_new_lineage_adds_a_recovery_copy(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft('draft-l'); draft.body='T1';
-const server={...draft,body:'server',revision:2,content_hash:'c'.repeat(64)};
-const store=makeStore({initialDrafts:[draft]});
-global.fetch=async path=>path==='/api/drafts'
-  ?{ok:true,json:async()=>({drafts:[{...server}]})}
-  :{ok:false,status:409,json:async()=>({error:'changed'})};
-await store.save(draft);
-const reopened=store.drafts.find(row=>row.id==='draft-l');
-reopened.body='T2';
-await store.save(reopened);
-const recoveries=store.drafts.filter(row=>row._localRecovery);
-assert.deepEqual(recoveries.map(row=>row.body).sort(),['T1','T2']);
-const first=recoveries.find(row=>row.body==='T1'), second=recoveries.find(row=>row.body==='T2');
-assert.equal(first.id,'draft-l:local-recovery');
-assert.equal(second.id,'draft-l:local-recovery:2');
-assert.equal(second.sourceId,'draft-l');
-assert.equal(JSON.parse(entries.get(store.storageKey(null,'draft-l'))).body,'T1');
-assert.equal(JSON.parse(entries.get(store.storageKey(null,'draft-l:local-recovery:2'))).body,'T2');
-// Reload: both copies come back, and the extra key is not read as a server draft.
-const reloaded=makeStore({initialDrafts:[{...server}]});
-await reloaded.importLocal(); reloaded.restoreLocal();
-assert.deepEqual(reloaded.drafts.filter(row=>row._localRecovery).map(row=>row.body).sort(),['T1','T2']);
-assert.equal(reloaded.drafts.filter(row=>!row._localRecovery).length,1);
-// Dismissing one copy leaves the other.
-reloaded.dismiss(reloaded.drafts.find(row=>row.body==='T2'));
-assert.deepEqual(reloaded.drafts.filter(row=>row._localRecovery).map(row=>row.body),['T1']);
-assert.equal(entries.has(reloaded.storageKey(null,'draft-l:local-recovery:2')),false);
-assert.equal(JSON.parse(entries.get(reloaded.storageKey(null,'draft-l'))).body,'T1');
-const again=makeStore({initialDrafts:[{...server}]});
-again.restoreLocal();
-assert.deepEqual(again.drafts.filter(row=>row._localRecovery).map(row=>row.body),['T1']);
-""")
-
-    def test_same_lineage_conflict_updates_recovery_in_place(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft('draft-i'); draft.body='first';
-const store=makeStore({initialDrafts:[{...draft,body:'server',revision:2}]});
-global.fetch=async()=>({ok:false,status:409,json:async()=>({error:'changed'})});
-await store.save(draft);
-draft.body='first and more';
-await store.markForRecovery(draft,undefined,{conflict:true});
-const recoveries=store.drafts.filter(row=>row._localRecovery);
-assert.equal(recoveries.length,1);
-assert.equal(recoveries[0].body,'first and more');
-assert.equal(JSON.parse(entries.get(store.storageKey(null,draft.id))).body,'first and more');
-""")
-
-    def test_missing_draft_leaves_no_ghost_row_but_keeps_recovery(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft('draft-m'); draft.body='kept text';
-const store=makeStore({initialDrafts:[draft]});
-const paths=[];
-global.fetch=async path=>{paths.push(path);return {ok:false,status:404,json:async()=>({error:'Draft not found'})};};
-assert.equal(await store.save(draft),false);
-assert.equal(store.drafts.some(row=>row.id===draft.id),false);
-assert.equal(store.drafts.find(row=>row._localRecovery).body,'kept text');
-assert.equal(paths.includes('/api/drafts'),false);
-""")
-
-    def test_target_conflict_keeps_workspace_draft_editable(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft(); draft._savedBody=draft.body;
-const store=makeStore({initialDrafts:[draft]});
-global.fetch=async()=>({ok:false,status:409,json:async()=>({error:'target changed since the draft was created'})});
-await assert.rejects(store.finish(draft),error=>error.conflict&&error.targetConflict);
-assert.equal(draft._orphanedLocal,undefined);
-assert.equal(store.drafts.length,1);
-assert.equal(store.wasDismissed(draft.id),false);
-""")
-
-    def test_failed_draft_does_not_block_another_saved_draft(self) -> None:
-        self.run_store(r"""
-const store=makeStore(), failing=makeDraft('failing'), ready=makeDraft('ready');
-ready._savedBody=ready.body;
-global.fetch=async()=>{throw new Error('offline');};
-assert.equal(await store.save(failing),false);
-global.fetch=async(path,options)=>{
-  assert.equal(path,'/api/draft-finish');
-  assert.equal(JSON.parse(options.body).id,'ready');
-  return {ok:true,json:async()=>({saved_ref:'@ready'})};
-};
-assert.equal((await store.finish(ready)).saved_ref,'@ready');
-""")
-
-    def test_reload_restores_divergent_text_and_closed_ids_stay_closed(self) -> None:
-        self.run_store(r"""
-const draft=makeDraft(), store=makeStore(); store.saveLocal(draft);
-const canonical={...draft,body:'other text',revision:2,content_hash:'c'.repeat(64)};
-const reloaded=makeStore({initialDrafts:[canonical]});
-reloaded.restoreLocal();
-const recovery=reloaded.drafts.find(row=>row._orphanedLocal);
-assert.equal(recovery.body,'new text');
-reloaded.dismiss(recovery);
-store.saveLocal(draft); // stale tab writes after dismissal
-const next=makeStore({initialDrafts:[canonical]}); next.restoreLocal();
-assert.equal(next.drafts.length,1);
-assert.equal(next.drafts[0].body,'other text');
-assert.equal(entries.has(next.storageKey(null,draft.id)),false);
-""")
-
-    def test_matching_edit_recovery_ignores_empty_server_metadata_defaults(self) -> None:
-        self.run_store(r"""
-const local=makeDraft(); local._savedBody=local.body;
-const store=makeStore(); store.saveLocal(local);
-const canonical={...local,status:null,priority:null,type:null,project:null,topic:null,tags:[],due:null,due_kind:null};
-const reloaded=makeStore({initialDrafts:[canonical]}); reloaded.restoreLocal();
-assert.equal(reloaded.drafts.length,1);
-assert.equal(reloaded.drafts[0].id,local.id);
-local.body='Different local text'; store.saveLocal(local);
-const divergent=makeStore({initialDrafts:[canonical]}); divergent.restoreLocal();
-assert.equal(divergent.drafts.length,2);
-assert.equal(divergent.drafts[1]._orphanedLocal,true);
-assert.equal(divergent.drafts[1].body,'Different local text');
-""")
-
-    def test_legacy_browser_drafts_are_not_imported_after_cutover(self) -> None:
-        self.run_store(r"""
-const oldKey='mt-composer-draft-v1:workspace-a';
-entries.set(oldKey,JSON.stringify({version:1,workspaceKey:'workspace-a',mode:'edit',ref:'@target',
-  text:'legacy whole-card text',expectedHash:'d'.repeat(64)}));
-const store=makeStore(); store.restoreLocal();
-assert.equal(store.drafts.length,0);
-assert.equal(entries.has(oldKey),true);
 """)
 
     def test_unavailable_or_other_workspace_drafts_are_not_sent(self) -> None:
         self.run_store(r"""
-const store=makeStore(), draft=makeDraft();
-global.fetch=async()=>{throw new Error('must not send');};
+const calls=[];
+global.fetch=async path=>{calls.push(path);return savedResponse({});};
+const store=makeStore();
+const other=makeDraft('other-ws'); other.workspaceKey='workspace-b';
+assert.equal(await store.save(other),false);
 workspace.available=false;
-assert.equal(await store.save(draft),false);
-workspace.available=true; draft.workspaceKey='workspace-b';
-assert.equal(await store.save(draft),false);
-store.saveLocal(draft);
-assert.equal(JSON.parse(entries.get(store.storageKey('workspace-b',draft.id))).body,'new text');
+assert.equal(await store.save(makeDraft('offline-ws')),false);
+assert.equal(calls.length,0);
 """)
 
-    def test_queued_copy_receives_updated_revision_and_awaits_its_own_save(self) -> None:
+    def test_save_during_inflight_save_resends_latest_text_and_waits_for_it(self) -> None:
         self.run_store(r"""
-const store=makeStore();
-const firstCopy=makeDraft('draft-q');
-firstCopy.revision=0;
-delete firstCopy.content_hash;
-firstCopy._savedBody='old text';
-const secondCopy={...firstCopy,body:'second edit'};
-const calls=[];
-let releaseFirst, releaseSecond;
-global.fetch=(path,options)=>{
-  const payload=JSON.parse(options.body);
-  calls.push(payload);
-  if (calls.length===1) return new Promise(resolve=>{releaseFirst=()=>resolve(savedResponse(payload));});
-  return new Promise(resolve=>{releaseSecond=()=>resolve(savedResponse(payload));});
-};
-const firstSave=store.save(firstCopy);
-const secondSave=store.save(secondCopy);
-let secondResolved=false;
-secondSave.then(()=>{secondResolved=true;});
-releaseFirst();
-await firstSave;
-await Promise.resolve();
-assert.equal(secondResolved,false);
-assert.equal(secondCopy.revision,1);
-assert.equal(secondCopy.content_hash,'1'.repeat(64));
-releaseSecond();
-assert.equal(await secondSave,true);
-assert.equal(calls.length,2);
-assert.equal(calls[1].expected_revision,1);
-assert.equal(calls[1].expected_hash,'1'.repeat(64));
-assert.equal(calls[1].body,'second edit');
+const store = makeStore();
+const draft = makeDraft('draft-q');
+const releases = [];
+const payloads = [];
+global.fetch = (_path, options) => new Promise(resolve => {
+  const payload = JSON.parse(options.body);
+  payloads.push(payload);
+  releases.push(() => resolve(savedResponse(payload)));
+});
+const first = store.save(draft);
+draft.body = 'queued edit';
+const second = store.save(draft);
+let secondDone = false;
+second.then(() => { secondDone = true; });
+assert.equal(payloads.length, 1);
+releases[0]();
+await new Promise(resolve => setTimeout(resolve, 0));
+// The second save waits for a second request carrying the latest text and the new hash.
+assert.equal(secondDone, false);
+assert.equal(payloads.length, 2);
+assert.equal(payloads[1].body, 'queued edit');
+assert.equal(payloads[1].expected_hash, draft.content_hash);
+releases[1]();
+assert.equal(await second, true);
+assert.equal(await first, true);
+assert.equal(store.hasChanges(draft), false);
 """)
 
     def test_discard_cancels_pending_save_without_flushing_new_edits_to_server(self) -> None:
         self.run_store(r"""
-const store=makeStore();
-const localOnly=makeDraft('draft-local-only');
-localOnly.revision=0;
-delete localOnly.content_hash;
-const paths=[];
-global.fetch=async(path,options)=>{paths.push(path);return {ok:true,json:async()=>({message:'Draft discarded'})};};
-store.saveLocal(localOnly);
-store.drafts.push(localOnly);
-store.schedule(localOnly,1000);
-await store.discard(localOnly);
-assert.deepEqual(paths,[]);
-assert.equal(store.drafts.length,0);
-assert.equal(store.wasDismissed(localOnly.id),true);
-
-const saved=makeDraft('draft-saved');
-saved._serverSaved=true;
-store.saveLocal(saved);
-store.drafts.push(saved);
-saved.body='unsaved edit that should be discarded';
-store.schedule(saved,1000);
-await store.discard(saved);
-assert.deepEqual(paths,['/api/draft-discard']);
-assert.equal(store.drafts.length,0);
-assert.equal(store.wasDismissed(saved.id),true);
+const store = makeStore();
+const draft = makeDraft('draft-d');
+const calls = [];
+let releaseSave;
+global.fetch = (path, options) => {
+  const payload = JSON.parse(options.body);
+  calls.push({ path, payload });
+  if (calls.length === 1) return new Promise(resolve => { releaseSave = () => resolve(savedResponse(payload)); });
+  return Promise.resolve({ ok: true, json: async () => ({ message: 'Draft discarded' }) });
+};
+const first = store.save(draft);
+draft.body = 'edited while saving';
+const discarded = store.discard(draft);
+releaseSave();
+await first;
+await discarded;
+assert.deepEqual(calls.map(c => c.path), ['/api/draft-save', '/api/draft-discard']);
+assert.equal(calls[1].payload.expected_hash, '2'.repeat(64));
+assert.equal(draft.state, 'closed');
+assert.equal(store.drafts.length, 0);
 """)
+
+
+if __name__ == "__main__":
+    unittest.main()

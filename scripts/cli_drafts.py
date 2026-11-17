@@ -2,14 +2,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
 import uuid
 
-from cli_helpers import _cli_print_error, editor_command, resolve_unique
+from cli_helpers import _cli_print_error, editor_command
 import drafts as draft_store
 from operations import op_draft_save, task_defaults
 import store
@@ -36,8 +35,7 @@ def command_draft_list(args: argparse.Namespace, ws: Workspace | None = None) ->
         if len(excerpt) > 110:
             excerpt = excerpt[:107].rstrip() + "..."
         label = str(draft.get("title") or "").strip() or excerpt[:70] or "Untitled draft"
-        target = f" → {draft.get('target')}" if draft.get("target") else ""
-        print(f"{draft['id']}  {draft['kind']} {draft['mode']}{target}  {label}")
+        print(f"{draft['id']}  {draft['kind']} {draft['mode']}  {label}")
     return 0
 
 
@@ -72,45 +70,29 @@ def command_draft_create(args: argparse.Namespace, ws: Workspace | None = None) 
         return 2
     fields: dict[str, object] = {"kind": args.kind, "mode": "new", "title": args.title or ""}
     body = args.section_text
-    if args.target:
-        item, result = resolve_unique(args.target, match_mode="exact", ws=resolved)
-        if item is None:
-            return result
-        if (args.kind == "task") != item.is_task:
-            print(f"error: {args.kind} drafts require a matching {args.kind} target", file=sys.stderr)
-            return 2
+    if args.created_at and not is_timestamp(args.created_at):
+        print("error: --created-at must be a local ISO timestamp with seconds", file=sys.stderr)
+        return 2
+    capture_id = args.capture_id or str(uuid.uuid4())
+    try:
+        parsed_capture_id = uuid.UUID(capture_id)
+    except (AttributeError, ValueError):
+        print("error: --capture-id must be a valid UUID", file=sys.stderr)
+        return 2
+    if str(parsed_capture_id) != capture_id.lower():
+        print("error: --capture-id must be a canonical UUID", file=sys.stderr)
+        return 2
+    fields.update({"capture_id": str(parsed_capture_id), "created": args.created_at or now_stamp()})
+    if args.kind == "task":
+        default_status, default_priority, default_type = task_defaults(store.policy(resolved))
         fields.update({
-            "mode": "edit", "target": str(item.path.relative_to(resolved.root)),
-            "base_hash": hashlib.sha256(item.raw.encode("utf-8")).hexdigest(),
-            "base_updated": str(item.frontmatter.get("updated") or ""), "title": args.title or "",
-            "origin": "card-body",
+            "status": default_status, "priority": default_priority, "type": default_type,
+            "project": None, "topic": None, "tags": [], "due": None, "due_kind": None,
         })
-        # Seed from the card unless --file supplies the proposed body.
-        body = args.section_text if args.file is not None else item.body
-    else:
-        if args.created_at and not is_timestamp(args.created_at):
-            print("error: --created-at must be a local ISO timestamp with seconds", file=sys.stderr)
-            return 2
-        capture_id = args.capture_id or str(uuid.uuid4())
-        try:
-            parsed_capture_id = uuid.UUID(capture_id)
-        except (AttributeError, ValueError):
-            print("error: --capture-id must be a valid UUID", file=sys.stderr)
-            return 2
-        if str(parsed_capture_id) != capture_id.lower():
-            print("error: --capture-id must be a canonical UUID", file=sys.stderr)
-            return 2
-        fields.update({"capture_id": str(parsed_capture_id), "created": args.created_at or now_stamp()})
-        if args.kind == "task":
-            default_status, default_priority, default_type = task_defaults(store.policy(resolved))
-            fields.update({
-                "status": default_status, "priority": default_priority, "type": default_type,
-                "project": None, "topic": None, "tags": [], "due": None, "due_kind": None,
-            })
     try:
         draft = draft_store.save(
             resolved.root, draft_id=args.draft_id, fields=fields, body=body,
-            expected_revision=0, now=now_stamp(),
+            now=now_stamp(),
         )
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -126,11 +108,11 @@ def draft_conflict_copy(
     existing: dict[str, object], body: str, title: str, ws: Workspace | None = None,
 ) -> dict[str, object]:
     fields = {field: existing.get(field) for field in draft_store.FIELDS
-              if field in existing and field not in {"id", "revision", "updated"}}
+              if field in existing and field not in {"id", "updated"}}
     fields["title"] = title
     return draft_store.save(
         _ws(ws).root, draft_id=None, fields=fields, body=body,
-        expected_revision=0, now=now_stamp(),
+        now=now_stamp(),
     )
 
 
@@ -138,16 +120,16 @@ def command_draft_edit(args: argparse.Namespace, ws: Workspace | None = None) ->
     resolved = _ws(ws)
     try:
         existing = draft_store.read(resolved.root, args.draft_id)
-        expected_revision = (args.expected_revision if args.expected_revision is not None
-                             else int(existing["revision"]))
-        if expected_revision != existing["revision"]:
-            raise draft_store.DraftConflict("draft changed since it was loaded; refresh and retry")
+        expected_hash = (args.expected_hash if args.expected_hash is not None
+                         else str(existing["content_hash"]))
+        if expected_hash != existing["content_hash"]:
+            raise draft_store.DraftConflict("draft content changed outside microtask; refresh and reconcile")
         title = args.title if args.title is not None else str(existing.get("title") or "")
         if any(character in title for character in "\r\n"):
             raise ValueError("draft title must be single-line")
         if args.file is not None:
-            if args.expected_revision is None:
-                raise ValueError("--expected-revision is required when using --file")
+            if args.expected_hash is None:
+                raise ValueError("--expected-hash is required when using --file")
             body = args.section_text
         else:
             command = editor_command("draft edit")
@@ -172,13 +154,12 @@ def command_draft_edit(args: argparse.Namespace, ws: Workspace | None = None) ->
                     print("No changes: draft was not updated.")
                     return 0
         fields = {field: existing.get(field) for field in draft_store.FIELDS
-                  if field in existing and field not in {"id", "revision", "updated"}}
+                  if field in existing and field not in {"id", "updated"}}
         fields["title"] = title
         try:
             updated = draft_store.save(
                 resolved.root, draft_id=args.draft_id, fields=fields, body=body,
-                expected_revision=expected_revision, expected_content_hash=str(existing["content_hash"]),
-                now=now_stamp(),
+                expected_content_hash=expected_hash, now=now_stamp(),
             )
         except draft_store.DraftConflict:
             copy = draft_conflict_copy(existing, body, title, ws=resolved)
@@ -191,17 +172,24 @@ def command_draft_edit(args: argparse.Namespace, ws: Workspace | None = None) ->
     if args.as_json:
         print(json.dumps(updated, ensure_ascii=False))
     else:
-        print(f"Draft saved: {updated['id']} revision {updated['revision']}")
+        print(f"Draft saved: {updated['id']}")
     return 0
 
 
 def command_draft_discard(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
     try:
-        existing = draft_store.read(resolved.root, args.draft_id)
+        try:
+            existing = draft_store.read(resolved.root, args.draft_id)
+            expected_hash: str | None = (args.expected_hash if args.expected_hash is not None
+                                         else str(existing["content_hash"]))
+        except draft_store.RetiredDraftError:
+            if args.expected_hash is not None:
+                raise
+            expected_hash = None
         removed = draft_store.discard(
-            resolved.root, args.draft_id, args.expected_revision,
-            expected_content_hash=str(existing["content_hash"]),
+            resolved.root, args.draft_id,
+            expected_content_hash=expected_hash,
         )
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -221,7 +209,6 @@ def command_draft_save(args: argparse.Namespace, ws: Workspace | None = None) ->
         result = op_draft_save(
             ws,
             args.draft_id,
-            expected_revision=args.expected_revision,
             expected_hash=args.expected_hash,
         )
     except TaskError as error:

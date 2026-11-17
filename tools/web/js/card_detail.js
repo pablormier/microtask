@@ -84,7 +84,7 @@ function createDetailController() {
       if (!box || !event.currentTarget.contains(box)) return;
       // The browser toggles the box on click; keep it as rendered until the server confirms.
       event.preventDefault();
-      if (!this.selected || this.busy || this.draftBusy || this.contentEditor.draft) return;
+      if (!this.selected || this.busy || this.draftBusy || this.contentEditor.open) return;
       const index = Number(box.getAttribute("data-mt-task-index"));
       const count = event.currentTarget.querySelectorAll("input.mt-task-checkbox").length;
       return this.saveBodyKeepingProperties(() => this.apiPost("/api/checkbox", {
@@ -208,12 +208,15 @@ function createDetailController() {
 
     canLeaveCard() {
       if (this.busy || this.draftBusy) return false;
-      if (this.selected && this.propertyEditor.changed()) {
+      const propDirty = Boolean(this.selected && this.propertyEditor.changed());
+      const bodyDirty = Boolean(this.contentEditor.open && this.contentEditor.text !== this.contentEditor.original);
+      if (propDirty || bodyDirty) {
         if (typeof window !== "undefined" && typeof window.confirm === "function" &&
-            !window.confirm("Discard unsaved property changes? Content edits are kept as a draft.")) return false;
-        this.propertyEditor.begin(this.selected, this.taskDefaults);
+            !window.confirm("Discard unsaved changes?")) return false;
+        if (propDirty) this.propertyEditor.begin(this.selected, this.taskDefaults);
       }
-      return this.contentEditor.close(this.contentContext()) !== false;
+      this.contentEditor.close(this.contentContext(), { force: true });
+      return true;
     },
 
     select(task, event) {
@@ -285,7 +288,7 @@ function createDetailController() {
     },
 
     showCard(task) {
-      this.contentEditor.close(this.contentContext());
+      this.contentEditor.close(this.contentContext(), { force: true });
       this.clearHoverCard();
       if (!this.detailReturnFocus) this.detailReturnFocus = document.activeElement;
       this.selectedId = task.id;
@@ -349,7 +352,7 @@ function createDetailController() {
 
     clearSelection(updateUrl = true) {
       if (!this.canLeaveCard()) return;
-      this.contentEditor.close(this.contentContext());
+      this.contentEditor.close(this.contentContext(), { force: true });
       this.clearHoverCard();
       if (updateUrl) {
         history.replaceState({ ...history.state, mtCard: {

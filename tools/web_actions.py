@@ -184,20 +184,18 @@ def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dic
 
 def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
-    expected_revision = body.get("expected_revision")
-    if not isinstance(expected_revision, int) or isinstance(expected_revision, bool) or expected_revision < 0:
-        return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be a non-negative integer"}
     expected_hash = body.get("expected_hash")
-    if expected_revision > 0 and not _valid_sha256(expected_hash):
+    if expected_hash is not None and not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash when updating a draft"}
     if not isinstance(body.get("body"), str):
         return HTTPStatus.BAD_REQUEST, {"error": "body must be valid UTF-8 text"}
     kind = body.get("kind")
-    mode = body.get("mode")
+    # Drafts are always new cards. The field stays optional for older clients.
+    mode = body.get("mode", "new")
     if not isinstance(kind, str) or kind not in {"note", "task"}:
         return HTTPStatus.BAD_REQUEST, {"error": "kind must be note or task"}
-    if not isinstance(mode, str) or mode not in {"new", "edit"}:
-        return HTTPStatus.BAD_REQUEST, {"error": "mode must be new or edit"}
+    if mode != "new":
+        return HTTPStatus.BAD_REQUEST, {"error": "mode must be new"}
     title = body.get("title", "")
     if not isinstance(title, str) or not valid_utf8(title):
         return HTTPStatus.BAD_REQUEST, {"error": "title must be valid UTF-8 text"}
@@ -216,30 +214,13 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
         fields[field] = value
     if "instructions" in body:
         fields["instructions"] = body["instructions"]
-    if mode == "new":
-        fields.update(capture_id=body.get("capture_id"), created=body.get("created"))
-    elif mode == "edit" and expected_revision == 0:
-        item = item_by_ref(body.get("target_ref"))
-        if item is None or item["kind"] != kind:
-            return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
-        item_path = workspace_root() / str(item["path"])
-        if item_path.is_symlink() or not item_path.is_file():
-            return HTTPStatus.BAD_REQUEST, {"error": "edit draft target is unavailable"}
-        supplied_hash = body.get("base_hash")
-        if supplied_hash is None:
-            supplied_hash = draft_store.UNVERIFIED_BASE_HASH
-        if not _valid_sha256(supplied_hash):
-            return HTTPStatus.BAD_REQUEST, {"error": "base_hash must be a SHA-256 hash"}
-        supplied_updated = body.get("base_updated", "")
-        if not isinstance(supplied_updated, str):
-            return HTTPStatus.BAD_REQUEST, {"error": "base_updated must be text"}
-        fields.update(target=str(item["path"]), base_hash=supplied_hash, base_updated=supplied_updated)
+    fields.update(capture_id=body.get("capture_id"), created=body.get("created"))
     origin = body.get("origin")
     if origin is not None:
         if not isinstance(origin, str) or len(origin) > 512:
             return HTTPStatus.BAD_REQUEST, {"error": "origin must be a short string"}
         fields["origin"] = origin
-    if (mode == "new" and expected_revision == 0 and not title.strip()
+    if (expected_hash is None and not title.strip()
             and not body["body"].strip() and not str(body.get("instructions") or "").strip()):
         return HTTPStatus.BAD_REQUEST, {"error": "new drafts require a non-empty title or text"}
     try:
@@ -248,9 +229,8 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
             draft_id=draft_id if isinstance(draft_id, str) else None,
             fields=fields,
             body=body["body"],
-            expected_revision=expected_revision,
             now=store.now_stamp(),
-            expected_content_hash=expected_hash if expected_revision > 0 else None,
+            expected_content_hash=expected_hash,
         )
     except draft_store.DraftConflict as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
@@ -261,14 +241,11 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
 
 def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
-    revision = body.get("expected_revision")
-    if not isinstance(revision, int) or isinstance(revision, bool):
-        return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be an integer"}
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     try:
-        removed = draft_store.discard(workspace_root(), str(draft_id), revision, expected_hash)
+        removed = draft_store.discard(workspace_root(), str(draft_id), expected_hash)
     except draft_store.DraftConflict as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except (OSError, ValueError) as error:
@@ -280,9 +257,6 @@ def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
 
 def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
-    revision = body.get("expected_revision")
-    if not isinstance(revision, int) or isinstance(revision, bool):
-        return HTTPStatus.BAD_REQUEST, {"error": "expected_revision must be an integer"}
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
@@ -290,11 +264,32 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
         lambda ws: operations.op_draft_save(
             ws,
             str(draft_id),
-            expected_revision=revision,
             expected_hash=expected_hash,
             sync=False,
         ),
         "Draft applied",
+        include_saved_ref=True,
+    )
+
+
+def handle_card_edit(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    expected_hash = body.get("expected_hash")
+    text = body.get("body")
+    if not _valid_sha256(expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    if not isinstance(text, str) or not valid_utf8(text):
+        return HTTPStatus.BAD_REQUEST, {"error": "body must be valid UTF-8 text"}
+    return _run_operation(
+        lambda ws: operations.op_edit(
+            ws,
+            item["ref"],
+            match_mode="exact",
+            expected_hash=expected_hash,
+            body_mode="replace",
+            body_text=text,
+            sync=False,
+        ),
+        "Content saved",
         include_saved_ref=True,
     )
 
@@ -494,6 +489,7 @@ DRAFT_ACTION_HANDLERS = {
 }
 
 ITEM_ACTION_HANDLERS = {
+    "/api/card-edit": handle_card_edit,
     "/api/card-metadata": handle_card_metadata,
     "/api/checkbox": handle_checkbox,
     "/api/review": handle_review,

@@ -101,12 +101,13 @@ class TriageCheckTests(unittest.TestCase):
         self.assertEqual(valid.returncode, 0, valid.stderr)
         self.assertIn("1 draft file(s)", valid.stdout)
 
-        path.write_text(path.read_text(encoding="utf-8").replace("revision: 1", "revision: 0"),
+        path.write_text(path.read_text(encoding="utf-8").replace("kind: note", "kind: bogus"),
                         encoding="utf-8")
         invalid = self.validate()
 
         self.assertEqual(invalid.returncode, 1)
-        self.assertIn(f"drafts/{draft['id']}.md: malformed draft revision", invalid.stderr)
+        self.assertIn(f"drafts/{draft['id']}.md: ", invalid.stderr)
+        self.assertIn("malformed draft kind", invalid.stderr)
 
     def test_malformed_draft_kind_and_mode_values_report_and_validation_continues(self) -> None:
         cases = (

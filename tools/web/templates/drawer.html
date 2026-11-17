@@ -1,9 +1,9 @@
       <template x-if="selected">
-        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" @click.self="if (!(contentEditor.draft && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.draft && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open) { clearSelection(); }">
-          <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.draft && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
+        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open) { clearSelection(); }">
+          <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
-                   @keydown.meta.shift.f.stop.prevent="if (contentEditor.draft) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
-                   @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.draft) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }">
+                   @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
+                   @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }">
             <header class="mt-detail-header">
               <div class="mt-detail-heading">
                 <div class="mt-detail-identity"><span class="mt-ref" x-text="selected?.ref"></span><span x-text="selected?.kind === 'note' ? 'Note' : 'Task'"></span><span x-show="selected?.archived">Archived</span><span x-show="selected?.hidden">Hidden</span></div>
@@ -12,6 +12,7 @@
                     <textarea class="mt-detail-title-input" rows="1" form="mt-properties-form" aria-label="Title" spellcheck="false"
                               x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving"
                               x-effect="propertyEditor.form.title; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
+                              x-init="let width = 0; new ResizeObserver(([entry]) => { if (entry.contentRect.width === width) return; width = entry.contentRect.width; $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; }).observe($el)"
                               @keydown.enter.prevent="$el.form && $el.form.requestSubmit()"
                               @keydown.escape.stop="propertyEditor.form.title = selected?.title || ''; $el.blur()"></textarea>
                   </template>
@@ -19,12 +20,20 @@
                 </h2>
               </div>
               <div class="mt-detail-navigation">
+                <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-meta-toggle"
+                        x-show="contentEditor.zen && propertyEditor.form"
+                        :aria-expanded="contentEditor.zenMetaOpen"
+                        aria-controls="mt-detail-properties-panel"
+                        @click="contentEditor.zenMetaOpen = !contentEditor.zenMetaOpen">
+                  <span>Properties</span>
+                  <span class="mt-zen-meta-badge" x-show="!contentEditor.zenMetaOpen && contentEditor.zenMetaSummary(propertyEditor.form)" x-text="contentEditor.zenMetaSummary(propertyEditor.form)"></span>
+                </button>
                 <button class="mt-button mt-button-quiet mt-button-compact mt-detail-back" type="button" aria-label="Back to previous card" x-show="canGoBackReference()" @click="backReference()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>Back</span></button>
                 <details class="mt-card-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
                   <summary class="mt-menu-trigger" aria-label="More card actions" title="More card actions"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
                   <div class="mt-card-menu-items">
-                    <button type="button" class="mt-button mt-button-compact" @click="archiveSelected()" :disabled="busy || draftBusy || !!contentEditor.draft" :aria-busy="busy" x-text="selected?.archived ? 'Unarchive' : 'Archive'"></button>
-                    <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.draft" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
+                    <button type="button" class="mt-button mt-button-compact" @click="archiveSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.archived ? 'Unarchive' : 'Archive'"></button>
+                    <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
                   </div>
                 </details>
                 <button class="mt-button mt-button-quiet mt-button-icon mt-close" type="button" aria-label="Close preview" @click="clearSelection()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
@@ -33,13 +42,13 @@
             <div class="mt-detail-workbar" x-show="selected?.kind === 'task' || selected?.needs_review">
               <div class="mt-detail-status">
                 <template x-if="selected?.kind === 'task'">
-                  <select class="mt-field mt-field-compact mt-status-select" :data-status="moveDestination" x-model="moveDestination" @change="changeSelectedStatus()" :disabled="!canMoveSelected() || busy || draftBusy || !!contentEditor.draft" aria-label="Task status">
+                  <select class="mt-field mt-field-compact mt-status-select" :data-status="moveDestination" x-model="moveDestination" @change="changeSelectedStatus()" :disabled="!canMoveSelected() || busy || draftBusy || !!contentEditor.open" aria-label="Task status">
                     <template x-for="status in statuses" :key="status"><option :value="status" :selected="status === moveDestination" x-text="statusText(status)"></option></template>
                   </select>
                 </template>
                 <span class="mt-detail-owner" x-show="selected?.claimed_by" x-text="'Working: ' + selected?.claimed_by"></span>
                 <span class="mt-badge mt-badge-warning" x-show="selected?.needs_review">Needs review</span>
-                <button type="button" class="mt-button mt-button-compact" x-show="selected?.needs_review" @click="markReviewed(selected)" :disabled="busy || draftBusy || !!contentEditor.draft">Mark reviewed</button>
+                <button type="button" class="mt-button mt-button-compact" x-show="selected?.needs_review" @click="markReviewed(selected)" :disabled="busy || draftBusy || !!contentEditor.open">Mark reviewed</button>
               </div>
               <div class="mt-detail-timer mt-layout-group" x-show="selected?.kind === 'task'" role="group" aria-label="Task timer">
                 <span class="mt-time-readout">
@@ -47,8 +56,8 @@
                   <span class="mt-time-session" x-show="timerRunningFor(selected)" x-text="timerSessionLabel(selected)"></span>
                   <span class="mt-time-total" x-text="savedTimeLabel(selected)"></span>
                 </span>
-                <button type="button" class="mt-button mt-button-compact" x-show="showStartTimer(selected)" @click="startTimer(selected)" :disabled="!canStartTimer(selected) || !!contentEditor.draft" :aria-label="'Start timer for ' + selected?.title">Start</button>
-                <button type="button" class="mt-button mt-button-compact" x-show="showStopTimer(selected)" @click="stopTimer(selected)" :disabled="!canStopTimer(selected) || !!contentEditor.draft" :aria-label="'Stop timer for ' + selected?.title">Stop</button>
+                <button type="button" class="mt-button mt-button-compact" x-show="showStartTimer(selected)" @click="startTimer(selected)" :disabled="!canStartTimer(selected) || !!contentEditor.open" :aria-label="'Start timer for ' + selected?.title">Start</button>
+                <button type="button" class="mt-button mt-button-compact" x-show="showStopTimer(selected)" @click="stopTimer(selected)" :disabled="!canStopTimer(selected) || !!contentEditor.open" :aria-label="'Stop timer for ' + selected?.title">Stop</button>
                 {timer_menu}
               </div>
             </div>
@@ -56,7 +65,7 @@
               <section class="mt-detail-content" aria-label="Card content">
                 <header class="mt-content-header">
                   <h3>Content</h3>
-                  <div class="mt-layout-group" x-show="!contentEditor.draft">
+                  <div class="mt-layout-group" x-show="!contentEditor.open">
                     <button type="button" class="mt-button mt-button-compact mt-content-edit" x-ref="contentEditButton" @click="contentEditor.begin(contentContext())" :disabled="busy || draftBusy || detailLoading || !!detailError || typeof selected?.body !== 'string'">Edit content</button>
                     <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact mt-content-edit-zen"
                             aria-label="Edit in Zen mode" title="Edit in Zen mode (⌘/Ctrl+Shift+F)"
@@ -73,7 +82,7 @@
                   <p x-text="detailError"></p>
                   <button type="button" class="mt-button mt-button-compact" @click="loadSelectedDetails(true)" :disabled="detailLoading">Retry content</button>
                 </div>
-                <template x-if="contentEditor.draft">
+                <template x-if="contentEditor.open">
                   <div class="mt-content-editor">
                     <div class="mt-content-editor-toolbar">
                       <div class="mt-segmented" role="group" aria-label="Content editor mode" x-show="!contentEditor.zen">
@@ -123,31 +132,25 @@
                            x-html="contentEditor.zen ? contentEditor.previewHtml : contentEditor.preview(contentContext())"
                            @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                     </div>
+                    <div class="mt-composer-recovery-warning" role="status" x-show="contentEditor.unsavedOffer">
+                      <span>Restore unsaved text?</span>
+                      <button type="button" class="mt-button mt-button-compact mt-button-primary" @click="contentEditor.restoreUnsaved(contentContext())">Restore</button>
+                      <button type="button" class="mt-button mt-button-compact" @click="contentEditor.dismissUnsaved()">Dismiss</button>
+                    </div>
                     <p class="mt-composer-recovery-warning" role="status" x-show="contentEditor.error" x-text="contentEditor.error"></p>
-                    <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.messageError" x-text="captureComposer.message"></p>
-                    <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.recoveryWarning" x-text="captureComposer.recoveryWarning"></p>
-                    <p class="mt-composer-recovery-warning" role="status" x-show="contentEditor.draft?._orphanedLocal">This draft changed elsewhere. Your text is kept in Drafts for recovery.</p>
                     <footer class="mt-content-footer">
-                      <span class="mt-composer-storage-status" role="status" x-text="draftWorkspaceStatus || 'Changes are kept as a draft'"></span>
-                      <template x-if="contentEditor.draft?._orphanedLocal">
-                        <div class="mt-layout-group" role="group" aria-label="Content draft recovery">
-                          <button type="button" class="mt-button mt-button-danger" @click="dismissLocalWorkspaceDraft(contentEditor.draft)" :disabled="draftBusy">Dismiss local copy</button>
-                          <button type="button" class="mt-button mt-button-primary" @click="recoverLocalWorkspaceDraft(contentEditor.draft)" :disabled="draftBusy" :aria-busy="draftBusy">Recover as separate draft</button>
-                        </div>
-                      </template>
-                      <template x-if="!contentEditor.draft?._orphanedLocal">
-                        <div class="mt-layout-group" role="group" aria-label="Content draft actions">
-                          <button type="button" class="mt-button mt-button-danger" x-show="contentEditor.hasDraft()" @click="contentEditor.discard(contentContext())" :disabled="draftBusy || contentEditor.saving">Discard draft</button>
-                          <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="draftBusy || contentEditor.saving">Close</button>
-                          <button type="button" class="mt-button mt-button-primary" @click="contentEditor.save(contentContext())" :disabled="!contentEditor.canSave(contentContext()) || contentEditor.saving" :aria-busy="draftBusy || contentEditor.saving">Save content</button>
-                        </div>
-                      </template>
+                      <span class="mt-composer-storage-status" role="status"></span>
+                      <div class="mt-layout-group" role="group" aria-label="Content editor actions">
+                        <button type="button" class="mt-button" x-show="contentEditor.conflict" @click="contentEditor.reloadKeepingText(contentContext())" :disabled="contentEditor.saving" title="Loads the latest card hash; saving will replace the card's current body with your text">Reload card, keep my text</button>
+                        <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="contentEditor.saving">Cancel</button>
+                        <button type="button" class="mt-button mt-button-primary" @click="contentEditor.save(contentContext())" :disabled="!contentEditor.canSave(contentContext()) || contentEditor.saving" :aria-busy="contentEditor.saving">Save content</button>
+                      </div>
                     </footer>
                   </div>
                 </template>
-                <div class="mt-preview" x-show="!contentEditor.draft" x-ref="preview" x-html="previewHtml" @click="openReference($event); toggleTaskCheckbox($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <div class="mt-preview" x-show="!contentEditor.open" x-ref="preview" x-html="previewHtml" @click="openReference($event); toggleTaskCheckbox($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <template x-for="field in textPropertyFields()" :key="field.key">
-                  <section class="mt-text-property" x-show="!contentEditor.draft" :aria-label="field.label">
+                  <section class="mt-text-property" x-show="!contentEditor.open" :aria-label="field.label">
                     <header class="mt-text-property-header">
                       <h3 x-text="field.label"></h3>
                       <button type="button" class="mt-button mt-button-quiet mt-button-compact" x-show="textPropertyEditing !== field.key"
@@ -173,20 +176,20 @@
                   </section>
                 </template>
                 <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-text-property-add"
-                        x-show="!contentEditor.draft && selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'"
+                        x-show="!contentEditor.open && selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'"
                         @click="editTextProperty('processing_instructions')" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading">
                   <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
                   <span>Add processing instructions</span>
                 </button>
-                <div class="mt-card-properties-preview" x-show="!contentEditor.draft" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
-                <form class="mt-comment-composer" x-show="!contentEditor.draft" @submit.prevent="commentSelected()">
+                <div class="mt-card-properties-preview" x-show="!contentEditor.open" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <form class="mt-comment-composer" x-show="!contentEditor.open" @submit.prevent="commentSelected()">
                   <textarea class="mt-field" x-model="commentText" :disabled="busy" aria-label="Comment text" placeholder="Leave a comment"></textarea>
                   <button type="submit" class="mt-button mt-button-compact" :disabled="busy || !commentText.trim()" :aria-busy="busy">Comment</button>
                 </form>
               </section>
-              <aside class="mt-properties-panel" aria-label="Card properties">
+              <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }">
                 <header class="mt-properties-header"><h3>Properties</h3></header>
-                <form class="mt-properties-form" id="mt-properties-form" @submit.prevent="propertyEditor.apply(propertyContext())">
+                <form class="mt-properties-form" id="mt-properties-form" @submit.prevent="contentEditor.open && contentEditor.zen ? contentEditor.save(contentContext()) : propertyEditor.apply(propertyContext())">
                   <!-- Keyed by card so the shared editor re-initializes for each card's kind and values. -->
                   <template x-for="cardId in [selected?.id]" :key="cardId">
                     <div x-data="cardMetadataEditor(propertyEditor.form, false, 'drawer', cardMetadataConfig(), propertyEditor.errors, selected?.kind)"
@@ -198,9 +201,9 @@
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.conflict">This card changed while you were editing. Your changes are kept here. Reset to load the latest properties.</p>
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.error" x-text="propertyEditor.error"></p>
                   <footer class="mt-properties-footer" x-show="propertyEditor.changed()">
-                    <span class="mt-unsaved-indicator" role="status" x-text="contentEditor.draft ? 'Save or close the content editor first' : 'Unsaved changes'"></span>
+                    <span class="mt-unsaved-indicator" role="status" x-text="contentEditor.open && contentEditor.zen ? 'Saved with Save content' : (contentEditor.open ? 'Save or close the content editor first' : 'Unsaved changes')"></span>
                     <button type="button" class="mt-button" @click="propertyEditor.begin(selected, taskDefaults)" :disabled="busy || draftBusy">Reset</button>
-                    <button type="submit" class="mt-button mt-button-primary" :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="busy || propertyEditor.saving">Save changes</button>
+                    <button type="submit" class="mt-button mt-button-primary" x-show="!(contentEditor.open && contentEditor.zen)" :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="busy || propertyEditor.saving">Save changes</button>
                   </footer>
                 </form>
               </aside>

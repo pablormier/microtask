@@ -1787,63 +1787,10 @@ def _save_new_draft(resolved: Workspace, draft: dict[str, object]) -> tuple[Card
     return capture_card(capture_args, body, draft["kind"], ws=resolved)
 
 
-def _save_edit_draft(resolved: Workspace, draft: dict[str, object]) -> tuple[Card, bool]:
-    """Verify baseline guards and apply an 'edit'-mode draft to its target card."""
-    target = str(draft.get("target") or "")
-    if not re.fullmatch(r"(?:\.mt/demo/)?cards/[^/]+\.md", target):
-        raise ValueError("draft target path is invalid")
-    target_path = resolved.root / target
-    if target_path.is_symlink() or not target_path.is_file():
-        raise draft_store.DraftConflict("draft target is missing; draft was kept")
-    original = target_path.read_bytes()
-    if draft.get("base_hash") == draft_store.UNVERIFIED_BASE_HASH:
-        raise draft_store.DraftConflict(
-            "draft has no verified target baseline; compare the saved text and create a fresh edit draft before applying"
-        )
-    if hashlib.sha256(original).hexdigest() != draft.get("base_hash"):
-        raise draft_store.DraftConflict("target changed since the draft was created; draft was kept")
-    current = Card.read(target_path)
-    if draft.get("origin") != "card-body":
-        raise draft_store.DraftConflict(
-            "edit draft uses a retired card format; create a fresh edit draft before saving"
-        )
-    if target_path.read_bytes() != original:
-        raise draft_store.DraftConflict("target changed while saving; draft was kept")
-    if (draft["kind"] == "note") != current.is_note:
-        raise ValueError("draft kind does not match target kind")
-    if current.is_task and current.frontmatter.get("claimed_by"):
-        check_claim(current, current_username(None, ws=resolved))
-    properties, current_body = dict(current.frontmatter), current.body
-    body = str(draft.get("body") or "")
-    title = str(draft.get("title") or "").strip()
-    if title:
-        properties = card_format.apply_property_patch(
-            properties, {"title": title}, kind=str(draft["kind"])
-        )
-    changed = body != current_body or properties != current.frontmatter
-    if not changed:
-        return current, False
-    properties["updated"] = now_stamp()
-    raw = card_format.render_document(properties, body, expected_kind=str(draft["kind"]))
-    if target.startswith(".mt/demo/"):
-        if not demo_active(resolved):
-            raise draft_store.DraftConflict("demo target is no longer active; draft was kept")
-        base = demo_root(resolved)
-        relative = target[len(".mt/demo/"):]
-    else:
-        base = resolved.root
-        relative = target
-    transaction.apply_item_transaction(
-        {relative: raw.encode("utf-8")}, expected={relative: original}, source_root=base, ws=resolved
-    )
-    return Card.read(target_path), True
-
-
 def _draft_save_locked(
     resolved: Workspace,
     draft_id: str,
     *,
-    expected_revision: int,
     expected_hash: str | None = None,
 ) -> tuple[WriteResult, bool]:
     _require_mutation_lock()
@@ -1857,24 +1804,19 @@ def _draft_save_locked(
             if not path.is_file():
                 raise draft_store.DraftConflict("draft was removed outside microtask; local copy was kept")
             draft = draft_store.read(resolved.root, draft_id)
-            if draft["revision"] != expected_revision:
-                raise draft_store.DraftConflict("draft changed since it was loaded; refresh and retry")
             if expected_hash is not None and draft["content_hash"] != expected_hash:
                 raise draft_store.DraftConflict("draft content changed outside microtask; refresh and reconcile")
-            if draft["mode"] == "new":
-                item, changed = _save_new_draft(resolved, draft)
-                conflict_label = "card saved"
-            else:
-                item, changed = _save_edit_draft(resolved, draft)
-                conflict_label = "changes applied"
+            if draft["mode"] != "new":
+                raise ValueError("draft mode must be new")
+            item, changed = _save_new_draft(resolved, draft)
             if draft_store.read(resolved.root, draft_id)["content_hash"] != draft["content_hash"]:
                 raise draft_store.DraftConflict(
-                    f"draft content changed outside microtask; {conflict_label} and draft retained"
+                    "draft content changed outside microtask; card saved and draft retained"
                 )
             path.unlink()
             draft_removed = True
             if item is None:
-                raise ValueError("draft save did not create or update a card")
+                raise ValueError("draft save did not create a card")
         finally:
             draft_store.unlock(lock_handle)
     except draft_store.DraftConflict as error:
@@ -1896,11 +1838,10 @@ def op_draft_save(
     ws: Workspace | None,
     draft_id: str,
     *,
-    expected_revision: int,
     expected_hash: str | None = None,
     sync: bool = True,
 ) -> WriteResult:
-    """Apply a draft (new or edit) to the workspace and remove the draft file."""
+    """Apply a draft to the workspace and remove the draft file."""
     resolved = _ws(ws)
     # Keep the global mutation lock order aligned with migration and card
     # writes: time/mutation first, drafts second. Auto-sync runs below after
@@ -1909,7 +1850,6 @@ def op_draft_save(
         result, draft_removed = _draft_save_locked(
             resolved,
             draft_id,
-            expected_revision=expected_revision,
             expected_hash=expected_hash,
         )
     if sync and (result.changed or draft_removed):

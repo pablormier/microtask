@@ -194,11 +194,11 @@ unset MT_PROJECT
 
 ## Drafts
 
-Drafts are unfinished cards or edits kept in `drafts/`. They stay out of lists,
-search, and focus until you apply them. The dashboard saves drafts as you type
-(and can expand the capture composer or card editor into a full-screen **Zen
-mode** with `Write`, `Split`, and `Preview` views via `⤢` or
-`Cmd/Ctrl+Shift+F`), and the CLI works on the same files:
+Drafts are unfinished new cards kept in `drafts/`. They stay out of lists,
+search, and focus until you create them. The capture composer saves drafts as
+you type (and can expand into a full-screen **Zen mode** with `Write`, `Split`,
+and `Preview` views via `⤢` or `Cmd/Ctrl+Shift+F`), and the CLI works on the
+same files:
 
 ```sh
 mt draft list
@@ -206,8 +206,8 @@ mt draft create note --title "Meeting follow-up" --file notes.md
 mt draft recover          # recover editor copies left behind by a crash
 ```
 
-Applying a draft checks that neither the draft nor its target card changed in
-the meantime, so a stale draft never overwrites newer work.
+Saving a draft checks its revision so another tab or the CLI never silently
+overwrites newer changes.
 
 ## Workspaces
 

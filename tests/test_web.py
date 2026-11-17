@@ -1930,7 +1930,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             initial = self.get_json(url + "api/items")
             token = initial["meta"]["api_token"]
             created = {
-                "id": draft_id, "expected_revision": 0, "kind": "note", "mode": "new",
+                "id": draft_id, "kind": "note", "mode": "new",
                 "capture_id": capture_id, "created": "2026-10-15T09:30:00",
                 "title": "A workspace draft", "body": unique_text + "\n\n## Incomplete",
                 "instructions": "Review the captured source before triage.",
@@ -1956,7 +1956,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertNotIn(draft_id, static_html)
 
             finished = self.post_json(url + "api/draft-finish", token, {
-                "id": draft_id, "expected_revision": 1,
+                "id": draft_id,
                 "expected_hash": saved["saved_draft"]["content_hash"],
             })
             status, payload = finished
@@ -2011,7 +2011,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
-    def test_body_draft_cannot_replace_processing_instructions_property(self):
+    def test_card_edit_cannot_replace_processing_instructions_property(self):
         fields, body = taskweb.card_format.parse_document(self.note.read_text())
         fields["processing_instructions"] = "Keep source wording."
         self.note.write_text(taskweb.card_format.render_document(fields, body))
@@ -2020,18 +2020,16 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             initial = self.get_json(url + "api/items")
             note = self.get_card(url, next(item for item in initial["tasks"] if item["kind"] == "note"))
             token = initial["meta"]["api_token"]
-            import uuid
-            request = {"id": str(uuid.uuid4()), "expected_revision": 0, "kind": "note", "mode": "edit",
-                       "origin": "card-body", "title": "", "body": "## Processing instructions\n\nOrdinary heading.",
-                       "target_ref": note["ref"], "base_hash": note["content_hash"]}
-            status, response = self.post_json(url + "api/draft-save", token, request)
-            self.assertEqual(status, 200, response)
-            draft = response["saved_draft"]
-            status, response = self.post_json(url + "api/draft-finish", token, {"id":draft["id"], "expected_revision":draft["revision"], "expected_hash":draft["content_hash"]})
+            new_body = "## Processing instructions\n\nOrdinary heading."
+            status, response = self.post_json(url + "api/card-edit", token, {
+                "ref": note["ref"],
+                "expected_hash": note["content_hash"],
+                "body": new_body,
+            })
             self.assertEqual(status, 200, response)
             actual, body = taskweb.card_format.parse_document(self.note.read_text())
             self.assertEqual(actual["processing_instructions"], "Keep source wording.")
-            self.assertEqual(body, request["body"])
+            self.assertEqual(body, new_body)
         finally:
             self.stop_interactive_web(process)
 
@@ -2043,7 +2041,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
                 with self.subTest(kind=kind):
                     draft_id = f"00000000-0000-4000-8000-{index:012d}"
                     initial = {
-                        "id": draft_id, "expected_revision": 0, "kind": kind, "mode": "new",
+                        "id": draft_id, "kind": kind, "mode": "new",
                         "capture_id": draft_id, "created": "2026-10-15T09:30:00",
                         "title": "Title to erase", "body": "Text to erase",
                         "instructions": "Guidance to erase",
@@ -2051,12 +2049,12 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
                     status, response = self.post_json(url + "api/draft-save", token, initial)
                     self.assertEqual(status, 200, response)
                     saved = response["saved_draft"]
-                    cleared = dict(initial, title="", body="", instructions="", expected_revision=saved["revision"],
+                    cleared = dict(initial, title="", body="", instructions="",
                                    expected_hash=saved["content_hash"])
                     status, response = self.post_json(url + "api/draft-save", token, cleared)
                     self.assertEqual(status, 200, response)
                     updated = response["saved_draft"]
-                    self.assertEqual(updated["revision"], 2)
+                    self.assertNotEqual(updated["content_hash"], saved["content_hash"])
                     for field in ("id", "kind", "capture_id", "created"):
                         self.assertEqual(updated[field], saved[field])
                     reopened = next(draft for draft in self.get_json(url + "api/drafts")["drafts"]
@@ -2078,7 +2076,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             initial = self.get_json(url + "api/items")
             token = initial["meta"]["api_token"]
             draft_body = {
-                "id": draft_id, "expected_revision": 0, "kind": "note", "mode": "new",
+                "id": draft_id, "kind": "note", "mode": "new",
                 "capture_id": capture_id, "created": "2026-10-15T09:30:00",
                 "title": "Task capture", "body": body,
                 "status": "active", "priority": "high", "type": "bug",
@@ -2088,7 +2086,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             status, note_mode = self.post_json(url + "api/draft-save", token, draft_body)
             self.assertEqual(status, 200, note_mode)
             self.assertEqual(note_mode["saved_draft"]["kind"], "note")
-            switched = dict(draft_body, kind="task", expected_revision=1,
+            switched = dict(draft_body, kind="task",
                             expected_hash=note_mode["saved_draft"]["content_hash"])
             status, task_mode = self.post_json(url + "api/draft-save", token, switched)
             self.assertEqual(status, 200, task_mode)
@@ -2097,7 +2095,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertEqual(task_mode["saved_draft"]["tags"], ["code", "custom-tag"])
 
             status, created = self.post_json(url + "api/draft-finish", token, {
-                "id": draft_id, "expected_revision": 2,
+                "id": draft_id,
                 "expected_hash": task_mode["saved_draft"]["content_hash"],
             })
             self.assertEqual(status, 200, created)
@@ -2117,7 +2115,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertIn("## Literal heading", stored)
 
             status, repeated = self.post_json(url + "api/draft-finish", token, {
-                "id": draft_id, "expected_revision": 2,
+                "id": draft_id,
                 "expected_hash": task_mode["saved_draft"]["content_hash"],
             })
             self.assertEqual(status, 409, repeated)
@@ -2125,7 +2123,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
 
             empty_id = "1ab9fd4d-c0f2-4446-adf5-c893949994fd"
             status, empty = self.post_json(url + "api/draft-save", token, {
-                "id": empty_id, "expected_revision": 0, "kind": "note", "mode": "new",
+                "id": empty_id, "kind": "note", "mode": "new",
                 "capture_id": "75cc8138-74fd-4280-a323-1a98580653a5",
                 "created": draft_body["created"], "title": "", "body": " \n\t",
             })
@@ -2233,67 +2231,28 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         finally:
             self.stop_interactive_web(process)
 
-    def test_inline_task_content_draft_preserves_metadata_and_rejects_stale_target(self) -> None:
-        import uuid
-
+    def test_card_edit_preserves_metadata_and_rejects_stale_hash(self) -> None:
         process, url = self.start_interactive_web()
         try:
             initial = self.get_json(url + "api/items")
             token = initial["meta"]["api_token"]
             task = self.get_card(url, next(item for item in initial["tasks"] if item["id"] == self.tasks[0].stem))
             source = task["body"].replace("Test content.", "Edited from the content panel.")
-            request = {"id": str(uuid.uuid4()), "expected_revision": 0, "kind": "task", "mode": "edit",
-                       "title": "", "body": source, "target_ref": task["ref"], "base_hash": task["content_hash"],
-                       "base_updated": task["updated"], "origin": "card-body"}
-            status, response = self.post_json(url + "api/draft-save", token, request)
-            self.assertEqual(status, 200, response)
-            draft = response["saved_draft"]
-            status, result = self.post_json(url + "api/draft-finish", token, {
-                "id": draft["id"], "expected_revision": draft["revision"], "expected_hash": draft["content_hash"]})
+            status, result = self.post_json(url + "api/card-edit", token, {
+                "ref": task["ref"], "expected_hash": task["content_hash"], "body": source,
+            })
             self.assertEqual(status, 200, result)
             fresh = self.get_card(url, next(item for item in result["tasks"] if item["id"] == task["id"]))
             self.assertIn("Edited from the content panel.", fresh["body"])
             for key in ("status", "priority", "type", "tags", "due", "due_kind", "claimed_by"):
                 self.assertEqual(fresh[key], task[key], key)
             unchanged = self.tasks[0].read_bytes()
-            request["id"] = str(uuid.uuid4())
-            status, response = self.post_json(url + "api/draft-save", token, request)
-            self.assertEqual(status, 200, response)
-            draft = response["saved_draft"]
-            status, result = self.post_json(url + "api/draft-finish", token, {
-                "id": draft["id"], "expected_revision": draft["revision"], "expected_hash": draft["content_hash"]})
-            self.assertEqual(status, 409, result)
-            self.assertEqual(self.tasks[0].read_bytes(), unchanged)
-            self.assertTrue((self.root / "drafts" / (draft["id"] + ".md")).is_file())
-        finally:
-            self.stop_interactive_web(process)
-
-    def test_note_edit_draft_keeps_text_when_target_changes(self) -> None:
-        process, url = self.start_interactive_web()
-        try:
-            initial = self.get_json(url + "api/items")
-            token = initial["meta"]["api_token"]
-            note = self.get_card(url, next(item for item in initial["tasks"] if item["id"] == self.note.stem))
-            draft_body = {"id": "c38f37dd-2eaa-4a80-a240-4a2b3b92c617", "expected_revision": 0,
-                          "kind": "note", "mode": "edit", "origin": "card-body", "target_ref": note["ref"],
-                          "base_hash": note["content_hash"], "base_updated": note["updated"],
-                          "title": "", "body": "Preserve this stale edit."}
-            status, created = self.post_json(url + "api/draft-save", token, draft_body)
-            self.assertEqual(status, 200, created)
-            changed = subprocess.run(
-                [str(self.root / "mt"), "edit", note["ref"], "--body", "--file", "-",
-                 "--expected-hash", note["content_hash"]],
-                cwd=self.root, input="The target changed independently.", text=True, capture_output=True,
-            )
-            self.assertEqual(changed.returncode, 0, changed.stderr)
-            status, conflict = self.post_json(url + "api/draft-finish", token, {
-                "id": draft_body["id"], "expected_revision": 1,
-                "expected_hash": created["saved_draft"]["content_hash"],
+            status, conflict = self.post_json(url + "api/card-edit", token, {
+                "ref": task["ref"], "expected_hash": task["content_hash"], "body": "Stale overwrite",
             })
             self.assertEqual(status, 409, conflict)
-            self.assertIn("target changed", conflict["error"])
-            kept = self.get_json(url + "api/drafts")["drafts"]
-            self.assertEqual(kept[0]["body"], draft_body["body"])
+            self.assertTrue(conflict.get("conflict"))
+            self.assertEqual(self.tasks[0].read_bytes(), unchanged)
         finally:
             self.stop_interactive_web(process)
 
@@ -2304,7 +2263,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         try:
             token = self.get_json(url + "api/items")["meta"]["api_token"]
             status, saved = self.post_json(url + "api/draft-save", token, {
-                "id": draft_id, "expected_revision": 0, "kind": "note", "mode": "new",
+                "id": draft_id, "kind": "note", "mode": "new",
                 "capture_id": capture_id, "created": "2026-10-15T09:30:00",
                 "title": "Hash guard", "body": "Original text",
             })
@@ -2317,7 +2276,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             path.write_text(header + separator + "manual Git edit\n", encoding="utf-8")
 
             status, edit_conflict = self.post_json(url + "api/draft-save", token, {
-                "id": draft_id, "expected_revision": 1, "expected_hash": original_hash,
+                "id": draft_id, "expected_hash": original_hash,
                 "kind": "note", "mode": "new", "capture_id": capture_id,
                 "created": "2026-10-15T09:30:00", "title": "Hash guard", "body": "Overwrite",
             })
@@ -2325,34 +2284,11 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
             self.assertIn("outside microtask", edit_conflict["error"])
 
             status, discard_conflict = self.post_json(url + "api/draft-discard", token, {
-                "id": draft_id, "expected_revision": 1, "expected_hash": original_hash,
+                "id": draft_id, "expected_hash": original_hash,
             })
             self.assertEqual(status, 409, discard_conflict)
             self.assertTrue(path.is_file())
             self.assertIn("manual Git edit", path.read_text(encoding="utf-8"))
-        finally:
-            self.stop_interactive_web(process)
-
-    def test_edit_draft_without_original_baseline_cannot_apply(self) -> None:
-        process, url = self.start_interactive_web()
-        draft_id = "e1941a6e-739d-49e4-9391-d70770fb149b"
-        try:
-            initial = self.get_json(url + "api/items")
-            token = initial["meta"]["api_token"]
-            note = self.get_card(url, next(item for item in initial["tasks"] if item["id"] == self.note.stem))
-            status, saved = self.post_json(url + "api/draft-save", token, {
-                "id": draft_id, "expected_revision": 0, "kind": "note", "mode": "edit", "origin": "card-body",
-                "target_ref": note["ref"], "title": "", "body": "Recovered unbased edit",
-            })
-            self.assertEqual(status, 200, saved)
-            self.assertEqual(saved["saved_draft"]["base_hash"], "0" * 64)
-            status, conflict = self.post_json(url + "api/draft-finish", token, {
-                "id": draft_id, "expected_revision": 1,
-                "expected_hash": saved["saved_draft"]["content_hash"],
-            })
-            self.assertEqual(status, 409, conflict)
-            self.assertIn("no verified target baseline", conflict["error"])
-            self.assertEqual(self.get_json(url + "api/drafts")["drafts"][0]["body"], "Recovered unbased edit")
         finally:
             self.stop_interactive_web(process)
 

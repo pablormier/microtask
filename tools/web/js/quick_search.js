@@ -99,7 +99,7 @@ function createQuickSearchController() {
 
     canOpenQuickSearch() {
       return Boolean(this.ready && !this.captureComposer.open
-        && !(this.contentEditor && this.contentEditor.draft && this.contentEditor.zen));
+        && !(this.contentEditor && this.contentEditor.open && this.contentEditor.zen));
     },
 
     quickSearchActiveDescendant() {

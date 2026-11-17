@@ -105,7 +105,6 @@ function taskBoard() {
     get drafts() { return this.getDraftStore().drafts; },
     set drafts(value) { this.getDraftStore().drafts = value; },
     draftSearch: "",
-    draftModeFilter: "all",
     draftWorkspaceStatus: "",
     draftBusy: false,
     syncWarning: "",
@@ -218,9 +217,6 @@ function taskBoard() {
       this.loadError = "";
       try {
         await this.refreshItems();
-        if (!this.ready) {
-          this.restoreLocalWorkspaceDrafts();
-        }
         await this.loadWorkspaceDrafts();
         this.ready = true;
         this.$nextTick(() => {
@@ -798,8 +794,7 @@ function taskBoard() {
 
     hasUnsavedChanges() {
       if (this.selected && this.propertyEditor.changed()) return true;
-      if (this.contentEditor.draft && !this.contentEditor.localSaved &&
-          this.contentEditor.draft.body !== this.contentEditor.draft._savedBody) return true;
+      if (this.contentEditor.open && this.contentEditor.text !== this.contentEditor.original) return true;
       return this.captureComposer.hasUnpersisted(this.captureContext());
     },
 

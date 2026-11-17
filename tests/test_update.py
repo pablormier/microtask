@@ -308,7 +308,7 @@ class UpdateTests(unittest.TestCase):
         ).stdout)
         subprocess.run(
             [str(self.workspace / "mt"), "draft", "edit", tracked.stem,
-             "--expected-revision", str(tracked_record["revision"]), "--file", "-"],
+             "--expected-hash", str(tracked_record["content_hash"]), "--file", "-"],
             cwd=self.workspace, input="unsynced edit\n", check=True, capture_output=True, text=True,
         )
         subprocess.run(

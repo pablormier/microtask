@@ -1,71 +1,50 @@
-// Workspace draft persistence. No editor, modal, DOM or Alpine state lives here.
-// Queues stay private; each store has its own draft list and per-ID requests.
-function createDraftStore({ context, findTarget, captureFields, initialDrafts = [],
-  onStatus = () => {}, onWarning = () => {}, onSaved = () => {}, onRecovery = () => {} }) {
+// Workspace draft persistence for new-card drafts. No editor, modal, DOM or Alpine state lives here.
+// The store keeps one object per draft ID. A draft carries id, capture_id, created, kind,
+// title, body, instructions, taskOptions, content_hash, state and _saved (the snapshot
+// last written to the workspace, or null before the first save).
+function createDraftStore({ context, captureFields, initialDrafts = [],
+  onStatus = () => {}, onWarning = () => {}, onSaved = () => {} }) {
   const timers = Object.create(null);
   const pendingSaves = Object.create(null);
-  const queuedSaves = Object.create(null);
-  // Maps a conflicting draft object to the recovery record it produced.
-  const recoveryLineage = new WeakMap();
+  const resave = Object.create(null);
+  const CONFLICT_MESSAGE = "This draft changed since you opened it. Copy your text or save as a new draft.";
+
   function setStatus(value) {
     onStatus(value);
   }
-  function draftBodyText(draft) {
-    return String(draft && (draft.body == null ? draft.text || "" : draft.body));
+  function inWorkspace(draft) {
+    return context().available && !(draft.workspaceKey && draft.workspaceKey !== context().workspaceKey);
   }
-  function applySavedFields(target, saved, { body, title, kind, metadata }) {
-    target.revision = saved.revision;
-    target.updated = saved.updated;
-    target.content_hash = saved.content_hash;
-    target._serverSaved = true;
-    target._savedBody = body;
-    target._savedTitle = title;
-    target._savedKind = kind;
-    target._savedMetadata = metadata;
+  function editable(draft) {
+    return Boolean(draft && draft.id && draft.state !== "conflict" && draft.state !== "closed" && inWorkspace(draft));
   }
-  function buildSavePayload(draft, { id, expectedRevision, expectedHash, captureId, created, targetRef }) {
-    const body = draftBodyText(draft);
-    const title = String(draft.title || "");
+  function clearTimer(key) {
+    clearTimeout(timers[key]);
+    delete timers[key];
+  }
+  function buildSavePayload(draft, { id, expectedHash, captureId }) {
     const payload = {
       id,
-      expected_revision: expectedRevision,
       kind: draft.kind || "note",
-      mode: draft.mode,
-      title,
-      body,
+      title: String(draft.title || ""),
+      body: String(draft.body || ""),
+      capture_id: captureId,
+      created: draft.created,
       ...(draft.origin ? { origin: draft.origin } : {}),
+      ...captureFields(draft),
     };
-    if (draft.mode === "new") {
-      payload.capture_id = captureId;
-      payload.created = created;
-      Object.assign(payload, captureFields(draft));
-    } else if (expectedRevision === 0) {
-      payload.target_ref = targetRef;
-      payload.base_hash = draft.base_hash || "0".repeat(64);
-      payload.base_updated = draft.base_updated || "";
-    }
-    if (expectedRevision > 0) payload.expected_hash = expectedHash;
+    if (expectedHash) payload.expected_hash = expectedHash;
     return payload;
   }
-  async function runDraftAction(store, endpoint, draft, { ignoreTargetConflict = false } = {}) {
-    if (!draft || draft._orphanedLocal || !await store.flush(draft)) return null;
-    const id = draft.id || draft.draftId;
-    try {
-      const result = await store.post(endpoint, {
-        id,
-        expected_revision: Number(draft.revision || 0),
-        expected_hash: draft.content_hash,
-      });
-      store.drafts = store.drafts.filter(item => item.id !== id);
-      store.markClosed(draft);
-      return result;
-    } catch (error) {
-      if ((error.conflict || error.missing) && !(ignoreTargetConflict && error.targetConflict)) {
-        await store.markForRecovery(draft, undefined, error);
-      }
-      throw error;
-    }
+  function markConflict(draft) {
+    if (draft) draft.state = "conflict";
+    setStatus("Error");
+    onWarning(CONFLICT_MESSAGE);
   }
+  function removeFromList(store, id) {
+    store.drafts = store.drafts.filter(item => item.id !== id);
+  }
+
   return {
     drafts: initialDrafts.slice(),
 
@@ -73,153 +52,18 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       const response = await fetch("/api/drafts", { cache: "no-store" });
       if (!response.ok) throw new Error("Could not load workspace drafts");
       const payload = await response.json();
-      this.drafts = payload.drafts || [];
-    },
-
-    storageKey(workspaceKey, draftId) {
-      const key = workspaceKey || context().workspaceKey;
-      if (!key || !draftId) return "";
-      return "mt-note-draft-v2:" + key + ":" + draftId;
-    },
-
-    async importLocal() {
-      if (!context().available || typeof localStorage.length !== "number" ||
-          typeof localStorage.key !== "function") return;
-      const prefix = "mt-note-draft-v2:" + context().workspaceKey + ":";
-      const keys = [];
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (key && key.startsWith(prefix)) keys.push(key);
-      }
-      for (const key of keys) {
-        let local;
-        try { local = JSON.parse(localStorage.getItem(key)); } catch (_) { continue; }
-        const localId = local && (local.id || local.draftId) || key.slice(prefix.length);
-        if (!local || !localId || !local.kind || !local.mode) continue;
-        if (local.mode === "edit" && local.origin !== "card-body") continue;
-        if (local._recoveryExtra) continue;
-        const body = draftBodyText(local);
-        const current = this.drafts.find(draft => draft.id === localId);
-        const title = String(local.title || "");
-        const sameText = current && current.kind === (local.kind || "note") && current.mode === (local.mode || "new") &&
-          current.body === body && String(current.title || "") === title &&
-          String(current.origin || "") === String(local.origin || "") &&
-          this.metadataSnapshot(current) === this.metadataSnapshot(local);
-        if (!current && (local._serverSaved || Number(local.revision || 0) > 0 || this.wasDismissed(localId))) {
-          continue;
-        }
-        const revision = current ? Number(current.revision) : 0;
-        if (current && !sameText && (Number(local.revision || 0) !== revision || local.content_hash !== current.content_hash)) {
-          setStatus("Error");
-          continue;
-        }
-        if (sameText) {
-          local.revision = revision;
-          local.content_hash = current.content_hash;
-          local._serverSaved = true;
-          try { localStorage.setItem(key, JSON.stringify(local)); } catch (_) {}
-          continue;
-        }
-        let targetRef;
-        if (local.mode !== "new" && revision === 0) {
-          const target = findTarget(local.ref, local.target);
-          if (!target) continue;
-          targetRef = target.ref;
-        }
-        const payload = buildSavePayload(local, {
-          id: localId,
-          expectedRevision: revision,
-          expectedHash: current && current.content_hash,
-          captureId: local.capture_id || local.captureId,
-          created: local.created || local.createdAt,
-          targetRef,
-        });
-        try {
-          const result = await this.post("/api/draft-save", payload);
-          const saved = { ...result.saved_draft, _localRecovery: false, _orphanedLocal: false };
-          this.upsert(saved);
-          applySavedFields(local, saved, {
-            body, title, kind: payload.kind, metadata: this.metadataSnapshot(local),
-          });
-          try { localStorage.setItem(key, JSON.stringify(local)); } catch (_) {}
-          setStatus("Saved in workspace");
-        } catch (_) {
-          setStatus("Error");
-        }
-      }
-    },
-
-    restoreLocal() {
-      if (typeof localStorage === "undefined" || typeof localStorage.length !== "number" ||
-          typeof localStorage.key !== "function" || !context().workspaceKey) return;
-      const prefix = "mt-note-draft-v2:" + context().workspaceKey + ":";
-      this.drafts = this.drafts.filter(draft => !draft._localRecovery);
-      for (let index = 0; index < localStorage.length; index += 1) {
-        const key = localStorage.key(index);
-        if (!key || !key.startsWith(prefix)) continue;
-        let local;
-        try { local = JSON.parse(localStorage.getItem(key)); } catch (_) { continue; }
-        if (!local || !local.kind || !local.mode) continue;
-        if (local.mode === "edit" && local.origin !== "card-body") continue;
-        const id = local.id || local.draftId || key.slice(prefix.length);
-        if (!id) continue;
-        // A closed ID is a durable signal from another tab. Ignore its stale
-        // localStorage copy even when the canonical draft still exists.
-        if (this.wasDismissed(id)) {
-          try { localStorage.removeItem(key); } catch (_) {}
-          continue;
-        }
-        const body = String(local.body == null ? local.text || "" : local.body);
-        const title = String(local.title || "");
-        if (local._recoveryExtra && local.sourceId) {
-          // An additional recovery copy keeps its own key and never matches a server draft.
-          this.drafts.push({
-            ...local, id, body, title, storageId: id,
-            _localRecovery: true, _orphanedLocal: true, _staleLocal: true,
-          });
-          continue;
-        }
-        const current = this.drafts.find(draft => draft.id === id);
-        if (current) {
-          if ((local.kind || "note") === (current.kind || "note") && (local.mode || "new") === (current.mode || "new") &&
-              body === String(current.body || "") && title === String(current.title || "") &&
-              this.metadataSnapshot(local) === this.metadataSnapshot(current)) continue;
-          const recoveryId = id + ":local-recovery";
-          this.drafts.push({
-            ...local, id: recoveryId, sourceId: id, storageId: id, body, title,
-            _localRecovery: true, _orphanedLocal: true, _staleLocal: true,
-          });
-          continue;
-        }
-        const wasSaved = Boolean(local._serverSaved) || Number(local.revision || 0) > 0;
-        this.drafts.push({
-          ...local, id, body, title,
-          revision: Number(local.revision || 0),
-          _savedBody: local._savedBody,
-          _savedTitle: local._savedTitle,
-          sourceId: id, storageId: id,
-          _localRecovery: wasSaved,
-          _orphanedLocal: wasSaved,
-          _staleLocal: wasSaved,
-        });
-      }
-    },
-
-    dismissKey(id) {
-      return "mt-draft-closed-v1:" + context().workspaceKey + ":" + id;
-    },
-
-    wasDismissed(id) {
-      try { return Boolean(localStorage.getItem(this.dismissKey(id))); } catch (_) { return false; }
+      this.drafts = (payload.drafts || []).map(draft => {
+        const loaded = { ...draft, state: "clean" };
+        loaded._saved = this.snapshot(loaded);
+        return loaded;
+      });
     },
 
     upsert(saved) {
       if (!saved || !saved.id) return null;
       const index = this.drafts.findIndex(draft => draft.id === saved.id);
       if (index >= 0) {
-        if (this.drafts[index] !== saved) {
-          Object.assign(this.drafts[index], saved);
-        }
+        if (this.drafts[index] !== saved) Object.assign(this.drafts[index], saved);
         return this.drafts[index];
       }
       this.drafts.push(saved);
@@ -237,250 +81,110 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
         const error = new Error(payload.error || "Draft action failed");
         error.conflict = Boolean(payload.conflict || response.status === 409);
         error.missing = response.status === 404;
-        error.targetConflict = /target changed since the draft|no verified target baseline|draft target is missing/i.test(error.message);
         throw error;
       }
       return payload;
     },
 
-    metadataSnapshot(draft) {
-      // Edit drafts carry changes in their body; server metadata fields are empty defaults.
-      if (draft && draft.mode === "edit") return "";
+    // Everything a save writes, as one comparable string.
+    snapshot(draft) {
       const options = draft && draft.taskOptions && typeof draft.taskOptions === "object"
         ? draft.taskOptions : draft || {};
       const hasTaskFields = METADATA_FIELDS
         .some(field => Object.prototype.hasOwnProperty.call(options, field));
-      if (!hasTaskFields) return "";
       return JSON.stringify({
-        ...metadataCoreObject(options),
+        kind: (draft && draft.kind) || "note",
+        title: String(draft && draft.title || ""),
+        body: String(draft && draft.body || ""),
+        metadata: hasTaskFields ? metadataCoreObject(options) : null,
         instructions: String(draft && draft.instructions || ""),
       });
     },
 
     hasChanges(draft) {
-      if (!draft) return false;
-      const body = String(draft.body == null ? draft.text || "" : draft.body);
-      const title = String(draft.title || "");
-      const kind = draft.kind || "note";
-      const savedMetadata = Object.prototype.hasOwnProperty.call(draft, "_savedMetadata")
-        ? draft._savedMetadata : this.metadataSnapshot(draft);
-      return draft._savedBody !== body || draft._savedTitle !== title ||
-        (draft._savedKind || kind) !== kind || savedMetadata !== this.metadataSnapshot(draft);
-    },
-
-    saveLocal(draft) {
-      const id = draft.storageId || draft.sourceId || draft.id || draft.draftId;
-      const key = this.storageKey(draft.workspaceKey || context().workspaceKey, id);
-      if (!key) return;
-      try {
-        localStorage.setItem(key, JSON.stringify({
-          ...draft, id, body: String(draft.body == null ? draft.text || "" : draft.body), _serverSaved: Boolean(draft._serverSaved || Number(draft.revision || 0) > 0),
-        }));
-        return true;
-      } catch (_) { return false; }
-    },
-
-    markClosed(draft) {
-      const id = draft && (draft.storageId || draft.sourceId || draft.id || draft.draftId);
-      if (!id || !context().workspaceKey) return;
-      try {
-        localStorage.setItem(this.dismissKey(id), JSON.stringify({ state: "closed", id }));
-        localStorage.removeItem(this.storageKey(context().workspaceKey, id));
-      } catch (_) {}
-    },
-
-    removeRecovery(sourceId, selected) {
-      if (selected && selected._recoveryExtra) {
-        // An additional recovery copy is removed alone.
-        const extraId = selected.recoveryId || selected.id;
-        this.drafts = this.drafts.filter(item => item !== selected && !(item && item.id === extraId));
-        return;
-      }
-      this.drafts = this.drafts.filter(item => {
-        if (item === selected) return false;
-        if (!item) return true;
-        if (item._recoveryExtra) return true;
-        const itemSourceId = item.sourceId || item.storageId || item.id;
-        // An unsaved inline row can coexist with its explicit recovery copy.
-        // Remove both local rows while retaining any canonical saved sibling.
-        if (!item._orphanedLocal && (item._serverSaved || Number(item.revision || 0) > 0)) return true;
-        return itemSourceId !== sourceId && item.id !== sourceId + ":local-recovery";
-      });
-    },
-
-    async markForRecovery(draft, message, error) {
-      const id = draft && (draft.sourceId || draft.id || draft.draftId);
-      if (!draft || !id) return;
-      const primaryId = id + ":local-recovery";
-      const canonical = this.drafts.includes(draft);
-      // Update a record in place only when this draft produced it. Any other
-      // conflict gets its own record and storage key so no text is overwritten.
-      let recoveryRecord = recoveryLineage.get(draft);
-      if (recoveryRecord && !this.drafts.includes(recoveryRecord)) recoveryRecord = null;
-      const primary = this.drafts.find(item => item.id === primaryId);
-      if (!recoveryRecord && primary === draft) recoveryRecord = primary;
-      const extra = !recoveryRecord && Boolean(primary);
-      const recoveryId = recoveryRecord ? recoveryRecord.id : extra ? this.nextRecoveryId(primaryId) : primaryId;
-      const fields = {
-        ...draft,
-        id: recoveryId,
-        sourceId: id,
-        storageId: recoveryRecord ? recoveryRecord.storageId : extra ? recoveryId : id,
-        body: String(draft.body == null ? draft.text || "" : draft.body),
-        _recoveryExtra: recoveryRecord ? Boolean(recoveryRecord._recoveryExtra) : extra,
-        _localRecovery: true,
-        _orphanedLocal: true,
-        _staleLocal: true,
-      };
-      if (recoveryRecord) {
-        if (recoveryRecord !== draft) Object.assign(recoveryRecord, fields);
-      } else {
-        recoveryRecord = fields;
-        this.drafts.push(recoveryRecord);
-      }
-      recoveryLineage.set(draft, recoveryRecord);
-      if (!canonical) {
-        draft.sourceId = id;
-        draft.storageId = recoveryRecord.storageId;
-        if (recoveryRecord._recoveryExtra) {
-          draft._recoveryExtra = true;
-          draft.recoveryId = recoveryRecord.id;
-        }
-        draft._orphanedLocal = true;
-        draft._localRecovery = true;
-        draft._staleLocal = true;
-      }
-      this.saveLocal(recoveryRecord);
-      // The canonical entry holds the user's text and a stale revision. Drop it
-      // so reopening cannot repeat the conflict, then reload the server copy.
-      if (canonical) this.drafts = this.drafts.filter(item => item !== draft);
-      setStatus("Error");
-      onWarning(message || "The workspace draft changed or was removed. Recover your local text as a separate draft or dismiss it.");
-      onRecovery(draft, recoveryRecord);
-      if (canonical && !(error && error.missing)) await this.refreshDraft(id);
-    },
-
-    nextRecoveryId(primaryId) {
-      for (let n = 2; ; n += 1) {
-        const id = primaryId + ":" + n;
-        const key = this.storageKey(null, id);
-        let stored = false;
-        try { stored = Boolean(key && localStorage.getItem(key)); } catch (_) {}
-        if (!stored && !this.wasDismissed(id) && !this.drafts.some(item => item.id === id)) return id;
-      }
-    },
-
-    async refreshDraft(id) {
-      try {
-        const response = await fetch("/api/drafts", { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = await response.json();
-        const fresh = (payload.drafts || []).find(item => item.id === id);
-        if (fresh && !this.drafts.some(item => item.id === id)) this.drafts.push(fresh);
-      } catch (_) {}
+      return Boolean(draft) && this.snapshot(draft) !== draft._saved;
     },
 
     isEmpty(draft) {
-      const id = draft && (draft.id || draft.draftId);
-      return Boolean(draft && draft.mode === "new" &&
+      return Boolean(draft &&
         !String(draft.title || "").trim() &&
-        !String(draft.body == null ? draft.text || "" : draft.body).trim() &&
+        !String(draft.body || "").trim() &&
         !String(draft.instructions || "").trim() &&
-        Number(draft.revision || 0) === 0 && !draft._serverSaved &&
-        !pendingSaves[String(id)]);
+        !draft.content_hash &&
+        !pendingSaves[String(draft.id)]);
     },
 
     forgetEmpty(draft) {
       if (!this.isEmpty(draft)) return;
-      const id = draft.id || draft.draftId || draft.captureId;
-      clearTimeout(timers[String(id)]);
-      delete timers[String(id)];
-      try { localStorage.removeItem(this.storageKey(draft.workspaceKey, id)); } catch (_) {}
-      this.drafts = this.drafts.filter(item => item.id !== id);
+      clearTimer(String(draft.id));
+      removeFromList(this, draft.id);
     },
 
-    dismiss(draft) {
-      const sourceId = draft.sourceId || draft.id;
-      this.markClosed(draft);
-      this.removeRecovery(sourceId, draft);
-      return sourceId;
-    },
-
-    async recover(draft, newId, created) {
-      const sourceId = draft.sourceId || draft.storageId || draft.id;
-      let targetRef;
-      if (draft.mode !== "new") {
-        const target = findTarget(null, draft.target) || findTarget(draft.ref);
-        if (!target) throw new Error("The original item is unavailable. Keep this local copy and reconcile it manually.");
-        targetRef = target.ref;
-      }
-      const payload = buildSavePayload(draft, {
-        id: newId,
-        expectedRevision: 0,
-        // Divergent text must not share an already-promoted capture's identity.
-        captureId: newId,
-        created: draft.created || draft.createdAt || created,
-        targetRef,
-      });
-      const result = await this.post("/api/draft-save", payload);
-      this.markClosed({ ...draft, sourceId });
-      this.removeRecovery(sourceId, draft);
-      this.upsert({ ...result.saved_draft, _localRecovery: false, _orphanedLocal: false });
-      setStatus("Recovered as a separate workspace draft");
-      return result.saved_draft;
-    },
-
-    finish(draft) {
-      return runDraftAction(this, "/api/draft-finish", draft, { ignoreTargetConflict: true });
-    },
-
-    async discard(draft) {
-      if (!draft || draft._orphanedLocal || !context().available ||
-          (draft.workspaceKey && draft.workspaceKey !== context().workspaceKey)) return null;
-      const id = draft.id || draft.draftId;
-      const key = id ? String(id) : "";
-      if (key) {
-        clearTimeout(timers[key]);
-        delete timers[key];
-        delete queuedSaves[key];
-        if (pendingSaves[key]) await pendingSaves[key];
-        clearTimeout(timers[key]);
-        delete timers[key];
-      }
-      const current = this.drafts.find(item => item.id === id);
-      const revision = Number(draft.revision || (current && current.revision) || 0);
-      const contentHash = draft.content_hash || (current && current.content_hash);
-      const serverSaved = Boolean(draft._serverSaved || (current && current._serverSaved) || revision > 0);
-      if (!serverSaved) {
-        this.drafts = this.drafts.filter(item => item.id !== id);
-        this.markClosed(draft);
-        return { message: "Draft discarded" };
-      }
+    async finish(draft) {
+      if (!editable(draft) || !await this.flush(draft)) return null;
       try {
-        const result = await this.post("/api/draft-discard", {
-          id,
-          expected_revision: revision,
-          expected_hash: contentHash,
+        const result = await this.post("/api/draft-finish", {
+          id: draft.id,
+          expected_hash: draft.content_hash,
         });
-        this.drafts = this.drafts.filter(item => item.id !== id);
-        this.markClosed(draft);
+        draft.state = "closed";
+        removeFromList(this, draft.id);
         return result;
       } catch (error) {
-        if (error.conflict || error.missing) {
-          await this.markForRecovery(draft, undefined, error);
-        }
+        if (error.conflict || error.missing) markConflict(draft);
         throw error;
       }
     },
 
+    async discard(draft) {
+      if (!draft || !draft.id || draft.state === "closed" || !inWorkspace(draft)) return null;
+      const key = String(draft.id);
+      clearTimer(key);
+      delete resave[key];
+      if (pendingSaves[key]) await pendingSaves[key];
+      clearTimer(key);
+      // A draft that was never saved, or lost a conflict, has nothing of ours in the workspace.
+      if (!draft.content_hash || draft.state === "conflict") {
+        draft.state = "closed";
+        removeFromList(this, draft.id);
+        return { message: "Draft discarded" };
+      }
+      try {
+        const result = await this.post("/api/draft-discard", {
+          id: draft.id,
+          expected_hash: draft.content_hash,
+        });
+        draft.state = "closed";
+        removeFromList(this, draft.id);
+        return result;
+      } catch (error) {
+        if (error.conflict || error.missing) markConflict(draft);
+        throw error;
+      }
+    },
+
+    async saveAsNew(draft, newId, created) {
+      const payload = buildSavePayload({ ...draft, created: draft.created || created }, {
+        id: newId,
+        expectedHash: null,
+        captureId: newId,
+      });
+      const result = await this.post("/api/draft-save", payload);
+      const saved = { ...result.saved_draft, state: "clean" };
+      saved._saved = this.snapshot(saved);
+      draft.state = "closed";
+      removeFromList(this, draft.id);
+      this.upsert(saved);
+      setStatus("Saved in workspace");
+      onWarning("");
+      return saved;
+    },
+
     schedule(draft, delay = 450) {
-      const id = draft && (draft.id || draft.draftId);
-      if (!draft || !id || draft._orphanedLocal || !context().available ||
-          (draft.workspaceKey && draft.workspaceKey !== context().workspaceKey)) return;
-      if (this.isEmpty(draft)) return;
-      if (!this.hasChanges(draft)) return;
-      const key = String(id);
-      clearTimeout(timers[key]);
+      if (!editable(draft) || this.isEmpty(draft) || !this.hasChanges(draft)) return;
+      draft.state = "dirty";
+      const key = String(draft.id);
+      clearTimer(key);
       setStatus("Saving…");
       timers[key] = setTimeout(() => {
         delete timers[key];
@@ -488,95 +192,72 @@ function createDraftStore({ context, findTarget, captureFields, initialDrafts = 
       }, delay);
     },
 
+    // One request per draft at a time. A save asked for while one is in flight
+    // runs once more afterwards and resolves when the draft's latest text is saved.
     async save(draft) {
-      const draftId = draft && (draft.id || draft.draftId);
-      if (!draft || !draftId || draft._orphanedLocal || !context().available ||
-          (draft.workspaceKey && draft.workspaceKey !== context().workspaceKey)) return false;
-      const key = String(draftId);
-      const pending = pendingSaves[key];
-      if (pending) {
-        queuedSaves[key] = draft;
-        await pending;
-        const queued = queuedSaves[key];
-        if (queued === draft) {
-          delete queuedSaves[key];
-          if (this.hasChanges(queued)) {
-            return this.save(queued);
-          }
-          return true;
-        }
-        return pendingSaves[key] ? await pendingSaves[key] : true;
+      if (!editable(draft)) return false;
+      const key = String(draft.id);
+      if (pendingSaves[key]) {
+        resave[key] = true;
+        return pendingSaves[key];
       }
-      if (draft.mode === "new" && this.isEmpty(draft)) return false;
-      const body = draftBodyText(draft);
-      const title = String(draft.title || "");
-      const expectedRevision = Number(draft.revision || 0);
-      const payload = buildSavePayload(draft, {
-        id: draftId,
-        expectedRevision,
-        expectedHash: draft.content_hash,
-        captureId: draft.capture_id || draft.captureId,
-        created: draft.created || draft.createdAt,
-        targetRef: draft.ref || (findTarget(null, draft.target) || {}).ref,
-      });
-      const savedKind = payload.kind;
-      const savedMetadata = this.metadataSnapshot({ ...payload, kind: savedKind });
-      const request = (async () => {
-        try {
-          const result = await this.post("/api/draft-save", payload);
-          const saved = { ...result.saved_draft, _localRecovery: false, _orphanedLocal: false };
-          const savedFields = { body, title, kind: savedKind, metadata: savedMetadata };
-          applySavedFields(draft, saved, savedFields);
-          if (queuedSaves[key] && queuedSaves[key] !== draft) {
-            applySavedFields(queuedSaves[key], saved, savedFields);
-          }
-          if (this.drafts.includes(draft)) {
-            draft._localRecovery = false;
-            draft._orphanedLocal = false;
-          } else {
-            this.upsert(saved);
-          }
-          setStatus("Saved in workspace");
-          this.saveLocal(draft);
-          onSaved(draft);
-          return true;
-        } catch (error) {
-          if (error.conflict || error.missing) {
-            await this.markForRecovery(draft, undefined, error);
-          } else {
-            setStatus("Error");
-            onWarning("Workspace save failed. Your local recovery copy is still available.");
-          }
-          return false;
-        }
+      const run = (async () => {
+        let ok;
+        do {
+          delete resave[key];
+          ok = await this.send(draft);
+        } while (ok && resave[key] && editable(draft) && this.hasChanges(draft));
+        delete resave[key];
+        return ok;
       })();
-      pendingSaves[key] = request;
-      const result = await request;
-      if (pendingSaves[key] === request) delete pendingSaves[key];
-      const queued = queuedSaves[key];
-      delete queuedSaves[key];
-      if (queued && this.hasChanges(queued)) {
-        return this.save(queued);
+      pendingSaves[key] = run;
+      try {
+        return await run;
+      } finally {
+        if (pendingSaves[key] === run) delete pendingSaves[key];
       }
-      return result;
+    },
+
+    async send(draft) {
+      if (this.isEmpty(draft)) return false;
+      draft.state = "saving";
+      const payload = buildSavePayload(draft, {
+        id: draft.id,
+        expectedHash: draft.content_hash || null,
+        captureId: draft.capture_id,
+      });
+      const sent = this.snapshot(draft);
+      try {
+        const result = await this.post("/api/draft-save", payload);
+        const saved = result.saved_draft;
+        draft.updated = saved.updated;
+        draft.content_hash = saved.content_hash;
+        draft._saved = sent;
+        draft.state = this.hasChanges(draft) ? "dirty" : "clean";
+        this.upsert(draft);
+        setStatus("Saved in workspace");
+        onSaved(draft);
+        return true;
+      } catch (error) {
+        if (error.conflict || error.missing) {
+          markConflict(draft);
+        } else {
+          draft.state = "dirty";
+          setStatus("Error");
+          onWarning("Workspace save failed.");
+        }
+        return false;
+      }
     },
 
     async flush(draft) {
-      if (!draft || draft._orphanedLocal || !context().available ||
-          (draft.workspaceKey && draft.workspaceKey !== context().workspaceKey)) return false;
-      const id = draft && (draft.id || draft.draftId);
-      const key = id ? String(id) : "";
-      if (key) {
-        clearTimeout(timers[key]);
-        delete timers[key];
-        if (pendingSaves[key]) await pendingSaves[key];
-        clearTimeout(timers[key]);
-        delete timers[key];
-      }
-      const body = String(draft.body == null ? draft.text || "" : draft.body);
-      const title = String(draft.title || "");
+      if (!editable(draft)) return false;
+      const key = String(draft.id);
+      clearTimer(key);
+      if (pendingSaves[key]) await pendingSaves[key];
+      clearTimer(key);
       if (this.isEmpty(draft)) return true;
-      if (this.hasChanges({ ...draft, body, title })) return this.save(draft);
+      if (this.hasChanges(draft)) return this.save(draft);
       return true;
     },
   };

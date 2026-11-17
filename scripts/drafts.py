@@ -1,4 +1,4 @@
-"""Workspace-owned, revision-guarded Markdown drafts."""
+"""Workspace-owned, hash-guarded Markdown drafts."""
 from __future__ import annotations
 
 import fcntl
@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import sys
 import uuid
 
 import card_format
@@ -13,16 +14,17 @@ import card_format
 
 ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 FIELDS = (
-    "id", "kind", "mode", "revision", "created", "updated", "title", "target",
-    "base_hash", "base_updated", "capture_id", "origin", "status", "priority",
-    "type", "project", "topic", "tags", "due", "due_kind", "instructions",
+    "id", "kind", "mode", "created", "updated", "title",
+    "capture_id", "origin", "status", "priority", "type", "project",
+    "topic", "tags", "due", "due_kind", "instructions",
 )
-# Older recovery copies may not contain the target version they were opened
-# against. This reserved digest makes their edit drafts explicitly unbased.
-UNVERIFIED_BASE_HASH = "0" * 64
 
 
 class DraftConflict(ValueError):
+    pass
+
+
+class RetiredDraftError(ValueError):
     pass
 
 
@@ -94,36 +96,25 @@ def read_path(path: Path) -> dict[str, object]:
     if not isinstance(kind, str) or kind not in {"note", "task"}:
         raise ValueError(f"{path}: malformed draft kind; expected note or task")
     mode = metadata.get("mode")
-    if not isinstance(mode, str) or mode not in {"new", "edit"}:
-        raise ValueError(f"{path}: malformed draft mode; expected new or edit")
-    revision = metadata.get("revision")
-    if isinstance(revision, str) and re.fullmatch(r"[1-9][0-9]*", revision):
-        revision = int(revision)
-        metadata["revision"] = revision
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
-        raise ValueError(f"malformed draft revision: {path}")
+    if mode == "edit":
+        raise RetiredDraftError(
+            f"{path}: retired edit draft; apply or delete it manually (card edits no longer use drafts)"
+        )
+    if mode != "new":
+        raise ValueError(f"{path}: malformed draft mode; expected new")
     if not isinstance(metadata.get("title"), str) or any(char in metadata["title"] for char in "\r\n"):
         raise ValueError(f"malformed draft title: {path}")
     for field in ("created", "updated"):
         value = metadata.get(field)
         if not isinstance(value, str) or not card_format.is_timestamp(value):
             raise ValueError(f"malformed draft {field}: {path}")
-    mode = metadata["mode"]
-    kind = metadata["kind"]
-    if mode == "new":
-        capture_id = metadata.get("capture_id")
-        try:
-            parsed_capture_id = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
-        except ValueError:
-            parsed_capture_id = None
-        if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
-            raise ValueError(f"malformed new capture draft identity: {path}")
-    else:
-        target, base_hash = metadata.get("target"), metadata.get("base_hash")
-        if not isinstance(target, str) or not target or not isinstance(base_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", base_hash):
-            raise ValueError(f"malformed edit draft target: {path}")
-        if metadata.get("origin") != "card-body":
-            raise ValueError(f"{path}: edit draft uses a retired card format; create a fresh edit draft")
+    capture_id = metadata.get("capture_id")
+    try:
+        parsed_capture_id = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
+    except ValueError:
+        parsed_capture_id = None
+    if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
+        raise ValueError(f"malformed new capture draft identity: {path}")
     origin = metadata.get("origin")
     if origin is not None and not isinstance(origin, str):
         raise ValueError(f"malformed draft origin: {path}")
@@ -140,7 +131,13 @@ def list_drafts(root: Path) -> list[dict[str, object]]:
     directory = draft_directory(root)
     if not directory.is_dir():
         return []
-    return [read_path(path) for path in sorted(directory.glob("*.md"))]
+    items: list[dict[str, object]] = []
+    for path in sorted(directory.glob("*.md")):
+        try:
+            items.append(read_path(path))
+        except RetiredDraftError as error:
+            print(f"warning: skipping {error}", file=sys.stderr)
+    return items
 
 
 def save(
@@ -149,14 +146,13 @@ def save(
     draft_id: str | None,
     fields: dict[str, object],
     body: str,
-    expected_revision: int | None,
     now: str,
     expected_content_hash: str | None = None,
 ) -> dict[str, object]:
     if not isinstance(fields, dict):
         raise ValueError("draft fields must be a mapping")
-    if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
-        raise ValueError("expected_revision must be a non-negative integer or null")
+    if expected_content_hash is not None and (not isinstance(expected_content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_content_hash)):
+        raise ValueError("expected_content_hash must be a SHA-256 hash or null")
     if not isinstance(body, str):
         raise ValueError("draft body must be a string")
     try:
@@ -175,65 +171,44 @@ def save(
         mode = fields.get("mode", previous.get("mode") if previous else None)
         if not isinstance(kind, str) or kind not in {"note", "task"}:
             raise ValueError("draft kind must be note or task")
-        if not isinstance(mode, str) or mode not in {"new", "edit"}:
-            raise ValueError("draft mode must be new or edit")
+        if mode != "new":
+            raise ValueError("draft mode must be new")
         if previous is None:
-            if expected_revision not in (None, 0):
+            if expected_content_hash is not None:
                 raise DraftConflict("draft changed since it was loaded; refresh and retry")
-            revision = 1
             created = str(fields.get("created") or now)
         else:
-            if expected_revision == 0 and fields.get("origin") and fields.get("origin") != "card-body" and fields.get("origin") == previous.get("origin"):
+            if expected_content_hash is None and fields.get("origin") and fields.get("origin") == previous.get("origin"):
                 if body == previous.get("body") and str(fields.get("title") or "") == str(previous.get("title") or ""):
                     return previous
                 raise DraftConflict("an import with this origin already exists; local changes were retained")
-            if expected_revision is None or expected_revision != previous["revision"]:
-                raise DraftConflict("draft changed since it was loaded; refresh and retry")
             if expected_content_hash is None or expected_content_hash != previous["content_hash"]:
                 raise DraftConflict("draft content changed outside microtask; refresh and reconcile")
-            for field in ("mode", "target", "base_hash", "base_updated", "capture_id"):
+            for field in ("mode", "capture_id"):
                 if field in fields and fields[field] != previous.get(field):
                     raise ValueError(f"draft field '{field}' cannot change after creation")
-            if previous["mode"] != "new" and fields.get("kind", previous.get("kind")) != previous.get("kind"):
-                raise ValueError("draft kind cannot change after creation")
-            revision = int(previous["revision"]) + 1
             created = str(previous.get("created") or now)
 
-        if previous and previous["mode"] == "edit" and kind != previous.get("kind"):
-            raise ValueError("edit draft kind cannot change after creation")
         title = fields.get("title", previous.get("title", "") if previous else "")
         if not isinstance(title, str) or any(char in title for char in "\r\n"):
             raise ValueError("draft title must be single-line text")
-        if mode == "new":
-            capture_id = fields.get("capture_id", previous.get("capture_id") if previous else None)
-            created_value = fields.get("created", previous.get("created") if previous else now)
-            try:
-                parsed_capture_id = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
-            except ValueError:
-                parsed_capture_id = None
-            if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
-                raise ValueError("new note draft capture ID must be a canonical UUID")
-            if not isinstance(created_value, str) or not card_format.is_timestamp(created_value):
-                raise ValueError("new capture draft created time must be a valid local ISO timestamp with seconds")
-        else:
-            target = fields.get("target", previous.get("target") if previous else None)
-            base_hash = fields.get("base_hash", previous.get("base_hash") if previous else None)
-            if not isinstance(target, str) or not target or not isinstance(base_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", base_hash):
-                raise ValueError("edit drafts require a target and its SHA-256 base hash")
-            origin = fields.get("origin", previous.get("origin") if previous else None)
-            if origin != "card-body":
-                raise ValueError("edit drafts must store a logical Markdown body with origin card-body")
+        capture_id = fields.get("capture_id", previous.get("capture_id") if previous else None)
+        created_value = fields.get("created", previous.get("created") if previous else now)
+        try:
+            parsed_capture_id = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
+        except ValueError:
+            parsed_capture_id = None
+        if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
+            raise ValueError("new note draft capture ID must be a canonical UUID")
+        if not isinstance(created_value, str) or not card_format.is_timestamp(created_value):
+            raise ValueError("new capture draft created time must be a valid local ISO timestamp with seconds")
         metadata: dict[str, object] = {
             "id": draft_id,
             "kind": kind,
             "mode": mode,
-            "revision": revision,
             "created": created,
             "updated": now,
             "title": title,
-            "target": fields.get("target", previous.get("target") if previous else None),
-            "base_hash": fields.get("base_hash", previous.get("base_hash") if previous else None),
-            "base_updated": fields.get("base_updated", previous.get("base_updated") if previous else None),
             "capture_id": fields.get("capture_id", previous.get("capture_id") if previous else None),
             "origin": fields.get("origin", previous.get("origin") if previous else None),
         }
@@ -261,7 +236,6 @@ def save(
 def discard(
     root: Path,
     draft_id: str,
-    expected_revision: int | None = None,
     expected_content_hash: str | None = None,
 ) -> bool:
     path = draft_path(root, draft_id)
@@ -269,9 +243,13 @@ def discard(
     try:
         if not path.is_file():
             return False
-        current = read_path(path)
-        if expected_revision is not None and current["revision"] != expected_revision:
-            raise DraftConflict("draft changed since it was loaded; refresh and retry")
+        try:
+            current = read_path(path)
+        except RetiredDraftError:
+            if expected_content_hash is not None:
+                raise
+            path.unlink()
+            return True
         if expected_content_hash is not None and current["content_hash"] != expected_content_hash:
             raise DraftConflict("draft content changed outside microtask; refresh and reconcile")
         path.unlink()

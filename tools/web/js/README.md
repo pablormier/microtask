@@ -8,8 +8,8 @@ tests use that same loader.
 - `card_helpers.js`: pure calculations for dates, durations
   and metadata values. These functions receive their inputs explicitly and do
   not access Alpine, the DOM, storage or the network. They do not mutate cards.
-- `draft_store.js`: workspace draft requests, current-format browser recovery copies,
-  revision/hash guards and per-ID autosave queues. Each instance owns
+- `draft_store.js`: workspace draft persistence for new-card drafts,
+  `content_hash` guards and per-ID autosave queues. Each instance owns
   its draft list; timers and pending requests stay private in its closure.
 - `capture_composer.js`: capture input, dirty/recovery state, validation and
   save/discard workflows. It receives the shared draft store and narrow board

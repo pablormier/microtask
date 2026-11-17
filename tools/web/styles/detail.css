@@ -490,6 +490,8 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   .mt-detail { padding: 14px 14px; width: 100%; }
   .mt-detail-layout { grid-template-columns: minmax(0, 1fr); gap: var(--mt-space-4); }
   .mt-properties-panel { padding: 12px 12px 0; }
+  /* The header has no room for the property summary beside the title. */
+  .mt-detail-navigation .mt-zen-meta-badge { display: none; }
   .mt-detail-navigation { gap: var(--mt-space-1); }
   .mt-composer-backdrop { padding: 0; place-items: stretch; }
   .mt-composer { width: 100%; max-height: 100vh; min-height: 100vh; border-radius: 0; }
@@ -540,12 +542,21 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   width: min(140ch, 100%);
 }
 .mt-detail.is-zen .mt-detail-workbar,
-.mt-detail.is-zen .mt-properties-panel,
+.mt-detail.is-zen .mt-properties-panel:not(.is-zen-open),
 .mt-detail.is-zen .mt-card-properties-preview,
 .mt-detail.is-zen .mt-comment-composer,
 .mt-detail.is-zen .mt-detail-footer,
 .mt-detail.is-zen .mt-content-header {
   display: none;
+}
+/* The Properties toggle opens the sidebar panel above the editor. Saving goes through
+   the content editor's Save button; the panel keeps Reset for conflicts. */
+.mt-detail.is-zen .mt-properties-panel.is-zen-open {
+  order: -1;
+  align-self: stretch;
+  max-height: 45vh;
+  overflow: auto;
+  margin-block-end: var(--mt-space-4);
 }
 .mt-detail.is-zen .mt-detail-layout {
   display: flex;
@@ -562,9 +573,12 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   flex-direction: column;
   min-height: 0;
 }
+/* In Zen the workspace row sets the height. Fixed minimums from the inline editor
+   would push the editor and preview past the buttons when the properties panel is open. */
+.mt-detail.is-zen .mt-zen-preview { min-height: 0; }
 .mt-detail.is-zen textarea.mt-content-input {
   flex: 1 1 auto;
-  min-height: 50vh;
+  min-height: 0;
   border-color: transparent;
   background: transparent;
   padding: 8px 0;

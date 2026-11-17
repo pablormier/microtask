@@ -420,6 +420,8 @@ button.mt-button-icon.mt-topic-tree-disclosure {
 .mt-draft-row {
   display: flex;
   min-width: 0;
+  /* The row is role="button" and would otherwise center its text. */
+  text-align: start;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
