@@ -59,7 +59,9 @@ including `role="group"` styling.
 The dashboard loads no third-party URLs. To change a browser library, edit its
 version in `tools/vendor_web.py`, run `python3 tools/vendor_web.py` (it verifies
 npm integrity and rewrites `tools/web/vendor`), and review the diff. The server
-serves those files under `/vendor/`. Tests never run the script.
+serves those files under `/vendor/`, and the `mt show` preview (`tools/mdviz.py`)
+inlines the same files into its generated page, with the KaTeX fonts embedded as
+data URIs. Tests never run the script.
 
 Before finishing, verify the rendered UI in a browser at desktop and narrow
 widths, including hover, focus, and disabled states; fix visual defects and

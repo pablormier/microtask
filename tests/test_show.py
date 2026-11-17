@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -51,15 +52,59 @@ tags:
             self.assertIn("<dt>tags</dt><dd>math, test</dd>", rendered)
             self.assertNotIn("status: active", rendered)
             self.assertIn("DOMPurify.sanitize(restored", rendered)
-            self.assertIn("marked@15.0.12", rendered)
-            self.assertIn("dompurify@3.2.6", rendered)
-            self.assertIn("katex@0.16.10", rendered)
             self.assertIn("Preview libraries could not be loaded", rendered)
+            self.assert_offline(rendered)
             self.assertIn(source.resolve().parent.as_uri() + "/", rendered)
             self.assertIn("ul { list-style: disc; padding-left: 1.35rem; }", rendered)
             self.assertIn("ol { list-style: decimal; padding-left: 1.35rem; }", rendered)
             self.assertNotIn("</script><script>alert(2)", rendered)
             self.assertIn(r"\u003c/script>\u003cscript>alert(2)\u003c/script>", rendered)
+
+    def assert_offline(self, rendered: str) -> None:
+        self.assertNotIn("cdn.jsdelivr.net", rendered)
+        self.assertEqual(re.findall(r"""(?:src|href)=["']https?:|url\(["']?https?:""", rendered), [])
+        csp = re.search(r'Content-Security-Policy" content="([^"]*)"', rendered).group(1)
+        for directive in ("script-src", "style-src", "font-src"):
+            self.assertNotIn("http", re.search(directive + r"[^;]*", csp).group(0))
+        self.assertIn("script-src 'nonce-", csp)
+        self.assertIn("font-src data:", csp)
+        # Every script is inline, carries the nonce, and none holds an early closing tag.
+        self.assertEqual(re.findall(r"<script\b[^>]*\bsrc=", rendered), [])
+        self.assertEqual(re.findall(r"<script(?![^>]*\bnonce=)[^>]*>", rendered), [])
+        bodies = re.findall(r"<script nonce=\"[^\"]+\">(.*?)</script>", rendered, re.S)
+        for library in ("marked", "DOMPurify", "katex", "renderMathInElement"):
+            self.assertTrue(any(library in body for body in bodies), library)
+        for body in bodies:
+            self.assertNotRegex(body, r"(?i)</script")
+        # KaTeX fonts are embedded; nothing points at a font file.
+        fonts = re.findall(r"@font-face\{[^}]*\}", rendered)
+        self.assertGreater(len(fonts), 0)
+        for rule in fonts:
+            self.assertRegex(rule, r'src:url\(data:font/woff2;base64,[A-Za-z0-9+/=]+\) format\("woff2"\)[;}]')
+        self.assertNotRegex(rendered, r"url\(fonts/")
+
+    def test_inlined_source_cannot_close_its_element(self) -> None:
+        sys.path.insert(0, str(SOURCE_ROOT / "tools"))
+        sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
+        import mdviz
+        self.assertEqual(mdviz.inline_script('a="</script><b>"; "</SCRIPT'), 'a="<\\/script><b>"; "<\\/SCRIPT')
+
+    def test_inlined_marked_still_renders_markdown(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        sys.path.insert(0, str(SOURCE_ROOT / "tools"))
+        sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
+        import mdviz
+        source = mdviz.inline_script(mdviz.vendor_text(mdviz.web_assets.MARKED_JS))
+        probe = ('const vm = require("vm"); const context = {}; context.globalThis = context;'
+                 'vm.runInNewContext(require("fs").readFileSync(0, "utf8"), context);'
+                 'process.stdout.write(context.marked.parse("# Title\\n\\n**bold** and `</script>`"));')
+        result = subprocess.run([node, "-e", probe], input=source, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("<h1>Title</h1>", result.stdout)
+        self.assertIn("<strong>bold</strong>", result.stdout)
+        self.assertIn("<code>&lt;/script&gt;</code>", result.stdout)
 
     def test_default_output_is_stable_and_path_specific(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

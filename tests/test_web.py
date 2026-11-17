@@ -2694,9 +2694,8 @@ class MdvizUnchangedTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             rendered = output.read_text(encoding="utf-8")
-            self.assertIn("marked@15.0.12", rendered)
-            self.assertIn("dompurify@3.2.6", rendered)
-            self.assertIn("katex@0.16.10", rendered)
+            self.assertNotIn("cdn.jsdelivr.net", rendered)
+            self.assertIn("font-src data:", rendered)
             self.assertNotIn("@picocss/pico", rendered)
             self.assertNotIn("taskBoard()", rendered)
 

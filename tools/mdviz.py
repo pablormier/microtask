@@ -3,28 +3,54 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import html
 import json
 from pathlib import Path
+import re
 import secrets
 import sys
 import tempfile
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
+sys.path.insert(0, str(APP_ROOT / "tools"))
 
 import card_format  # noqa: E402
 import cli  # noqa: E402
+import web_assets  # noqa: E402
 
 
-MARKED_CDN = "https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
-DOMPURIFY_CDN = "https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
-KATEX_CSS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css"
-KATEX_JS_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"
-KATEX_AUTO_RENDER_CDN = (
-    "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"
-)
+VENDOR_DIR = web_assets.WEB_DIR / "vendor"
+FONT_FACE_SRC = re.compile(r'src:url\(fonts/([^)]+\.woff2)\) format\("woff2"\)[^;}]*')
+
+
+def vendor_text(url_path: str) -> str:
+    return (VENDOR_DIR / url_path[len(web_assets.VENDOR_URL):]).read_text(encoding="utf-8")
+
+
+def inline_script(source: str) -> str:
+    """Make library source safe to place inside a <script> element."""
+    return re.sub(r"</(script)", r"<\\/\1", source, flags=re.IGNORECASE)
+
+
+def katex_css_with_fonts() -> str:
+    """Return katex.min.css with its woff2 fonts embedded as data URIs.
+
+    The page is opened from file://, where browsers may refuse fonts loaded from
+    other local files. The woff and ttf fallbacks are not vendored, so they are dropped.
+    """
+    fonts = VENDOR_DIR / "katex/dist/fonts"
+
+    def embed(match: re.Match[str]) -> str:
+        data = base64.b64encode((fonts / match.group(1)).read_bytes()).decode("ascii")
+        return f'src:url(data:font/woff2;base64,{data}) format("woff2")'
+
+    css = FONT_FACE_SRC.sub(embed, vendor_text(web_assets.KATEX_CSS))
+    if "fonts/" in css:
+        raise ValueError("katex.min.css has font references that were not embedded")
+    return re.sub(r"</(style)", r"<\\/\1", css, flags=re.IGNORECASE)
 
 
 HTML_TEMPLATE = """<!doctype html>
@@ -32,14 +58,14 @@ HTML_TEMPLATE = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; img-src file: data: https:; base-uri file:; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; font-src data:; img-src file: data: https:; base-uri file:; object-src 'none'">
   <base href="{base_uri}">
   <title>{title}</title>
-  <link rel="stylesheet" href="{katex_css}">
-  <script nonce="{nonce}" defer src="{marked_js}"></script>
-  <script nonce="{nonce}" defer src="{dompurify_js}"></script>
-  <script nonce="{nonce}" defer src="{katex_js}"></script>
-  <script nonce="{nonce}" defer src="{katex_auto_render_js}"></script>
+  <style>{katex_css}</style>
+  <script nonce="{nonce}">{marked_js}</script>
+  <script nonce="{nonce}">{dompurify_js}</script>
+  <script nonce="{nonce}">{katex_js}</script>
+  <script nonce="{nonce}">{katex_auto_render_js}</script>
   <style>
     :root {{ color-scheme: light dark; }}
     body {{
@@ -88,7 +114,7 @@ HTML_TEMPLATE = """<!doctype html>
       const root = document.getElementById("content");
       try {{
         if (!window.marked || !window.DOMPurify || !window.renderMathInElement) {{
-          throw new Error("Preview libraries could not be loaded. Check the network connection and reload.");
+          throw new Error("Preview libraries could not be loaded. Reload the preview or reinstall microtask.");
         }}
         renderPreview(card, root);
         renderPropertyPanels(card, document.getElementById("activity"));
@@ -155,9 +181,11 @@ def build_html(source: Path, text: str) -> str:
         metadata=render_metadata(properties, is_card=is_card), card_json=safe_json(card),
         renderer_js="\n".join((APP_ROOT / "tools/web/js" / name).read_text(encoding="utf-8")
                               for name in ("markdown.js", "card_helpers.js")),
-        marked_js=MARKED_CDN, dompurify_js=DOMPURIFY_CDN,
-        katex_css=KATEX_CSS_CDN, katex_js=KATEX_JS_CDN,
-        katex_auto_render_js=KATEX_AUTO_RENDER_CDN,
+        marked_js=inline_script(vendor_text(web_assets.MARKED_JS)),
+        dompurify_js=inline_script(vendor_text(web_assets.DOMPURIFY_JS)),
+        katex_css=katex_css_with_fonts(),
+        katex_js=inline_script(vendor_text(web_assets.KATEX_JS)),
+        katex_auto_render_js=inline_script(vendor_text(web_assets.KATEX_AUTO_RENDER_JS)),
     )
 
 
