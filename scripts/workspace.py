@@ -16,7 +16,7 @@ DEMO_DATE_ANCHOR = date(2026, 1, 5)
 _DETERMINISTIC_POLICY_KEYS = {
     "statuses", "priorities", "types", "due_kinds", "suggested_topics", "suggested_tags",
     "default_status", "default_priority", "default_type", "default_username", "rules", "view_labels",
-    "calendar",
+    "calendar", "lint",
 }
 _DETERMINISTIC_RULE_KEYS = {
     "auto_sync", "done_window", "max_doing_tasks", "demo_workspace", "timer_warn_hours",

@@ -58,3 +58,7 @@ rules:
   show_year_progress: true
   show_deadline_progress: true
   deadline_progress_start: created
+
+lint:
+  backticked_ref: warn # warn | off
+  topic_case: warn     # warn | off

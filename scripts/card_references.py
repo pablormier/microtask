@@ -8,6 +8,17 @@ from card_format import fenced_line_numbers
 REFERENCE_RE = re.compile(r"(?<![\w@])@[0-9a-f]{3,8}(?![\w-])", re.IGNORECASE)
 URL_RE = re.compile(r"(?:https?://|mailto:)[^\s<>]+", re.IGNORECASE)
 HTML_RE = re.compile(r"<!--[\s\S]*?(?:-->|$)|<(a|code|pre|script|style)\b[^>]*>[\s\S]*?</\1\s*>|<[^>\n]*>", re.IGNORECASE)
+BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def _inline_code_span(text: str, index: int) -> tuple[int, str]:
+    """Scan an inline backtick span at ``index``; return ``(next_index, inner_text)``."""
+    run = BACKTICK_RUN_RE.match(text, index)[0]
+    start = index + len(run)
+    close = re.compile(rf"(?<!`){run}(?!`)").search(text, start)
+    if not close:
+        return start, ""
+    return close.end(), text[start:close.start()]
 
 
 def _closing(text: str, start: int, opening: str, closing: str) -> int | None:
@@ -29,12 +40,8 @@ def _closing(text: str, start: int, opening: str, closing: str) -> int | None:
     return None
 
 
-def reference_spans(markdown: str) -> list[tuple[int, int]]:
-    """Return prose @refs, excluding code, URLs, HTML, and existing links.
-
-    This is a deliberately small Markdown scanner, not a Markdown renderer.
-    Positions are character offsets in the supplied text.
-    """
+def _mask_block_code(markdown: str) -> tuple[str, set[str]]:
+    """Replace fenced/indented code blocks and link definitions with spaces; return (masked, definitions)."""
     masked = list(markdown)
     definitions: set[str] = set()
     offset = 0
@@ -66,7 +73,16 @@ def reference_spans(markdown: str) -> list[tuple[int, int]]:
         if number in fences or definition or number in indented_lines:
             masked[offset:offset + len(line)] = " " * len(line)
         offset += len(line)
-    text = "".join(masked)
+    return "".join(masked), definitions
+
+
+def reference_spans(markdown: str) -> list[tuple[int, int]]:
+    """Return prose @refs, excluding code, URLs, HTML, and existing links.
+
+    This is a deliberately small Markdown scanner, not a Markdown renderer.
+    Positions are character offsets in the supplied text.
+    """
+    text, definitions = _mask_block_code(markdown)
     spans: list[tuple[int, int]] = []
     index = 0
     while index < len(text):
@@ -75,9 +91,7 @@ def reference_spans(markdown: str) -> list[tuple[int, int]]:
             index += 2
             continue
         if char == "`":
-            run = re.match(r"`+", text[index:])[0]
-            close = re.search(rf"(?<!`){run}(?!`)", text[index + len(run):])
-            index = index + len(run) + close.end() if close else index + len(run)
+            index, _inner = _inline_code_span(text, index)
             continue
         if char == "<":
             html = HTML_RE.match(text, index)
@@ -124,4 +138,26 @@ def extract_references(markdown: str) -> list[str]:
         if ref.casefold() not in seen:
             seen.add(ref.casefold())
             refs.append(ref)
+    return refs
+
+
+def backticked_references(markdown: str) -> list[str]:
+    """Distinct inline-backticked @refs in prose (e.g. `` `@1a2b` ``), ignoring code blocks."""
+    text, _definitions = _mask_block_code(markdown)
+    seen: set[str] = set()
+    refs: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "`":
+            index, inner = _inline_code_span(text, index)
+            candidate = inner.strip()
+            if candidate and REFERENCE_RE.fullmatch(candidate) and candidate.casefold() not in seen:
+                seen.add(candidate.casefold())
+                refs.append(candidate)
+            continue
+        index += 1
     return refs

@@ -104,7 +104,8 @@ stage or commit; `mt sync` handles Git.
 Use explicit arguments and `--file -` for multiline text. Do not use
 `mt capture`, editors, `mt show`, or `mt web` unless the user asks. Local
 temporary files stay on this machine, so a saved card must include the content
-and source links it needs.
+and source links it needs. Write card references as plain @ref without backticks
+in card text so they render as links.
 
 With `--json`, add, note, edit, move, done, and comment return the saved card, so
 report its reference without reading it again; each change is already validated.

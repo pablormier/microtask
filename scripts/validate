@@ -58,8 +58,11 @@ def main() -> int:
 
     data_root = explicit_root or repo_root
     if changes_mode:
+        warnings: list[str] = []
         try:
-            errors = validation.check_changes_request(data_root, effective_policy, json.load(sys.stdin))
+            report = validation.check_changes_request(data_root, effective_policy, json.load(sys.stdin))
+            errors = report.errors
+            warnings = report.warnings
         except (OSError, ValueError, TypeError, UnicodeError) as error:
             errors = [str(error)]
         if errors:
@@ -67,6 +70,8 @@ def main() -> int:
             for error in errors:
                 print(f"  - {error}", file=sys.stderr)
             return 1
+        for warning in warnings:
+            print(f"WARNING: {warning}", file=sys.stderr)
         print("OK: validated card changes and affected cross-card invariants.")
         return 0
 

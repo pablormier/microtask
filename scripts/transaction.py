@@ -265,7 +265,7 @@ def apply_item_transaction(
             current = original[relative] if relative in original else (path.read_bytes() if path.is_file() else None)
             if current != value:
                 raise ValueError(f"item changed before transaction: {relative}")
-    validate_item_changes(changes, deletions=deletions, source_root=base, previous=original, ws=resolved)
+    warnings = validate_item_changes(changes, deletions=deletions, source_root=base, previous=original, ws=resolved)
     try:
         for relative, before in original.items():
             path = base / relative
@@ -301,6 +301,8 @@ def apply_item_transaction(
             except OSError:
                 pass
         raise
+    for warning in warnings or ():
+        print(f"WARNING: {warning}", file=sys.stderr)
 
 
 
@@ -641,18 +643,19 @@ def _command_sync_serialized(args: argparse.Namespace, ws: Workspace | None = No
 def validate_item_changes(changes: dict[str, bytes], *, deletions: set[str] | None = None,
                           source_root: Path | None = None,
                           previous: dict[str, bytes | None] | None = None,
-                          ws: Workspace | None = None) -> None:
-    """Validate proposed card bytes without copying the workspace."""
+                          ws: Workspace | None = None) -> list[str]:
+    """Validate proposed card bytes without copying the workspace and return lint warnings."""
     resolved = _ws(ws)
     deletions = deletions or set()
     for relative in set(changes) | deletions:
         if Path(relative).is_absolute() or ".." in Path(relative).parts or not re.fullmatch(r"cards/[^/]+\.md", relative):
             raise ValueError(f"invalid item path in item changes: {relative}")
     base = source_root or active_root(resolved)
-    errors = validation.check_changes(base, store.policy(resolved), changes, deletions, previous)
-    if errors:
+    report = validation.check_changes(base, store.policy(resolved), changes, deletions, previous)
+    if report.errors:
         detail = "\n".join(
-            ["FAILED: card changes failed validation:", *(f"  - {error}" for error in errors)]
+            ["FAILED: card changes failed validation:", *(f"  - {error}" for error in report.errors)]
         )
         raise ValueError(detail)
+    return report.warnings
 

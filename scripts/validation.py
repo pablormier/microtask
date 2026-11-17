@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 import card_format
+import card_linter
 import drafts as draft_store
 import validators
 
@@ -17,6 +18,12 @@ class AuditReport:
     task_count: int
     note_count: int
     draft_count: int
+
+
+@dataclass(frozen=True)
+class ChangesReport:
+    errors: list[str]
+    warnings: list[str]
 
 
 def _decode_text(value: bytes | str) -> str:
@@ -34,6 +41,7 @@ def _check_item(
     *,
     raw: str | None = None,
     collect: dict[str, list] | None = None,
+    warnings: list[str] | None = None,
 ) -> tuple[str | None, str | None]:
     """Validate one card; return its (kind, status), or (None, None) when unreadable."""
     rel = path.relative_to(data_root)
@@ -70,6 +78,8 @@ def _check_item(
             )
         )
     )
+    if warnings is not None:
+        warnings.extend(card_linter.lint_item(rel, fm, body, policy))
     if kind == "task":
         try:
             entries = card_format.time_log_entries(raw)
@@ -135,30 +145,13 @@ def _item_identity(
     }, fm.get("kind") == "task" and fm.get("status") == "doing"
 
 
-def topic_case_warnings(topics: list[str]) -> list[str]:
-    """Warn when one topic path is spelled with different casing across cards."""
-    separator = card_format.TOPIC_SEPARATOR
-    spellings: dict[tuple[str, ...], dict[str, int]] = {}
-    for topic in topics:
-        parts = topic.split(separator)
-        for depth in range(1, len(parts) + 1):
-            prefix = separator.join(parts[:depth])
-            counts = spellings.setdefault(card_format.topic_key(prefix), {})
-            counts[prefix] = counts.get(prefix, 0) + 1
-    return [
-        "topic '" + "' and '".join(sorted(counts)) + "' differ only by letter case; they are treated as one topic, "
-        "so pick one spelling (mt topic rename OLD NEW)"
-        for counts in spellings.values() if len(counts) > 1
-    ]
-
-
 def check_changes(
     root: Path,
     policy: dict,
     changes: dict[str, bytes | str],
     deletions: set[str] | list[str] | None = None,
     previous: dict[str, bytes | str | None] | None = None,
-) -> list[str]:
+) -> ChangesReport:
     """Validate changed content and only cross-file invariants it can affect."""
     deletion_set = set(deletions or ())
     decoded_changes = {path: _decode_text(raw) for path, raw in changes.items()}
@@ -180,6 +173,8 @@ def check_changes(
         }
 
     errors: list[str] = []
+    warnings: list[str] = []
+    changed_topics: list[str] = []
     seen: dict[str, dict[str, Path]] = {"id": {}, "capture_id": {}, "time session id": {}}
     added: dict[str, set[str]] = {key: set() for key in seen}
     doing_delta = 0
@@ -207,13 +202,16 @@ def check_changes(
             _check_item(
                 root, path, seen["id"], seen["time session id"],
                 seen["capture_id"], errors, policy, raw=after,
+                collect={"topics": changed_topics}, warnings=warnings,
             )
-    if errors or (not any(added.values()) and doing_delta <= 0):
-        return errors
+    need_topic_scan = bool(changed_topics) and card_linter.rule_level(policy, "topic_case") != "off"
+    if errors or (not any(added.values()) and doing_delta <= 0 and not need_topic_scan):
+        return ChangesReport(errors=errors, warnings=[] if errors else warnings)
 
     # Read only metadata from other cards, except when new time-session IDs
     # require checking their time logs. Do not validate unrelated card bodies.
     other_doing = 0
+    other_topics: list[str] = []
     for path in sorted((root / "cards").glob("*.md")):
         relative = str(path.relative_to(root))
         if relative in affected:
@@ -224,6 +222,8 @@ def check_changes(
             raise ValueError(f"cannot check cross-card invariants: {relative} has no frontmatter; run mt validate")
         fm = card_format.parse_yaml(fm_text)
         other_doing += int(fm.get("kind") == "task" and fm.get("status") == "doing")
+        if need_topic_scan and isinstance(fm.get("topic"), str):
+            other_topics.append(fm["topic"])
         identity, _ = _item_identity(
             raw if added["time session id"] else ("---\n" + fm_text + "\n---\n"),
             path,
@@ -236,11 +236,15 @@ def check_changes(
     limit = int(str(policy.get("rules", {}).get("max_doing_tasks") or 0))
     if doing_delta > 0 and limit > 0 and other_doing + changed_doing > limit:
         errors.append(f"doing task limit exceeded: {other_doing + changed_doing} tasks, maximum {limit}")
-    return errors
+    if not errors and need_topic_scan:
+        warnings.extend(
+            card_linter.lint_workspace(changed_topics + other_topics, policy, focus_topics=changed_topics)
+        )
+    return ChangesReport(errors=errors, warnings=[] if errors else warnings)
 
 
-def check_changes_request(root: Path, policy: dict, request: object) -> list[str]:
-    """Validate a JSON --changes payload from stdin."""
+def check_changes_request(root: Path, policy: dict, request: object) -> ChangesReport:
+    """Validate a JSON --changes payload from stdin and return errors and warnings."""
     if not isinstance(request, dict) or set(request) - {"changes", "deletions", "previous"}:
         raise ValueError("changes request must contain changes, deletions and optional previous content")
     changes = request.get("changes", {})
@@ -290,12 +294,13 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                 md_files.append(entry)
 
     collected: dict[str, list] = {"topics": []}
+    warnings: list[str] = []
     doing_count = 0
     kind_counts = {"task": 0, "note": 0}
     for path in md_files:
         kind, status = _check_item(
             root, path, seen_ids, seen_time_sessions, seen_capture_ids, errors, policy,
-            collect=collected,
+            collect=collected, warnings=warnings,
         )
         if kind is not None:
             kind_counts[kind] += 1
@@ -336,10 +341,11 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                     message = message[len(prefix):]
                 errors.append(f"{path.relative_to(root)}: {message}")
 
-    warnings = [] if errors else topic_case_warnings(collected["topics"])
+    if not errors:
+        warnings.extend(card_linter.lint_workspace(collected["topics"], policy))
     return AuditReport(
         errors=errors,
-        warnings=warnings,
+        warnings=[] if errors else warnings,
         task_count=kind_counts["task"],
         note_count=kind_counts["note"],
         draft_count=len(draft_files),

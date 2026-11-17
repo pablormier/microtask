@@ -9,6 +9,7 @@ import os
 import re
 
 import card_format
+import card_linter
 from vendor import yaml
 
 
@@ -152,6 +153,12 @@ def load_policy(root: Path | None = None) -> dict:
             policy.pop("calendar", None)
         else:
             policy["calendar"] = normalized_calendar
+    if "lint" in policy:
+        normalized_lint = card_linter.normalize_lint_policy(policy["lint"])
+        if normalized_lint:
+            policy["lint"] = normalized_lint
+        else:
+            policy.pop("lint", None)
     return policy
 
 
