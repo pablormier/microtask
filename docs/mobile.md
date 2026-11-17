@@ -2,22 +2,103 @@
 
 `microtask` stores your tasks and notes as plain Markdown files in a private
 Git repository. Because there is no central microtask server, you have four
-ways to use it from your phone:
+ways to use it from your phone, ordered from easiest setup to most capable:
 
-1. **[Always-on Telegram bot with Claude Code](#telegram-bot-with-claude-code-on-a-raspberry-pi-or-vps)** *(recommended)*: fast two-way chat, voice notes, direct `./mt` execution, and `mt sync` on a Raspberry Pi or small VPS.
-2. **[Claude or Codex Cloud mobile apps via GitHub](#claude-or-codex-cloud-mobile-apps-no-server)**: zero-server cloud sandboxes that open branches/PRs on your repo.
-3. **[ChatGPT GitHub connector + `mt import-github`](#chatgpt-github-connector--mt-import-github)**: fast issue-based capture from ChatGPT chat, imported locally later.
-4. **[`mt web` over Tailscale](#mt-web-over-tailscale)**: the responsive web board served privately from your own machine.
+1. **[Claude or Codex Cloud mobile apps via GitHub](#claude-or-codex-cloud-mobile-apps-no-server)** *(easiest, recommended)*: link your private repo with zero server setup.
+2. **[ChatGPT GitHub connector + `mt import-github`](#chatgpt-github-connector--mt-import-github)**: fast issue-based capture from ChatGPT chat, imported locally later.
+3. **[`mt web` over Tailscale](#mt-web-over-tailscale)**: the responsive web board served privately from your own machine.
+4. **[Always-on Telegram bot with Claude Code](#telegram-bot-with-claude-code-on-a-raspberry-pi-or-vps)**: fast two-way chat, voice notes, direct `./mt` execution, and `mt sync` on a Raspberry Pi or small VPS.
+
+---
+
+## Claude or Codex Cloud mobile apps (no server)
+
+The easiest way to use `microtask` from your phone is to connect your **private
+GitHub repository** directly to:
+
+* **ChatGPT mobile app (Codex Cloud)** via the GitHub connector
+* **Claude mobile app** (Code tab / `claude.ai/code`) via the Claude GitHub App
+
+When you send a prompt from your phone, the service boots an isolated cloud
+container, clones your repo, reads [AGENTS.md](../AGENTS.md), and runs `./mt`.
+
+**Trade-offs compared to a self-hosted bot:**
+
+* **No server to maintain**, works when your PC is off.
+* **30–90 second startup latency** per task.
+* **Pull-request workflow:** Cloud sandboxes push to a branch rather than
+  `main`, so you'll tap **Merge** in the app or GitHub Mobile before running
+  `mt sync` on your computer.
+* **No local `.mt` state:** Machine-local state such as pinned `mt focus` or
+  `mt time` timers is not shared.
+
+---
+
+## ChatGPT GitHub connector + `mt import-github`
+
+If you want fast capture from the ChatGPT mobile app without waiting for a
+Codex Cloud container or merging pull requests, set up a dedicated **ChatGPT
+Project** with the **GitHub connector** enabled to file capture issues, then
+import them on your computer:
+
+1. **Create a ChatGPT Project:** Enable the GitHub connector, link it to your
+   private repository containing your cards, and add these **Project
+   instructions** (replacing `<owner>/<repo>` with that repository):
+
+   ```text
+   Use the GitHub connector to create issues in `<owner>/<repo>` (unless the user specifies another repo).
+   Before creating an issue, read `.github/ISSUE_CAPTURE.md` and follow its rules, and check `.github/ISSUE_TEMPLATE/capture.yml` to confirm the capture label. Ignore local `mt` CLI instructions—you are only creating the GitHub issue for later import.
+   Use relevant skills in `.agents/skills/` to format content (for example, follow `mt-paper-review` for a paper link and put the review in the issue body instead of running `./mt`).
+   Always write the issue title and body in English, and ask the user to confirm the proposed title, body, and label before creating the issue.
+   ```
+
+2. **On your phone:** Chat inside that Project naturally (for example, *"Capture:
+   renew passport before March"* or paste a link to a paper) and confirm the
+   proposed issue.
+
+3. **On your computer:** Run `mt import-github` (requires the
+   [GitHub CLI](https://cli.github.com/) `gh` authenticated for your repo):
+
+   ```sh
+   ./mt import-github
+   ```
+
+   This fetches all open `microtask-capture` issues, saves each one as a
+   validated note marked `needs_review` in `cards/`, closes the imported
+   issues, and leaves the notes ready to triage (`./mt list --needs-review` or
+   `/mt-triage`). See [.github/ISSUE_CAPTURE.md](../.github/ISSUE_CAPTURE.md)
+   for the full capture and triage rules.
+
+---
+
+## `mt web` over Tailscale
+
+`mt web` serves a responsive dashboard that works on mobile browsers. However,
+`mt web` uses an ephemeral per-session token embedded in the HTML and has **no
+user login**, so it must **not** be exposed directly to the public internet.
+
+To access it securely from your phone:
+
+1. Run `mt web` on an always-on machine connected to your private
+   [Tailscale](https://tailscale.com/) network, binding to its Tailscale IP:
+
+   ```sh
+   mt web --host <YOUR_TAILSCALE_IP> --port 8080 --no-open
+   ```
+
+2. Open `http://<YOUR_TAILSCALE_IP>:8080` in your phone's browser and use
+   **Add to Home Screen** for quick access. `mt web` automatically syncs edits
+   with `origin` in the background.
 
 ---
 
 ## Telegram bot with Claude Code on a Raspberry Pi or VPS
 
-Running Claude Code's official Telegram channel plugin on an always-on Linux
-machine (such as a Raspberry Pi or a \$4/mo VPS) lets you message your
-workspace from Telegram even when your laptop is off. Claude reads
-[AGENTS.md](../AGENTS.md) and `.agents/skills/`, runs `./mt`, and syncs via
-`mt sync`.
+If you want instant two-way chat, voice notes, and direct `mt sync` without
+cloud container startup latency or PR merges, you can run Claude Code's
+official Telegram channel plugin on an always-on Linux machine (such as a
+Raspberry Pi or a \$4/mo VPS). Claude reads [AGENTS.md](../AGENTS.md) and
+`.agents/skills/`, runs `./mt`, and syncs via `mt sync`.
 
 ### 1. Server prerequisites
 
@@ -168,74 +249,3 @@ Now pair your Telegram account:
 * *"Triage my inbox."*
 * *"What should I focus on for the next 30 minutes?"*
 * *"Mark the dentist task done and run mt sync."*
-
----
-
-## Claude or Codex Cloud mobile apps (no server)
-
-If you don't want to run a Raspberry Pi or VPS, you can connect your **private
-GitHub repository** directly to:
-
-* **Claude mobile app** (Code tab / `claude.ai/code`) via the Claude GitHub App
-* **ChatGPT mobile app (Codex Cloud)** via the GitHub connector
-
-When you send a prompt from your phone, the service boots an isolated cloud
-container, clones your repo, reads [AGENTS.md](../AGENTS.md), and runs `./mt`.
-
-**Trade-offs compared to a self-hosted bot:**
-
-* **No server to maintain**, works when your PC is off.
-* **30–90 second startup latency** per task.
-* **Pull-request workflow:** Cloud sandboxes push to a branch rather than
-  `main`, so you'll tap **Merge** in the app or GitHub Mobile before running
-  `mt sync` on your computer.
-* **No local `.mt` state:** Machine-local state such as pinned `mt focus` or
-  `mt time` timers is not shared.
-
----
-
-## ChatGPT GitHub connector + `mt import-github`
-
-If you want fast capture from the ChatGPT mobile app without waiting for a
-Codex Cloud container or merging pull requests, use regular ChatGPT chat with
-the **GitHub connector** enabled to file GitHub issues, then import them on
-your computer:
-
-1. **On your phone (ChatGPT):** Ask ChatGPT to create a GitHub issue in your
-   microtask repository with the `microtask-capture` label (the label configured
-   in [.github/ISSUE_TEMPLATE/capture.yml](../.github/ISSUE_TEMPLATE/capture.yml)).
-   For example:
-   > *"Create an issue in `<owner>/<repo>` with label `microtask-capture`:
-   > Renew passport before March."*
-2. **On your computer:** Run `mt import-github` (requires the
-   [GitHub CLI](https://cli.github.com/) `gh` authenticated for your repo):
-
-   ```sh
-   ./mt import-github
-   ```
-
-   This fetches all open `microtask-capture` issues, saves each one as a
-   validated note marked `needs_review` in `cards/`, and leaves them ready to
-   triage (`./mt list --needs-review` or `/mt-triage`) and convert to tasks if
-   needed.
-
----
-
-## `mt web` over Tailscale
-
-`mt web` serves a responsive dashboard that works on mobile browsers. However,
-`mt web` uses an ephemeral per-session token embedded in the HTML and has **no
-user login**, so it must **not** be exposed directly to the public internet.
-
-To access it securely from your phone:
-
-1. Run `mt web` on an always-on machine connected to your private
-   [Tailscale](https://tailscale.com/) network, binding to its Tailscale IP:
-
-   ```sh
-   mt web --host <YOUR_TAILSCALE_IP> --port 8080 --no-open
-   ```
-
-2. Open `http://<YOUR_TAILSCALE_IP>:8080` in your phone's browser and use
-   **Add to Home Screen** for quick access. `mt web` automatically syncs edits
-   with `origin` in the background.
