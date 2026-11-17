@@ -492,8 +492,10 @@ button.mt-button-icon.mt-topic-tree-disclosure {
   .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   /* Column pager: names every column, marks the one in view, and jumps on tap. */
+  /* flex: none keeps the column flex parent from shrinking the pager, a scroll container, and clipping its chips. */
   .mt-column-pager {
     display: flex;
+    flex: none;
     gap: 6px;
     margin: 0;
     padding: 10px 12px 0;
