@@ -115,13 +115,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
   .mt-toolbar { padding: 6px 12px; }
   .mt-title-row { flex-wrap: wrap; gap: 6px 8px; }
   .mt-mode-toggle { max-width: 100%; }
   .mt-demo-banner { flex-basis: 100%; max-width: none; margin-left: 0; }
 }
-@media (max-width: 38rem) {
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
+@media (max-width: 42rem) {
   .mt-toolbar { padding: 8px 12px; }
   .mt-toolbar-actions { padding-left: 0; border-left: 0; }
   /* Views stay on one swipeable row below the brand and controls. */

@@ -22,6 +22,12 @@ selector specificity as their base and follow it in the stylesheet.
   segmented choices (layout, text size) use a soft blue fill. Segments show
   their own focus ring, so `.mt-segmented` suppresses Pico's group ring.
   Preserve `aria-pressed` and `aria-expanded` states.
+- **Breakpoints:** use only these `max-width` queries, in rem, each preceded
+  by a comment naming it: compact `70rem` (1120px; wraps the toolbar, stacks the
+  overview and topics panel), narrow `56rem` (896px; stacks the Zen split
+  view), phone `42rem` (672px; phone header, column pager, single-column
+  dialogs, full-screen composer) and small phone `30rem` (480px). Media query
+  `rem` is the browser default 16px, not the page's scaled font size.
 - **Toolbar:** brand and view tabs on the left; the Display menu, then actions
   (Filters, Clear filters, Resume, and the primary New last) on the right. The
   Filters toggle counts active filters. Search, Filters and New stay enabled

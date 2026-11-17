@@ -2600,7 +2600,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         self.assertRegex(css, r"\.mt-column \{[^}]*flex: 1 1 18\.5rem;[^}]*min-width: 13rem;[^}]*max-width: 24rem;")
         self.assertRegex(css, r"\.mt-groups:not\(\.is-horizontal, \.is-flat\) > \.mt-column\.is-empty \{[^}]*flex: 0 0 3rem;")
         # Phones keep every column full width so swiping and the column pager still work.
-        phone = css[css.index("@media (max-width: 38rem)", css.index(".mt-column-pager { display: none; }")):]
+        phone = css[css.index("@media (max-width: 42rem)", css.index(".mt-column-pager { display: none; }")):]
         self.assertIn(".mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty { flex: 0 0 calc(100vw - 3.5rem)", phone)
 
     def test_toolbar_actions_wait_for_load_and_composer_offers_discard_only_with_content(self) -> None:
@@ -2633,6 +2633,14 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_stylesheets_use_only_the_named_breakpoints(self) -> None:
+        css = "\n".join(path.read_text(encoding="utf-8") for path in sorted((SOURCE_ROOT / "tools/web/styles").glob("*.css")))
+        widths = set(re.findall(r"@media \(max-width: ([^)]+)\)", css))
+        # compact, narrow, phone and small phone; see tools/web/styles/README.md.
+        self.assertEqual(widths, {"70rem", "56rem", "42rem", "30rem"})
+        # No breakpoint pins board columns back to a fixed width above the shared 13rem minimum.
+        self.assertNotRegex(css, r"\.mt-column \{ flex-basis: [0-9.]+rem; min-width")
 
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")

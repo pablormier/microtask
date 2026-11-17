@@ -331,6 +331,7 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   align-items: end;
 }
 .mt-comment-composer textarea.mt-field { min-height: 2.35rem; }
+/* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
   .mt-detail-backdrop { padding: 12px; place-items: start stretch; }
   .mt-detail { max-height: calc(100vh - 24px); }
@@ -483,6 +484,7 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
 /* The narrow sidebar stacks the note above two equal actions. */
 .mt-properties-panel .mt-properties-footer .mt-unsaved-indicator { flex: 1 1 100%; }
 .mt-properties-panel .mt-properties-footer > button.mt-button { flex: 1 1 0; }
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
   .mt-detail-backdrop { padding: 8px; }
   .mt-detail { padding: 14px 14px; width: 100%; }

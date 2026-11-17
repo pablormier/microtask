@@ -206,11 +206,12 @@
   overflow: visible;
 }
 
+/* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
-  .mt-column { flex-basis: 17rem; min-width: 17rem; }
   .mt-groups.is-horizontal .mt-column-cards .mt-card { flex-basis: 17rem; min-width: 17rem; }
 }
 
+/* Breakpoint: small phone (30rem, 480px). See styles/README.md. */
 @media (max-width: 30rem) {
   .mt-groups.is-horizontal .mt-column-cards .mt-card {
     flex-basis: calc(100vw - 4rem);

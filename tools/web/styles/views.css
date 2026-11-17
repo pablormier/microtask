@@ -475,13 +475,15 @@ button.mt-button-icon.mt-topic-tree-disclosure {
 
 .mt-column-pager { display: none; }
 
+/* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
   .mt-overview { grid-template-columns: 1fr; padding: 12px 12px 0; }
   .mt-followups { min-height: 0; contain: none; overflow: visible; }
   .mt-cards-body { flex-direction: column; }
   .mt-topic-tree { flex: none; min-width: 0; max-width: none; max-height: 15rem; margin: 8px 12px 0; }
 }
-@media (max-width: 38rem) {
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
+@media (max-width: 42rem) {
   .mt-groups { padding: 12px; }
   .mt-focus-attention { padding: 16px 12px 0; }
   .mt-focus-list { padding-bottom: 12px; }

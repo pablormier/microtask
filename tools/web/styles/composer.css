@@ -355,6 +355,7 @@ li.mt-mention-option.is-active .mt-mention-meta {
 .mt-composer.is-zen .mt-composer-template {
   margin-left: -10px;
 }
+/* Breakpoint: narrow (56rem, 896px). See styles/README.md. */
 @media (max-width: 56rem) {
   .mt-zen-workspace.is-zen.is-split {
     grid-template-columns: minmax(0, 1fr);

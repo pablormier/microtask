@@ -19,7 +19,8 @@
   line-height: 1.4;
 }
 
-@media (max-width: 680px) {
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
+@media (max-width: 42rem) {
   .mt-quick-search-trigger-label,
   .mt-quick-search-trigger .mt-kbd {
     display: none;
