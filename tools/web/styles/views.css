@@ -506,7 +506,10 @@ button.mt-button-icon.mt-topic-tree-disclosure {
   button.mt-button.mt-column-pager-item[aria-current="true"]:enabled:hover { border-color: var(--mt-accent); background: var(--mt-accent-soft); color: var(--mt-accent); }
   button.mt-column-pager-item:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 2px; }
   .mt-column-pager-count { color: inherit; font-variant-numeric: tabular-nums; opacity: .75; }
-  .mt-groups:not(.is-horizontal, .is-flat) .mt-column { flex-basis: calc(100vw - 3.5rem); min-width: calc(100vw - 3.5rem); scroll-snap-align: start; }
+  .mt-groups:not(.is-horizontal, .is-flat) .mt-column,
+  .mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty { flex: 0 0 calc(100vw - 3.5rem); min-width: calc(100vw - 3.5rem); max-width: none; padding: 8px; align-items: stretch; scroll-snap-align: start; }
+  .mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty > h2 { justify-content: space-between; padding: 4px 6px; color: var(--mt-text); writing-mode: horizontal-tb; }
+  .mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty > .mt-column-cards { display: flex; }
   .mt-deadline-list { padding: var(--mt-space-3); }
   .mt-deadline-row { grid-template-columns: minmax(0, 1fr); }
   .mt-deadline-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: var(--mt-space-2); }

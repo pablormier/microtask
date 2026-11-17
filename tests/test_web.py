@@ -2510,6 +2510,18 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_board_columns_flex_and_empty_columns_fold(self) -> None:
+        self.assertEqual(self.render_dashboard().returncode, 0)
+        rendered = self.output.read_text()
+        self.assertIn(":class=\"{ ...group.className, 'is-empty': !group.items.length }\"", rendered)
+        css = rendered
+        # Columns share the width instead of a fixed size, and empty ones fold to a strip on wider screens.
+        self.assertRegex(css, r"\.mt-column \{[^}]*flex: 1 1 18\.5rem;[^}]*min-width: 13rem;[^}]*max-width: 24rem;")
+        self.assertRegex(css, r"\.mt-groups:not\(\.is-horizontal, \.is-flat\) > \.mt-column\.is-empty \{[^}]*flex: 0 0 3rem;")
+        # Phones keep every column full width so swiping and the column pager still work.
+        phone = css[css.index("@media (max-width: 38rem)", css.index(".mt-column-pager { display: none; }")):]
+        self.assertIn(".mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty { flex: 0 0 calc(100vw - 3.5rem)", phone)
+
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")
         if not node:

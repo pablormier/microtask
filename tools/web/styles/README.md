@@ -28,6 +28,11 @@ selector specificity as their base and follow it in the stylesheet.
   their own row. On phones the tabs share that row evenly (scrolling only
   below about 360px), the brand shows the logo alone, and Search, Filters, and
   Clear drop their text so the actions fit on the brand row.
+- **Board columns:** side-by-side columns share the board width between
+  13rem and 24rem each, so a typical status board fits without scrolling; the
+  board scrolls only when even the narrowest columns do not fit. On wider
+  screens an empty column folds to a 3rem strip with its name running down
+  the side and its count. Phones keep every column full width.
 - **Column pager:** on phones, where the board shows one column at a time, a
   row of pill buttons above it names every column with its count, marks the
   one in view with `aria-current`, and scrolls to a column on tap. It is

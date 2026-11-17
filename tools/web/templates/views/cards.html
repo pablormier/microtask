@@ -108,8 +108,8 @@
           <div class="mt-groups" x-ref="groups" @scroll.passive="trackColumn($el)" x-effect="mode; settings[mode].group; $nextTick(() => trackColumn($el))"
                :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
           <template x-for="group in viewGroups()" :key="group.key">
-            <div class="mt-column" :class="group.className">
-              <h2 x-show="group.label"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>
+            <div class="mt-column" :class="{ ...group.className, 'is-empty': !group.items.length }">
+              <h2 x-show="group.label" :title="group.items.length ? null : group.label + ': ' + group.empty"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>
               <div class="mt-column-cards">
                 <template x-if="group.items.length === 0">
                   <p class="mt-empty" x-text="group.empty"></p>
