@@ -342,7 +342,7 @@ class ImportGithubTests(unittest.TestCase):
         self.assertFalse(list(card_files(self.root, "task")))
         listed = self.run_mt("list", "--json")
         self.assertEqual(listed.returncode, 0, listed.stderr)
-        self.assertIn("Organize desk cables", {item["title"] for item in json.loads(listed.stdout)})
+        self.assertIn("Re-run the benchmark baseline", {item["title"] for item in json.loads(listed.stdout)})
 
     def test_github_utc_timestamp_is_serialized_in_workspace_local_time(self) -> None:
         env = self.env.copy()

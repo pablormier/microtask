@@ -1119,7 +1119,7 @@ view_labels:
         process, url = self.start_interactive_web()
         try:
             payload = self.get_json(url + "api/items")
-            card = self.get_card(url, next(item for item in payload["tasks"] if item["title"] == "Fix login timeout bug"))
+            card = self.get_card(url, next(item for item in payload["tasks"] if item["title"] == "Fix per-target metric aggregation"))
             demo_file = self.root / card["path"]
             declared_id = re.search(r"^id: (.+)$", demo_file.read_text(encoding="utf-8"), re.MULTILINE)
             self.assertIsNotNone(declared_id)

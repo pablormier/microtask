@@ -157,6 +157,13 @@ dashboard is open, the running server keeps using the code
 it started with and shows a notice on the board; restart `mt web` to pick up the
 updated version.
 
+On a fresh empty installation, the demo opens on a protein structure ML research
+board. Open **Audit the benchmark split** to try its checklist and follow a
+reference to the split protocol. In **Notes**, look for the AlphaFold paper
+summary and the causal inference course tracker. **Deadlines** shows a mix of
+hard deadlines, a reminder, and a target. The demo sets those dates relative to
+the day it first seeds the cards and keeps them on reopen.
+
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where
 you tick one or more values; a card matches when it has any value ticked in a

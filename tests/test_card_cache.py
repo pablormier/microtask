@@ -16,9 +16,9 @@ import transaction  # noqa: E402
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = SOURCE_ROOT / "examples" / "cards"
-TASK = "2026-01-03-140000-fix-login-timeout-bug.md"
-OTHER_TASK = "2026-01-01-120000-learn-bike-maintenance.md"
-NOTE = "2026-01-04-120000-microtask-workflow-cheatsheet.md"
+TASK = "2026-01-02-090100-aggregation-bug.md"
+OTHER_TASK = "2026-01-02-090300-lab-readout.md"
+NOTE = "2026-01-02-091300-alphafold-notes.md"
 
 
 class CardCacheTests(unittest.TestCase):
@@ -53,20 +53,20 @@ class CardCacheTests(unittest.TestCase):
         self.assert_equivalent()
         path = self.root / TASK
         replacement = path.with_name("replacement.tmp")
-        replacement.write_text(path.read_text(encoding="utf-8").replace("Fix login timeout bug", "Fix the login timeout"),
+        replacement.write_text(path.read_text(encoding="utf-8").replace("Fix per-target metric aggregation", "Fix the metric aggregation"),
                                encoding="utf-8")
         os.replace(replacement, path)
         self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
         self.assert_equivalent()
         titles = [card.title for card in store.read_cards(self.root, cache=self.cache)]
-        self.assertIn("Fix the login timeout", titles)
+        self.assertIn("Fix the metric aggregation", titles)
 
     def test_in_place_rewrite_with_restored_mtime_is_detected(self) -> None:
         self.assert_equivalent()
         path = self.root / TASK
         before = path.stat()
         text = path.read_text(encoding="utf-8")
-        changed = text.replace("Fix login timeout bug", "Fix login timeout bag")
+        changed = text.replace("Fix per-target metric aggregation", "Fix per-target metric calculation")
         self.assertEqual(len(changed), len(text))
         path.write_text(changed, encoding="utf-8")
         os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
@@ -77,15 +77,15 @@ class CardCacheTests(unittest.TestCase):
             self.skipTest("this filesystem's ctime did not change on an in-place write")
         self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
         self.assert_equivalent()
-        self.assertIn("Fix login timeout bag", [card.title for card in store.read_cards(self.root, cache=self.cache)])
+        self.assertIn("Fix per-target metric calculation", [card.title for card in store.read_cards(self.root, cache=self.cache)])
 
     def test_deleted_cards_disappear_and_new_cards_appear(self) -> None:
         self.assert_equivalent()
         (self.root / NOTE).unlink()
-        shutil.copy2(EXAMPLES / "2026-01-02-153000-organize-desk-cables.md", self.root / "2026-01-02-153000-organize-desk-cables.md")
+        shutil.copy2(EXAMPLES / "2026-01-02-090200-baseline.md", self.root / "2026-01-02-090200-baseline.md")
         cards = self.assert_equivalent()
         self.assertNotIn(NOTE, [card.path.name for card in cards])
-        self.assertIn("2026-01-02-153000-organize-desk-cables.md", [card.path.name for card in cards])
+        self.assertIn("2026-01-02-090200-baseline.md", [card.path.name for card in cards])
         self.assertNotIn(self.root / NOTE, self.cache.entries)
 
     def test_pruning_leaves_other_roots_alone(self) -> None:
@@ -147,12 +147,12 @@ from pathlib import Path
 titles = lambda: [task['title'] for task in taskweb.dashboard_payload()['tasks']]
 print(titles()[0])
 path = Path('cards') / {TASK!r}
-path.write_text(path.read_text(encoding='utf-8').replace('Fix login timeout bug', 'Changed title'), encoding='utf-8')
+path.write_text(path.read_text(encoding='utf-8').replace('Fix per-target metric aggregation', 'Changed title'), encoding='utf-8')
 print(titles()[0])
 '''
             result = subprocess.run([sys.executable, "-c", source], cwd=root, text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.split("\n")[:2], ["Fix login timeout bug", "Changed title"])
+        self.assertEqual(result.stdout.split("\n")[:2], ["Fix per-target metric aggregation", "Changed title"])
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
@@ -35,47 +36,62 @@ class DemoWorkspaceTests(unittest.TestCase):
     def test_demo_mode_active_on_empty_workspace_with_examples(self) -> None:
         result = self.run_mt("list", "--status", "active")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()), 3)
-        self.assertIn("Plan quarterly roadmap", result.stdout)
+        self.assertEqual(len(result.stdout.splitlines()), 5)
+        self.assertIn("Prepare the lab meeting readout", result.stdout)
         self.assertIn("Demo mode:", result.stderr)
 
     def test_demo_mode_search_and_read(self) -> None:
-        searched = self.run_mt("search", "roadmap")
+        searched = self.run_mt("search", "readout")
         self.assertEqual(searched.returncode, 0, searched.stderr)
-        self.assertIn("Plan quarterly roadmap", searched.stdout)
+        self.assertIn("Prepare the lab meeting readout", searched.stdout)
 
-        read = self.run_mt("read", "Plan quarterly roadmap")
+        read = self.run_mt("read", "Prepare the lab meeting readout")
         self.assertEqual(read.returncode, 0, read.stderr)
-        self.assertEqual(json.loads(self.run_mt("read", "Plan quarterly roadmap", "--json").stdout)["properties"]["title"], "Plan quarterly roadmap")
+        self.assertEqual(json.loads(self.run_mt("read", "Prepare the lab meeting readout", "--json").stdout)["properties"]["title"], "Prepare the lab meeting readout")
 
     def test_demo_mode_date_rebasing(self) -> None:
-        read = self.run_mt("read", "Follow up with design agency")
-        self.assertEqual(read.returncode, 0, read.stderr)
-        self.assertIn("due:", read.stdout)
-        raw_example = (SOURCE_ROOT / "examples" / "cards" / "2026-01-03-090000-follow-up-with-design-agency.md").read_text(encoding="utf-8")
-        self.assertIn("2026-01-08", raw_example)
+        expected = {
+            "Re-run the benchmark baseline": (-1, "deadline"),
+            "Audit the benchmark split": (0, "deadline"),
+            "Check back on ambiguous benchmark cases": (1, "reminder"),
+            "Prepare the lab meeting readout": (3, "deadline"),
+            "Work through the causal inference DAG exercises": (5, "target"),
+        }
+        today = date.today()
+        for title, (offset, kind) in expected.items():
+            with self.subTest(title=title):
+                read = self.run_mt("read", title, "--json")
+                self.assertEqual(read.returncode, 0, read.stderr)
+                properties = json.loads(read.stdout)["properties"]
+                self.assertEqual(properties["due"], (today + timedelta(days=offset)).isoformat())
+                self.assertEqual(properties["due_kind"], kind)
+
+        title = "Audit the benchmark split"
+        edited = self.run_mt("edit", title, "--set", "due=2030-01-05")
+        self.assertEqual(edited.returncode, 0, edited.stderr)
+        reopened = self.run_mt("read", title, "--json")
+        self.assertEqual(json.loads(reopened.stdout)["properties"]["due"], "2030-01-05")
 
     def test_demo_has_resolved_task_and_note_reference_trails(self) -> None:
         result = self.run_mt("list", "--all", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
         items = {item["title"]: item for item in json.loads(result.stdout)}
-        for title in ("Plan quarterly roadmap", "microtask workflow cheatsheet", "Set up shared team inbox"):
+        for title, item in items.items():
             with self.subTest(title=title):
-                references = items[title]["references"]
-                self.assertEqual(len(references), 2)
-                self.assertTrue(all(ref["state"] == "resolved" for ref in references))
-                self.assertEqual({ref["target"]["title"] for ref in references},
-                    {"Plan quarterly roadmap", "microtask workflow cheatsheet", "Set up shared team inbox"} - {title})
-        active = self.run_mt("list", "--status", "active", "--json")
-        self.assertEqual(active.returncode, 0, active.stderr)
-        roadmap = next(item for item in json.loads(active.stdout) if item["title"] == "Plan quarterly roadmap")
-        self.assertEqual({reference["target"]["title"] for reference in roadmap["references"]},
-                         {"microtask workflow cheatsheet", "Set up shared team inbox"})
+                self.assertTrue(item["references"])
+                self.assertTrue(all(ref["state"] == "resolved" for ref in item["references"]))
+
+        for title, destination in (
+            ("Audit the benchmark split", "Benchmark split protocol"),
+            ("Causal inference course tracker", "Work through the causal inference DAG exercises"),
+            ("Does a longer protein chain cause higher prediction error?", "Investigate the noisy long-chain slice"),
+        ):
+            self.assertIn(destination, {ref["target"]["title"] for ref in items[title]["references"]})
 
     def test_creating_task_transitions_out_of_demo_mode(self) -> None:
         # Verify demo mode before creation
         listed_before = self.run_mt("list", "--status", "active")
-        self.assertEqual(len(listed_before.stdout.splitlines()), 3)
+        self.assertEqual(len(listed_before.stdout.splitlines()), 5)
 
         # Create real task
         added = self.run_mt("add", "My real production task")
@@ -103,18 +119,18 @@ class DemoWorkspaceTests(unittest.TestCase):
 
     def test_demo_mode_mutations(self) -> None:
         # Move a task in demo mode
-        moved = self.run_mt("move", "Plan quarterly roadmap", "doing")
+        moved = self.run_mt("move", "Prepare the lab meeting readout", "doing")
         self.assertEqual(moved.returncode, 0, moved.stderr)
 
         doing = self.run_mt("list", "--status", "doing")
-        self.assertIn("Plan quarterly roadmap", doing.stdout)
+        self.assertIn("Prepare the lab meeting readout", doing.stdout)
 
         # Complete a task in demo mode
-        done = self.run_mt("done", "Plan quarterly roadmap")
+        done = self.run_mt("done", "Prepare the lab meeting readout")
         self.assertEqual(done.returncode, 0, done.stderr)
 
         # Delete a task in demo mode
-        deleted = self.run_mt("delete", "Organize desk cables")
+        deleted = self.run_mt("delete", "Re-run the benchmark baseline")
         self.assertEqual(deleted.returncode, 0, deleted.stderr)
 
     def test_demo_workspace_disabled_by_policy(self) -> None:
