@@ -26,6 +26,7 @@ function taskBoard() {
     loading: true,
     workspaceLoading: false,
     ready: false,
+    readyAction: null,
     loadError: "",
     statuses: [],
     statusLabels: {},
@@ -222,7 +223,12 @@ function taskBoard() {
         }
         await this.loadWorkspaceDrafts();
         this.ready = true;
-        this.$nextTick(() => this.readCardLocation());
+        this.$nextTick(() => {
+          this.readCardLocation();
+          const action = this.readyAction;
+          this.readyAction = null;
+          if (action) action();
+        });
       } catch (error) {
         this.loadError = error.message || "Could not load the workspace.";
       } finally {
@@ -776,6 +782,13 @@ function taskBoard() {
         workspace_tags: this.workspaceTags,
         workspace_usage: this.workspaceUsage,
       };
+    },
+
+    // Toolbar actions stay clickable while the workspace loads; a click made before then
+    // runs once it has loaded (the latest click wins) instead of the button looking disabled.
+    whenReady(action) {
+      if (this.ready) action();
+      else this.readyAction = action;
     },
 
     beginNewCapture(event) {

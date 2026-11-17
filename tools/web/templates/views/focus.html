@@ -68,10 +68,16 @@
         </article>
       </section>
 
-      <section class="mt-focus-list">
-        <template x-for="task in focusModeTasks()" :key="task.id">
+      <section class="mt-focus-attention" x-show="focusModeTasks().length" aria-labelledby="mt-focus-attention-title">
+        <header class="mt-focus-attention-header">
+          <h2 id="mt-focus-attention-title">Needs attention <span class="mt-panel-count" x-text="focusModeTasks().length"></span></h2>
+          <p>Open tasks with a deadline to check or no next step.</p>
+        </header>
+        <div class="mt-focus-list">
+          <template x-for="task in focusModeTasks()" :key="task.id">
 {card}
-        </template>
+          </template>
+        </div>
       </section>
 
 </div>

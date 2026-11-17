@@ -2603,6 +2603,37 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         phone = css[css.index("@media (max-width: 38rem)", css.index(".mt-column-pager { display: none; }")):]
         self.assertIn(".mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty { flex: 0 0 calc(100vw - 3.5rem)", phone)
 
+    def test_toolbar_actions_wait_for_load_and_composer_offers_discard_only_with_content(self) -> None:
+        self.assertEqual(self.render_dashboard().returncode, 0)
+        rendered = self.output.read_text()
+        toolbar = rendered[rendered.index('class="mt-toolbar-actions"'):rendered.index('<search id="mt-filters"')]
+        # New, Search and Filters never look disabled while loading; a click waits for the workspace.
+        self.assertNotIn(':disabled="!ready"', toolbar)
+        self.assertIn('@click="whenReady(() => beginNewCapture({ currentTarget: $el }))"', toolbar)
+        self.assertIn("captureComposer.hasContent(captureContext())", rendered)
+        self.assertIn('id="mt-focus-attention-title">Needs attention', rendered)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        probe = (
+            'const assert = require("assert/strict");\n'
+            'global.document = {getElementById: () => ({textContent: "{}"}), documentElement: {dataset: {}}};\n'
+            f'eval({json.dumps(load_js(self.root / "tools/web"))} + `\n'
+            'const app = taskBoard(); const ran = [];\n'
+            'app.whenReady(() => ran.push("first")); app.whenReady(() => ran.push("latest"));\n'
+            'assert.deepEqual(ran, []); assert.equal(typeof app.readyAction, "function");\n'
+            'app.readyAction(); assert.deepEqual(ran, ["latest"]);\n'
+            'app.ready = true; app.whenReady(() => ran.push("now")); assert.deepEqual(ran, ["latest", "now"]);\n'
+            'const composer = app.captureComposer;\n'
+            'const ctx = {store: {isEmpty: draft => !String(draft.text || "").trim() && !String(draft.title || "").trim()}};\n'
+            'composer.draft = null; assert.equal(composer.hasContent(ctx), false);\n'
+            'composer.draft = {text: "  ", title: ""}; assert.equal(composer.hasContent(ctx), false);\n'
+            'composer.draft = {text: "Book the dentist", title: ""}; assert.equal(composer.hasContent(ctx), true);\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")
         if not node:

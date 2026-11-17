@@ -340,6 +340,11 @@ function createCaptureComposer() {
       }
     },
 
+    // Discard is offered only when the draft holds something; an empty draft just closes.
+    hasContent(ctx) {
+      return Boolean(this.draft && !ctx.store.isEmpty(this.draft));
+    },
+
     hasUnpersisted(ctx) {
       if (!this.draft || this.persisted) return false;
       if (this.draft.mode === "new") return !ctx.store.isEmpty(this.draft);

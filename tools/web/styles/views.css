@@ -54,8 +54,20 @@
   padding: 10px 12px;
 }
 .mt-followup-title { margin: 3px 0; color: var(--mt-text); font-weight: 650; font-size: var(--mt-font-size-md); }
+/* Cards that need attention, below the Focus and Follow-ups panels. */
+.mt-focus-attention { padding: 20px 18px 0; }
+.mt-focus-attention-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
+.mt-focus-attention-header h2 {
+  margin: 0;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 650;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.mt-focus-attention-header p { margin: 0; color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); }
 .mt-focus-list {
-  padding: 16px 18px 24px;
+  padding: 0 0 24px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
   gap: 12px;
@@ -470,7 +482,9 @@ button.mt-button-icon.mt-topic-tree-disclosure {
   .mt-topic-tree { flex: none; min-width: 0; max-width: none; max-height: 15rem; margin: 8px 12px 0; }
 }
 @media (max-width: 38rem) {
-  .mt-groups, .mt-focus-list { padding: 12px; }
+  .mt-groups { padding: 12px; }
+  .mt-focus-attention { padding: 16px 12px 0; }
+  .mt-focus-list { padding-bottom: 12px; }
   .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   /* Column pager: names every column, marks the one in view, and jumps on tap. */

@@ -24,7 +24,9 @@ selector specificity as their base and follow it in the stylesheet.
   Preserve `aria-pressed` and `aria-expanded` states.
 - **Toolbar:** brand and view tabs on the left; the Display menu, then actions
   (Filters, Clear filters, Resume, and the primary New last) on the right. The
-  Filters toggle counts active filters. At narrow widths the view tabs move to
+  Filters toggle counts active filters. Search, Filters and New stay enabled
+  while the workspace loads; a click then runs once it has loaded (`whenReady`).
+  At narrow widths the view tabs move to
   their own row. On phones the tabs share that row evenly (scrolling only
   below about 360px), the brand shows the logo alone, and Search, Filters, and
   Clear drop their text so the actions fit on the brand row.
@@ -84,6 +86,11 @@ selector specificity as their base and follow it in the stylesheet.
   Use the shared segmented control for Note/Task selection in the composer
   header, before the title. The title is a large borderless heading input;
   optional sections are quiet disclosures rather than boxed rows.
+  Escape closes the composer and keeps a non-empty draft for Resume; Discard
+  draft appears only when the draft holds text.
+- **Focus view:** below the Focus and Follow-ups panels, open tasks with a
+  deadline to check or no next step sit under a "Needs attention" heading
+  with a count and a one-line explanation; the section hides when empty.
 - **Pickers:** Project, Topic, and Tags accept any text but choose from a
   `mt-picker` list that always shows every option (most-used first, with
   counts), a Create row for new text, and Clear at the top when set. Tags are
