@@ -491,7 +491,18 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
 .mt-status-badge { margin: 2px 4px 2px 0; }
 .mt-status-badge.mt-badge-success { background: var(--mt-success-soft); color: var(--mt-success); }
 .mt-status-badge.mt-badge-accent { background: var(--mt-accent-soft); color: var(--mt-accent); }
-.mt-tag { padding: 0 7px; border-color: var(--mt-border); border-radius: var(--mt-radius-sm); background: var(--mt-surface-quiet); color: var(--mt-text-muted); font-weight: 550; }
+.mt-tag {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  padding: 0 7px;
+  border-color: var(--mt-border);
+  border-radius: var(--mt-radius-sm);
+  background: var(--mt-surface-quiet);
+  color: var(--mt-text-muted);
+  font-weight: 550;
+}
 .mt-needs-review { align-self: start; margin-top: 6px; border-color: var(--mt-warning-soft-border); font-size: var(--mt-font-size-xs); font-weight: 600; }
 .mt-empty { padding: 6px 4px; color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); }
 

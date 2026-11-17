@@ -244,7 +244,7 @@
                   <span class="mt-card-popover-meta-item" x-show="hoverDisplayCard?.topic" x-text="'Topic: ' + hoverDisplayCard?.topic"></span>
                   <time class="mt-badge mt-due" :class="dueClass(hoverDisplayCard)" x-show="hoverDisplayCard?.due" :datetime="hoverDisplayCard?.due" :title="hoverDisplayCard?.due" x-text="'Due ' + dateLabel(hoverDisplayCard?.due)"></time>
                   <template x-for="tag in (hoverDisplayCard?.tags || []).slice(0, 3)" :key="tag">
-                    <span class="mt-badge mt-badge-success mt-tag" x-text="tag"></span>
+                    <span class="mt-badge mt-badge-success mt-tag" :title="tag" x-text="tag"></span>
                   </template>
                 </div>
               </div>

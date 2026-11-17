@@ -45,13 +45,15 @@
                 <div class="mt-card-footer">
                   <div class="mt-tags">
                     <template x-for="tag in (task.tags || [])" :key="tag">
-                      <span class="mt-badge mt-badge-success mt-tag" x-text="tag"></span>
+                      <span class="mt-badge mt-badge-success mt-tag" :title="tag" x-text="tag"></span>
                     </template>
                   </div>
-                  <span class="mt-comment-count" x-show="task.comment_count" :title="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'">
-                    <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12.5a7.5 7.5 0 0 1-10.9 6.7L4 20.5l1.4-4.4A7.5 7.5 0 1 1 20 12.5Z"/></svg>
-                    <span x-text="task.comment_count" aria-hidden="true"></span><span class="mt-sr-only" x-text="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'"></span>
-                  </span>
-                  <span class="mt-ref mt-card-ref" title="Card reference" x-text="task.ref"></span>
+                  <div class="mt-card-footer-meta">
+                    <span class="mt-comment-count" x-show="task.comment_count" :title="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12.5a7.5 7.5 0 0 1-10.9 6.7L4 20.5l1.4-4.4A7.5 7.5 0 1 1 20 12.5Z"/></svg>
+                      <span x-text="task.comment_count" aria-hidden="true"></span><span class="mt-sr-only" x-text="task.comment_count === 1 ? '1 comment' : task.comment_count + ' comments'"></span>
+                    </span>
+                    <span class="mt-ref mt-card-ref" title="Card reference" x-text="task.ref"></span>
+                  </div>
                 </div>
               </article>
