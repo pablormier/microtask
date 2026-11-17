@@ -7,10 +7,19 @@
             <header class="mt-detail-header">
               <div class="mt-detail-heading">
                 <div class="mt-detail-identity"><span class="mt-ref" x-text="selected?.ref"></span><span x-text="selected?.kind === 'note' ? 'Note' : 'Task'"></span><span x-show="selected?.archived">Archived</span><span x-show="selected?.hidden">Hidden</span></div>
-                <h2 id="mt-detail-title" x-text="selected?.title"></h2>
+                <h2 id="mt-detail-title" class="mt-detail-title">
+                  <template x-if="propertyEditor.form">
+                    <textarea class="mt-detail-title-input" rows="1" form="mt-properties-form" aria-label="Title" spellcheck="false"
+                              x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving"
+                              x-effect="propertyEditor.form.title; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
+                              @keydown.enter.prevent="$el.form && $el.form.requestSubmit()"
+                              @keydown.escape.stop="propertyEditor.form.title = selected?.title || ''; $el.blur()"></textarea>
+                  </template>
+                  <template x-if="!propertyEditor.form"><span x-text="selected?.title"></span></template>
+                </h2>
               </div>
               <div class="mt-detail-navigation">
-                <button class="mt-button mt-button-quiet mt-button-compact mt-detail-back" type="button" aria-label="Back to previous card" :disabled="!canGoBackReference()" @click="backReference()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>Back</span></button>
+                <button class="mt-button mt-button-quiet mt-button-compact mt-detail-back" type="button" aria-label="Back to previous card" x-show="canGoBackReference()" @click="backReference()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>Back</span></button>
                 <details class="mt-card-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
                   <summary class="mt-menu-trigger" aria-label="More card actions" title="More card actions"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
                   <div class="mt-card-menu-items">
@@ -136,6 +145,38 @@
                   </div>
                 </template>
                 <div class="mt-preview" x-show="!contentEditor.draft" x-ref="preview" x-html="previewHtml" @click="openReference($event); toggleTaskCheckbox($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                <template x-for="field in textPropertyFields()" :key="field.key">
+                  <section class="mt-text-property" x-show="!contentEditor.draft" :aria-label="field.label">
+                    <header class="mt-text-property-header">
+                      <h3 x-text="field.label"></h3>
+                      <button type="button" class="mt-button mt-button-quiet mt-button-compact" x-show="textPropertyEditing !== field.key"
+                              @click="editTextProperty(field.key)" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading"
+                              :aria-label="(field.value ? 'Edit ' : 'Add ') + field.label.toLowerCase()" x-text="field.value ? 'Edit' : 'Add'"></button>
+                    </header>
+                    <div class="mt-preview mt-property-markdown" x-show="field.value && textPropertyEditing !== field.key" x-html="field.html"
+                         @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                    <p class="mt-text-property-empty" x-show="!field.value && textPropertyEditing !== field.key" x-text="field.empty"></p>
+                    <template x-if="textPropertyEditing === field.key">
+                      <div class="mt-text-property-editor">
+                        <textarea class="mt-field" rows="3" x-model="propertyEditor.form[field.key]" :aria-label="field.label" :placeholder="field.placeholder"
+                                  x-init="$nextTick(() => $el.focus())" :disabled="busy || draftBusy || propertyEditor.saving"
+                                  @keydown.escape.stop.prevent="cancelTextProperty(field.key)"
+                                  @keydown.meta.enter.prevent="saveTextProperty()" @keydown.ctrl.enter.prevent="saveTextProperty()"></textarea>
+                        <div class="mt-layout-group" role="group" :aria-label="field.label + ' actions'">
+                          <button type="button" class="mt-button mt-button-compact" @click="cancelTextProperty(field.key)" :disabled="propertyEditor.saving">Cancel</button>
+                          <button type="button" class="mt-button mt-button-primary mt-button-compact" @click="saveTextProperty()"
+                                  :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="propertyEditor.saving">Save</button>
+                        </div>
+                      </div>
+                    </template>
+                  </section>
+                </template>
+                <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-text-property-add"
+                        x-show="!contentEditor.draft && selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'"
+                        @click="editTextProperty('processing_instructions')" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading">
+                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
+                  <span>Add processing instructions</span>
+                </button>
                 <div class="mt-card-properties-preview" x-show="!contentEditor.draft" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <form class="mt-comment-composer" x-show="!contentEditor.draft" @submit.prevent="commentSelected()">
                   <textarea class="mt-field" x-model="commentText" :disabled="busy" aria-label="Comment text" placeholder="Leave a comment"></textarea>
@@ -144,7 +185,7 @@
               </section>
               <aside class="mt-properties-panel" aria-label="Card properties">
                 <header class="mt-properties-header"><h3>Properties</h3></header>
-                <form class="mt-properties-form" @submit.prevent="propertyEditor.apply(propertyContext())">
+                <form class="mt-properties-form" id="mt-properties-form" @submit.prevent="propertyEditor.apply(propertyContext())">
                   <!-- Keyed by card so the shared editor re-initializes for each card's kind and values. -->
                   <template x-for="cardId in [selected?.id]" :key="cardId">
                     <div x-data="cardMetadataEditor(propertyEditor.form, false, 'drawer', cardMetadataConfig(), propertyEditor.errors, selected?.kind)"
@@ -153,19 +194,6 @@
                       {card_metadata_editor}
                     </div>
                   </template>
-                  <div class="mt-properties-text">
-                  <label class="mt-detail-property-field">Title
-                    <input class="mt-field" type="text" x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving" autocomplete="off">
-                  </label>
-                  <template x-if="selected?.kind === 'task'">
-                    <label class="mt-detail-property-field">Next action
-                      <textarea class="mt-field" x-model="propertyEditor.form.next_action" :disabled="busy || draftBusy || propertyEditor.saving" rows="3"></textarea>
-                    </label>
-                  </template>
-                  <label class="mt-detail-property-field">Processing instructions
-                    <textarea class="mt-field" x-model="propertyEditor.form.processing_instructions" :disabled="busy || draftBusy || propertyEditor.saving" rows="3" placeholder="How should this be organized or triaged?"></textarea>
-                  </label>
-                  </div>
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.conflict">This card changed while you were editing. Your changes are kept here. Reset to load the latest properties.</p>
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.error" x-text="propertyEditor.error"></p>
                   <footer class="mt-properties-footer" x-show="propertyEditor.changed()">

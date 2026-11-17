@@ -88,6 +88,8 @@ function taskBoard() {
     requestedCardId: null,
     previewHtml: "",
     propertiesHtml: "",
+    textPropertyHtml: {},
+    textPropertyEditing: "",
     moveDestination: "",
     contentEditor: createContentEditor(),
     commentText: "",

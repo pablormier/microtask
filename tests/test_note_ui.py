@@ -1386,17 +1386,22 @@ for(const kind of ['task','note']) {
   const document={innerHTML:''},activity={innerHTML:''};
   renderPreview(card,document);
   const bodyCalls=parsed.slice();renderPropertyPanels(card,activity);
-  results.push({kind,body,bodyCalls,activityCalls:parsed.slice(1),document:document.innerHTML,activity:activity.innerHTML});
+  const activityCalls=parsed.slice(1);
+  const properties={next_action:renderTextProperty(card,'next_action'),processing_instructions:renderTextProperty(card,'processing_instructions')};
+  results.push({kind,body,bodyCalls,activityCalls,propertyCalls:parsed.slice(1+activityCalls.length),properties,document:document.innerHTML,activity:activity.innerHTML});
 }
 console.log(JSON.stringify({results}));
 """)
         for row in result['results']:
             self.assertEqual(row['bodyCalls'], [row['body']])
-            self.assertEqual(len(row['activityCalls']), 3 if row['kind']=='task' else 2)
-            self.assertIn('History line one.\nLine two.', row['activityCalls'])
+            # Each comment, and each text property, is its own Markdown document.
+            self.assertEqual(row['activityCalls'], ['History line one.\nLine two.'])
             self.assertIn('Comments (1)', row['activity'])
             self.assertEqual(row['document'], '<p>rendered</p>')
-            self.assertEqual('Next action</h3>' in row['activity'], row['kind']=='task')
+            self.assertNotIn('Next action</h3>', row['activity'])
+            self.assertEqual(row['propertyCalls'],
+                             (['Compare methods.'] if row['kind'] == 'task' else []) + ['Check source.\n```python\nunfinished'])
+            self.assertEqual(row['properties']['next_action'], '<p>rendered</p>' if row['kind'] == 'task' else '')
 
     def test_template_exposes_capture_and_review_controls(self) -> None:
         cards = (ROOT / "tools/web/templates/views/cards.html").read_text(encoding="utf-8")

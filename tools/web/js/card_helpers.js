@@ -56,6 +56,10 @@ const CARD_DATETIME_FORMATTER = typeof Intl !== "undefined"
   ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
   : null;
 
+const CARD_TIME_FORMATTER = typeof Intl !== "undefined"
+  ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" })
+  : null;
+
 function formatCardDate(value) {
   if (!value) return "—";
   const date = parseCardDueDate(value);

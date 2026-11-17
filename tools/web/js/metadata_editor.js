@@ -16,6 +16,8 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     tagsText: formatMetadataTags(value.tags),
     dateValue: due.slice(0, 10),
     timeValue: due.includes("T") ? due.split("T")[1].slice(0, 5) : "",
+    dateFocused: false,
+    timeFocused: false,
     tagsEdited: false,
     dueEdited: false,
     priorities: config.task_priorities || {},
@@ -59,6 +61,16 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
         return;
       }
       this.value.due = this.dateValue + (this.timeValue ? "T" + this.timeValue + ":00" : "");
+    },
+    // Readable text shown over the native date and time fields while they are not focused.
+    dateDisplay() {
+      return this.dateValue ? formatCardDate(this.dateValue) : "No date";
+    },
+    timeDisplay() {
+      if (!this.timeValue) return "All day";
+      const moment = new Date("2000-01-01T" + this.timeValue + ":00");
+      if (Number.isNaN(moment.getTime())) return this.timeValue;
+      return CARD_TIME_FORMATTER ? CARD_TIME_FORMATTER.format(moment) : this.timeValue;
     },
     syncDueKind() {
       this.value.due_kind = this.dateValue ? (this.value.due_kind || null) : null;

@@ -44,6 +44,39 @@ function createDetailController() {
       const properties = document.createElement("div");
       renderPropertyPanels(this.selected, properties);
       this.propertiesHtml = properties.innerHTML;
+      this.textPropertyHtml = {
+        next_action: renderTextProperty(this.selected, "next_action"),
+        processing_instructions: renderTextProperty(this.selected, "processing_instructions"),
+      };
+    },
+
+    // Next action and processing instructions live in one place: rendered in the content
+    // column, edited there in place, and saved through the shared property editor.
+    textPropertyFields() {
+      const card = this.selected;
+      if (!card) return [];
+      const fields = [];
+      if (card.kind === "task") fields.push({ key: "next_action", label: "Next action", empty: "No next action yet.", placeholder: "The next concrete step" });
+      fields.push({ key: "processing_instructions", label: "Processing instructions", empty: "None.", placeholder: "How should this be organized or triaged?" });
+      return fields
+        .map(field => ({ ...field, value: String(card[field.key] || ""), html: (this.textPropertyHtml || {})[field.key] || "" }))
+        .filter(field => field.key === "next_action" || field.value || this.textPropertyEditing === field.key);
+    },
+
+    editTextProperty(key) {
+      if (!this.propertyEditor.form) return;
+      this.textPropertyEditing = key;
+    },
+
+    cancelTextProperty(key) {
+      if (this.propertyEditor.form && this.selected) this.propertyEditor.form[key] = this.selected[key] || "";
+      this.textPropertyEditing = "";
+    },
+
+    async saveTextProperty() {
+      const result = await this.propertyEditor.apply(this.propertyContext());
+      if (result) this.textPropertyEditing = "";
+      return result;
     },
 
     async toggleTaskCheckbox(event) {
@@ -228,6 +261,21 @@ function createDetailController() {
       }).catch(() => {}).finally(() => { if (this.requestedCardId === id) this.requestedCardId = null; });
     },
 
+    // Focus Back when there is a previous card, else Close. Back renders only in that case and
+    // can appear shortly after the card does, so check again briefly before using Close.
+    focusDetailNavigation(triesLeft) {
+      const dialog = this.$refs && this.$refs.detailDialog;
+      if (!dialog) return;
+      const back = dialog.querySelector(".mt-detail-back");
+      const backShown = Boolean(back && back.getClientRects().length);
+      if (this.canGoBackReference() && !backShown && triesLeft > 0) {
+        setTimeout(() => this.focusDetailNavigation(triesLeft - 1), 30);
+        return;
+      }
+      const target = this.canGoBackReference() && backShown ? back : dialog.querySelector(".mt-close");
+      if (target) target.focus();
+    },
+
     canGoBackReference() {
       return Boolean(this.previousCardId && this.tasks.some(task => task.id === this.previousCardId));
     },
@@ -249,14 +297,14 @@ function createDetailController() {
       this.actionError = false;
       this.previewHtml = "";
       this.propertiesHtml = "";
+      this.textPropertyHtml = {};
+      this.textPropertyEditing = "";
       this.detailError = "";
       this.detailLoading = false;
       this.detailSequence += 1;
       this.$nextTick(() => {
         if (typeof window !== "undefined" && typeof window.scrollTo === "function") window.scrollTo(0, 0);
-        const dialog = this.$refs.detailDialog;
-        const navigationButton = dialog && dialog.querySelector(this.canGoBackReference() ? ".mt-detail-back" : ".mt-close");
-        if (navigationButton) navigationButton.focus();
+        this.focusDetailNavigation(10);
       });
       if (typeof task.body === "string") this.renderSelectedPreview();
       else return this.loadSelectedDetails();

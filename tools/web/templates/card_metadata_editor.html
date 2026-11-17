@@ -22,12 +22,20 @@
   <div class="mt-card-metadata-date">
     <label class="mt-card-metadata-field">
       <span>Date <small>(optional)</small></span>
-      <input class="mt-field mt-field-property" type="date" x-model="dateValue" @input="syncDue()" aria-label="Date">
+      <span class="mt-date-field" :class="{ 'is-formatted': !dateFocused }">
+        <input class="mt-field mt-field-property" type="date" x-model="dateValue" @input="syncDue()" aria-label="Date"
+               @focus="dateFocused = true" @blur="dateFocused = false">
+        <span class="mt-date-display" :class="{ 'is-empty': !dateValue }" aria-hidden="true" x-text="dateDisplay()"></span>
+      </span>
       <small class="mt-metadata-field-error" x-show="fieldErrors.due" x-text="fieldErrors.due"></small>
     </label>
     <label class="mt-card-metadata-field" x-show="dateValue" x-cloak>
       <span>Time <small>(optional)</small></span>
-      <input class="mt-field mt-field-property" type="time" x-model="timeValue" @input="syncDue()" :disabled="disabled || !dateValue" aria-label="Time">
+      <span class="mt-date-field" :class="{ 'is-formatted': !timeFocused }">
+        <input class="mt-field mt-field-property" type="time" x-model="timeValue" @input="syncDue()" :disabled="disabled || !dateValue" aria-label="Time"
+               @focus="timeFocused = true" @blur="timeFocused = false">
+        <span class="mt-date-display" :class="{ 'is-empty': !timeValue }" aria-hidden="true" x-text="timeDisplay()"></span>
+      </span>
     </label>
     <label class="mt-card-metadata-field" x-show="dateValue" x-cloak>
       <span>Date meaning</span>

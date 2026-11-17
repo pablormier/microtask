@@ -135,17 +135,17 @@ function enableTaskCheckboxes(el) {
   return boxes.length;
 }
 
+// A text property (next action, processing instructions) as Markdown with card references linked.
+function renderTextProperty(task, field) {
+  const value = String(task && task[field] || "");
+  if (!value || !window.marked || !window.DOMPurify) return escapeHtml(value);
+  return renderMarkdown(task, referenceSource(task, field, value));
+}
+
+// Comment and time history panels, shown below the card's text properties.
 function renderPropertyPanels(task, el) {
   if (!window.marked || !window.DOMPurify) return;
   const sections = [];
-  const propertySection = (field, label) => {
-    const value = String(task[field] || "");
-    if (!value) return "";
-    return '<section class="mt-property-markdown"><h3>' + escapeHtml(label) + "</h3>" +
-      renderMarkdown(task, referenceSource(task, field, value)) + "</section>";
-  };
-  if (task.kind === "task") sections.push(propertySection("next_action", "Next action"));
-  sections.push(propertySection("processing_instructions", "Processing instructions"));
 
   const comments = Array.isArray(task.comments) ? task.comments : [];
   if (comments.length) {

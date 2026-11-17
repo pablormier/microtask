@@ -2457,6 +2457,59 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_card_dialog_edits_title_and_text_properties_in_one_place(self) -> None:
+        self.assertEqual(self.render_dashboard().returncode, 0)
+        rendered = self.output.read_text()
+        dialog = rendered[rendered.index('class="mt-detail-backdrop'):rendered.index('class="mt-card-popover"')]
+        # The heading is the title field; the sidebar no longer repeats title, next action or instructions.
+        self.assertIn('class="mt-detail-title-input" rows="1" form="mt-properties-form"', dialog)
+        self.assertNotIn('x-model="propertyEditor.form.next_action"', dialog)
+        self.assertEqual(dialog.count('x-model="propertyEditor.form.title"'), 1)
+        self.assertIn('x-show="canGoBackReference()" @click="backReference()"', dialog)
+        self.assertIn('x-text="dateDisplay()"', dialog)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        probe = (
+            'const assert = require("assert/strict");\n'
+            'global.document = {getElementById: () => ({textContent: "{}"}), documentElement: {dataset: {}}};\n'
+            f'eval({json.dumps(load_js(self.root / "tools/web"))} + `\n'
+            '(async () => {\n'
+            'const app = taskBoard();\n'
+            'app.selected = {kind: "task", next_action: "Call @abc", processing_instructions: ""};\n'
+            'app.propertyEditor.form = {next_action: "Call @abc", processing_instructions: ""};\n'
+            'app.textPropertyHtml = {next_action: "<p>Call</p>"};\n'
+            'assert.deepEqual(app.textPropertyFields().map(f => [f.key, f.html]), [["next_action", "<p>Call</p>"]]);\n'
+            'app.editTextProperty("processing_instructions");\n'
+            'assert.deepEqual(app.textPropertyFields().map(f => f.key), ["next_action", "processing_instructions"]);\n'
+            'app.propertyEditor.form.processing_instructions = "Draft";\n'
+            'app.cancelTextProperty("processing_instructions");\n'
+            'assert.equal(app.propertyEditor.form.processing_instructions, ""); assert.equal(app.textPropertyEditing, "");\n'
+            'app.editTextProperty("next_action");\n'
+            'app.propertyEditor.apply = async () => null; await app.saveTextProperty(); assert.equal(app.textPropertyEditing, "next_action");\n'
+            'app.propertyEditor.apply = async () => ({ok: true}); await app.saveTextProperty(); assert.equal(app.textPropertyEditing, "");\n'
+            'app.selected = {kind: "note", processing_instructions: ""};\n'
+            'assert.deepEqual(app.textPropertyFields(), []);\n'
+            'const editor = cardMetadataEditor({}, false, "drawer", {}, {}, "task");\n'
+            'assert.equal(editor.dateDisplay(), "No date"); assert.equal(editor.timeDisplay(), "All day");\n'
+            'editor.dateValue = "2026-01-04"; editor.timeValue = "14:30";\n'
+            # Back gets focus once it renders; without a previous card, or if it never shows, Close does.
+            'const focused = []; let backRects = 0;\n'
+            'const button = name => ({focus() { focused.push(name); }, getClientRects: () => name === "back" ? new Array(backRects) : [1]});\n'
+            'const buttons = {".mt-detail-back": button("back"), ".mt-close": button("close")};\n'
+            'app.$refs = {detailDialog: {querySelector: selector => buttons[selector]}};\n'
+            'app.previousCardId = null; app.focusDetailNavigation(10); assert.deepEqual(focused, ["close"]);\n'
+            'app.previousCardId = "prev"; app.tasks = [{id: "prev"}];\n'
+            'app.focusDetailNavigation(10); assert.deepEqual(focused, ["close"]);\n'
+            'backRects = 1; await new Promise(resolve => setTimeout(resolve, 80)); assert.deepEqual(focused, ["close", "back"]);\n'
+            'backRects = 0; app.focusDetailNavigation(1); await new Promise(resolve => setTimeout(resolve, 80)); assert.deepEqual(focused, ["close", "back", "close"]);\n'
+            'assert.equal(editor.dateDisplay(), formatCardDate("2026-01-04")); assert.match(editor.timeDisplay(), /30/);\n'
+            '})().catch(error => { console.error(error); process.exit(1); });\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_topic_tree_controls_and_settings_defaults(self) -> None:
         node = shutil.which("node")
         if not node:

@@ -63,6 +63,14 @@ selector specificity as their base and follow it in the stylesheet.
   The sidebar editor is keyed by card so it re-initializes on navigation. Keep Archive/Hide in the secondary menu, active ownership beside status,
   and created/updated dates in the footer. Stack the content and
   properties on narrow screens.
+  Each value has one home. The title is the heading itself, an input that
+  shows a border only on hover and focus; Enter saves and Escape restores it.
+  Next action and processing instructions render in the content column with
+  card references linked, and edit in place there with Cancel and Save; the
+  sidebar does not repeat them. Back appears only when there is a previous
+  card to return to.
+  Date and time fields show readable text ("Jan 4, 2026", "All day") until
+  focused, over the native input so its picker and keyboard entry still work.
 - **Property forms:** reuse the same metadata editor for both kinds. Use
   `mt-field-property` for 36px controls and helper/errors below inputs. Reveal
   time and date meaning only after a date is set. Capture reuses this editor above the writing area, with
