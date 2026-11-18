@@ -91,7 +91,7 @@ def command_time_end(args: argparse.Namespace, ws: Workspace | None = None) -> i
 
 def command_time_list(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
-    selection = command_query(args)
+    selection = command_query(args, ws=resolved)
     window = session_window(args)
     if selection is None or window is None:
         return 2
@@ -200,7 +200,7 @@ def command_time_add(args: argparse.Namespace, ws: Workspace | None = None) -> i
 
 def command_time_report(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
-    selection = command_query(args)
+    selection = command_query(args, ws=resolved)
     window = session_window(args)
     if selection is None or window is None:
         return 2

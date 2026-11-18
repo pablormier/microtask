@@ -85,8 +85,10 @@ class PropertyPatchAuditTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "scripts"))
         import card_format
         import operations
+        from workspace import Workspace
 
-        properties, _ = card_format.parse_document(operations.render_new_card("note", "audit", "Audit"))
+        properties, _ = card_format.parse_document(
+            operations.render_new_card("note", "audit", "Audit", ws=Workspace.at(ROOT)))
         properties["hidden"] = False
         with self.assertRaisesRegex(ValueError, "hidden must be true or false"):
             card_format.apply_property_patch(properties, {"hidden": 0}, kind="note")

@@ -376,7 +376,8 @@ sys.path.insert(0, 'tools')
 import taskweb
 out = []
 for mapping in json.loads(sys.argv[1]):
-    payload = taskweb.dashboard_payload(query=taskweb.request_query(mapping))
+    ws, cache = taskweb.Workspace.resolve(), taskweb.store.CardCache()
+    payload = taskweb.dashboard_payload(ws, cache, query=taskweb.request_query(ws, mapping))
     out.append(payload['collections']['tasks'])
 print(json.dumps(out))
 """

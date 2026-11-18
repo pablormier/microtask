@@ -100,7 +100,7 @@ class ScopedValidationTests(unittest.TestCase):
         concurrent = self.before + b"\nConcurrent content\n"
         with patch.object(transaction, "validate_item_changes", side_effect=lambda *a, **k: self.root.joinpath(self.path).write_bytes(concurrent)):
             with self.assertRaisesRegex(ValueError, "item changed before transaction"):
-                transaction.apply_item_transaction({self.path: self.before + b"\nProposed\n"}, source_root=self.root)
+                transaction.apply_item_transaction({self.path: self.before + b"\nProposed\n"}, source_root=self.root, ws=tasklib.Workspace.at(self.root))
         self.assertEqual(self.root.joinpath(self.path).read_bytes(), concurrent)
 
     def test_validator_rejects_traversal_and_symlinks(self):

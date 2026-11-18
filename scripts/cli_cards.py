@@ -126,7 +126,7 @@ def command_create(args: argparse.Namespace, ws: Workspace | None = None) -> int
             return 1
     if as_json:
         auto_sync_after_mutation(changed=changed, ws=resolved)
-        return MutationReceipt(saved_receipt(card, updated=changed))
+        return MutationReceipt(saved_receipt(card, updated=changed, ws=resolved))
     print(card.path)
     return auto_sync_after_mutation(changed=changed, ws=resolved)
 
@@ -245,21 +245,21 @@ def command_note_editor(args: argparse.Namespace, ws: Workspace | None = None) -
             return 0
         args.capture_timestamp = timestamp
         try:
-            with time_mutation_lock():
-                note_item, changed = capture_card(args, candidate, "note")
+            with time_mutation_lock(resolved):
+                note_item, changed = capture_card(args, candidate, "note", ws=resolved)
         except (OSError, ValueError, RuntimeError) as error:
             print(f"error: note was not saved: {error}", file=sys.stderr)
             return 1
         keep_draft = False
         if getattr(args, "as_json", False):
-            receipt = saved_receipt(note_item, updated=changed)
-            sync_error = sync_error_after_json_save() if changed else None
+            receipt = saved_receipt(note_item, updated=changed, ws=resolved)
+            sync_error = sync_error_after_json_save(resolved) if changed else None
             if sync_error:
                 receipt["sync_error"] = sync_error
             print(json.dumps(receipt, ensure_ascii=False))
             return 0
         print(note_item.path)
-        return auto_sync_after_mutation(changed=changed)
+        return auto_sync_after_mutation(changed=changed, ws=resolved)
     except (OSError, UnicodeError) as error:
         print(f"error: could not read edited note draft: {error}", file=sys.stderr)
         return 1
@@ -350,7 +350,7 @@ def command_convert(args: argparse.Namespace, ws: Workspace | None = None) -> in
             updated = render_converted_task(
                 item, now, status_override=getattr(args, "status", None),
                 type_override=getattr(args, "task_type", None),
-                next_action_override=getattr(args, "next_action", None),
+                next_action_override=getattr(args, "next_action", None), ws=resolved,
             )
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -456,18 +456,18 @@ def command_delete(args: argparse.Namespace, ws: Workspace | None = None) -> int
     relative = task.path.relative_to(base).as_posix()
     original = task.path.read_bytes()
     try:
-        transaction.apply_item_transaction({}, deletions={relative}, expected={relative: original}, source_root=base)
+        transaction.apply_item_transaction({}, deletions={relative}, expected={relative: original}, source_root=base, ws=resolved)
     except (OSError, ValueError) as error:
         print(f"error: delete failed validation; change rolled back: {error}", file=sys.stderr)
         return 1
     if args.as_json:
-        receipt = item_receipt(task)
+        receipt = item_receipt(task, ws=resolved)
         receipt["deleted"] = True
         receipt["changed"] = True
-        auto_sync_after_mutation()
+        auto_sync_after_mutation(ws=resolved)
         return MutationReceipt(receipt)
     print(f"Deleted: {task.path}")
-    return auto_sync_after_mutation()
+    return auto_sync_after_mutation(ws=resolved)
 
 
 def _run_mdviz(resolved_ws: Workspace, target: Path, args: argparse.Namespace) -> int:
@@ -503,9 +503,9 @@ def command_show(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return _run_mdviz(resolved_ws, task.path, args)
 
 
-def _read_item_data(task: Card, args: argparse.Namespace) -> tuple[dict[str, object] | None, str | None]:
+def _read_item_data(task: Card, args: argparse.Namespace, ws: Workspace) -> tuple[dict[str, object] | None, str | None]:
     if args.as_json:
-        return item_read_record(task), None
+        return item_read_record(task, ws), None
     if getattr(args, "body", False):
         return None, task.body
     return None, task.raw
@@ -524,14 +524,14 @@ def command_read(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         if args.as_json:
             records = []
             for task in tasks:
-                rec, _ = _read_item_data(task, args)
+                rec, _ = _read_item_data(task, args, resolved)
                 if rec is None:
                     return 2
                 records.append(rec)
             print(json.dumps(records, ensure_ascii=False))
             return 0
         for task in tasks:
-            _, text = _read_item_data(task, args)
+            _, text = _read_item_data(task, args, resolved)
             if text is None:
                 return 2
             sys.stdout.write(text)
@@ -543,7 +543,7 @@ def command_read(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     task, result = resolve_unique(query, match_mode=args.match_mode, ws=resolved)
     if task is None:
         return result
-    rec, text = _read_item_data(task, args)
+    rec, text = _read_item_data(task, args, resolved)
     if rec is None and text is None:
         return 2
     if args.as_json:
@@ -583,12 +583,12 @@ def _bulk_preview(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         records = []
         changes: dict[str, bytes] = {}
         for item in matching:
-            record, contents = _bulk_plan_item(item, base, assignments, timestamp)
+            record, contents = _bulk_plan_item(item, base, assignments, timestamp, resolved)
             records.append(record)
             if contents is not None:
                 changes[str(Path(str(record["path"])).as_posix())] = contents
         if changes:
-            validate_item_changes(changes, source_root=base)
+            validate_item_changes(changes, source_root=base, ws=resolved)
     except (OSError, ValueError) as error:
         prefix = "conflict" if "conflict:" in str(error) else "invalid bulk edit"
         print(f"error: {error}" if prefix == "conflict" else f"error: {prefix}: {error}", file=sys.stderr)
@@ -654,7 +654,7 @@ def _read_bulk_plan(path_text: str, ws: Workspace | None = None) -> dict[str, ob
     assignments = _bulk_edit_assignments(assignments_raw)
     if not isinstance(plan["items"], list) or not plan["items"]:
         raise ValueError("bulk edit plan must contain at least one selected card")
-    _plan_query(plan)
+    _plan_query(plan, resolved)
     if any(type(plan[field]) is not int or plan[field] < 0 for field in ("selected", "changed", "unchanged")):
         raise ValueError("bulk edit plan has invalid selection counts")
     records = plan["items"]
@@ -678,7 +678,7 @@ def _apply_bulk_plan_locked(args: argparse.Namespace, ws: Workspace | None = Non
         assignments = plan["assignments"]
         assert isinstance(assignments, dict)
         base = active_root(resolved_ws)
-        current_items = select_cards(discover(ws=resolved_ws), _plan_query(plan))
+        current_items = select_cards(discover(ws=resolved_ws), _plan_query(plan, resolved_ws))
         current_members = {item.path.relative_to(base).as_posix() for item in current_items}
         planned_members = {
             entry.get("path") for entry in plan["items"]
@@ -731,7 +731,7 @@ def _apply_bulk_plan_locked(args: argparse.Namespace, ws: Workspace | None = Non
             if set(assignments) - set(card_format.EDITABLE_FIELDS[kind]):
                 raise ValueError(f"bulk edit field is not available on {kind} {relative_text}")
             before = {field: item.frontmatter.get(field) for field in assignments}
-            raw = _apply_bulk_metadata(item.raw, kind, assignments, timestamp)
+            raw = _apply_bulk_metadata(item.raw, kind, assignments, timestamp, resolved_ws)
             parsed = card_format.parse_yaml(card_format.parse_frontmatter(raw)[0] or "")
             after = {field: parsed.get(field) for field in assignments}
             changed = raw.encode("utf-8") != original
@@ -811,7 +811,7 @@ def _run_card_query(args: argparse.Namespace, *, search: bool, ws: Workspace | N
     if args.tail is not None and args.tail < 1:
         print("error: --tail must be a positive integer", file=sys.stderr)
         return 2
-    query = command_query(args)
+    query = command_query(args, ws=resolved)
     if query is None:
         return 2
     if search and not query.text.strip():
@@ -933,7 +933,7 @@ def command_topic_rename(args: argparse.Namespace, ws: Workspace | None = None) 
     resolved = _ws(ws)
     try:
         plan = topic_rename_plan(args.old, args.new, args.merge, ws=resolved)
-        username = current_username(getattr(args, "by", None))
+        username = current_username(getattr(args, "by", None), ws=resolved)
         claimed = []
         for card, _new_topic in plan:
             try:
@@ -1008,13 +1008,13 @@ def command_focus(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     if args.clear and args.next:
         print("error: --clear cannot be combined with --next", file=sys.stderr)
         return 2
-    selection = command_query(args)
+    selection = command_query(args, ws=resolved)
     if selection is None:
         return 2
     if (query or set_query or args.clear) and card_query.query_from_args(args, env={}) != card_query.DEFAULT:
         print("error: set and clear focus operations cannot be combined with filters", file=sys.stderr)
         return 2
-    actor = current_username(getattr(args, "by", None))
+    actor = current_username(getattr(args, "by", None), ws=resolved)
     if args.clear:
         clear_focus_task_id(resolved)
     elif query or set_query:

@@ -299,10 +299,10 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return 0
 
 
-def command_policy(args: argparse.Namespace) -> int:
+def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     """Show effective policy, with JSON available for automation."""
     try:
-        effective = store.policy()
+        effective = store.policy(_ws(ws))
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -434,7 +434,7 @@ def command_import_github(args: argparse.Namespace, ws: Workspace | None = None)
         argv.extend(["--repo", args.repo])
     if getattr(args, "as_json", False):
         argv.append("--json")
-    return import_github.main(argv, ws=resolved)
+    return import_github.main(argv, resolved)
 
 
 def command_validate(args: argparse.Namespace, ws: Workspace | None = None) -> int:

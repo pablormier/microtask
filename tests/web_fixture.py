@@ -12,9 +12,10 @@ import sys
 sys.path.insert(0, 'tools')
 import taskweb
 try:
-    payload = taskweb.dashboard_payload(api_token='test-token')
-    details = [taskweb.dashboard_detail(item['id']) for item in payload['tasks']]
-    page = taskweb.build_html(taskweb.bootstrap_config('test-token'))
+    ws, cache = taskweb.Workspace.resolve(), taskweb.store.CardCache()
+    payload = taskweb.dashboard_payload(ws, cache, api_token='test-token')
+    details = [taskweb.dashboard_detail(ws, cache, item['id']) for item in payload['tasks']]
+    page = taskweb.build_html(taskweb.bootstrap_config(ws, 'test-token'))
 except ValueError as error:
     print(str(error), file=sys.stderr)
     raise SystemExit(1)
@@ -35,7 +36,8 @@ import json
 import sys
 sys.path.insert(0, 'tools')
 import taskweb
-print(json.dumps([taskweb.dashboard_payload(query=taskweb.request_query(query))['collections']
+ws, cache = taskweb.Workspace.resolve(), taskweb.store.CardCache()
+print(json.dumps([taskweb.dashboard_payload(ws, cache, query=taskweb.request_query(ws, query))['collections']
                   for query in json.loads(sys.argv[1])]))
 '''
     result = subprocess.run([sys.executable, '-c', source, json.dumps(list(queries))], cwd=root,

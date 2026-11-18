@@ -28,24 +28,15 @@ except ImportError:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
     from web_queries import collection_results
 
-# Parsed cards reused across requests; every read re-checks each file's stat signature.
-CARD_CACHE = store.CardCache()
 MAX_INCLUDED_IDS = 8
 
 
-def current_workspace() -> Workspace:
-    return Workspace.resolve()
+def workspace_key(ws: Workspace) -> str:
+    return hashlib.sha256(str(ws.root.resolve()).encode("utf-8")).hexdigest()[:16]
 
 
-def workspace_root() -> Path:
-    return current_workspace().root
-
-
-def bootstrap_config(token: str) -> dict:
-    return {
-        "api_token": token,
-        "workspace_key": hashlib.sha256(str(workspace_root().resolve()).encode("utf-8")).hexdigest()[:16],
-    }
+def bootstrap_config(ws: Workspace, token: str) -> dict:
+    return {"api_token": token, "workspace_key": workspace_key(ws)}
 
 
 def extract_excerpt(text: str, max_len: int = 180) -> str:
@@ -97,20 +88,19 @@ def task_to_dict(
     task: store.Card,
     reference_index: store.ReferenceIndex | None = None,
     *,
+    ws: Workspace,
     detail: bool = True,
     cfg: dict | None = None,
     rank: dict[str, int] | None = None,
-    ws_root: Path | None = None,
 ) -> dict:
-    cfg = cfg if cfg is not None else store.policy()
+    cfg = cfg if cfg is not None else store.policy(ws)
     fm = task.frontmatter
     tags = fm.get("tags", [])
     body = task.body
     base_uri = task.path.resolve().parent.as_uri() + "/"
     if rank is None:
         rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
-    if ws_root is None:
-        ws_root = workspace_root()
+    ws_root = ws.root
     processing_instructions = fm.get("processing_instructions", "")
     comments = fm.get("comments", [])
     time_entries = fm.get("time_entries", [])
@@ -164,16 +154,16 @@ def task_to_dict(
     return result
 
 
-def dashboard_detail(identity: str) -> dict | None:
-    store.pin_demo_state()
-    store.maybe_seed_demo()
-    items = store.discover(cache=CARD_CACHE)
+def dashboard_detail(ws: Workspace, cache: store.CardCache, identity: str) -> dict | None:
+    store.pin_demo_state(ws)
+    store.maybe_seed_demo(ws)
+    items = store.discover(cache=cache, ws=ws)
     item = next((item for item in items if str(item.frontmatter.get("id") or item.path.stem) == identity), None)
-    return task_to_dict(item, store.ReferenceIndex(items)) if item else None
+    return task_to_dict(item, store.ReferenceIndex(items), ws=ws) if item else None
 
 
-def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None, cfg: dict | None = None) -> dict:
-    cfg = cfg if cfg is not None else store.policy()
+def dashboard_meta(ws: Workspace, *, api_token: str = "", items: list[store.Card] | None = None, cfg: dict | None = None) -> dict:
+    cfg = cfg if cfg is not None else store.policy(ws)
     default_status, default_priority, default_type = operations.task_defaults(cfg)
     statuses = list(cfg.get("statuses", {}))
     configured_status_labels = cfg.get("statuses", {})
@@ -195,9 +185,9 @@ def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None
     rules = cfg.get("rules", {})
     raw_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
     max_doing = int(str(raw_limit)) if raw_limit is not None and str(raw_limit).isdigit() else 1
-    timers = transaction.read_time_timers()
+    timers = transaction.read_time_timers(ws)
     timers = {
-        task_id: {**timer, "saved": store.timer_session_saved(task_id, timer)}
+        task_id: {**timer, "saved": store.timer_session_saved(task_id, timer, ws)}
         for task_id, timer in timers.items()
     }
     item_values = items or []
@@ -214,7 +204,7 @@ def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None
                 name = str(item.frontmatter[field])
                 usage[field][name] = usage[field].get(name, 0) + 1
     return {
-        "workspace_key": hashlib.sha256(str(workspace_root().resolve()).encode("utf-8")).hexdigest()[:16],
+        "workspace_key": workspace_key(ws),
         "status_labels": status_labels,
         "view_labels": view_labels,
         "priority_order": list(cfg.get("priorities", {}).keys()),
@@ -234,7 +224,7 @@ def dashboard_meta(*, api_token: str = "", items: list[store.Card] | None = None
         "show_deadline_progress": bool(rules.get("show_deadline_progress", True)),
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
         "api_token": api_token,
-        "demo": store.demo_active(),
+        "demo": store.demo_active(ws),
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
     }
@@ -246,16 +236,16 @@ def included_ids(value: object) -> list[str]:
     return [item for item in values if isinstance(item, str) and item][:MAX_INCLUDED_IDS]
 
 
-def request_query(values: object) -> card_query.Query:
+def request_query(ws: Workspace, values: object) -> card_query.Query:
     """The validated query a request's parameters describe; raises QueryError with a message for the client."""
     if values is not None and not isinstance(values, dict):
         raise card_query.QueryError("query must be an object")
     query = card_query.query_from_mapping(values or {})
-    card_query.validate(query, statuses=store.statuses(), priorities=list(store.policy().get("priorities", {})))
+    card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
     return query
 
 
-def view_topic_trees(cards: list[store.Card], query: card_query.Query, *, now: datetime,
+def view_topic_trees(ws: Workspace, cards: list[store.Card], query: card_query.Query, *, now: datetime,
                      done_cutoff: object, topics: list[str]) -> dict[str, list[dict[str, object]]]:
     """The topics panel's tree for each view that shows it, counting the cards that view would show.
 
@@ -264,7 +254,7 @@ def view_topic_trees(cards: list[store.Card], query: card_query.Query, *, now: d
     """
     by_id = {str(card.frontmatter.get("id") or card.path.stem): card for card in cards}
     found = collection_results(cards, replace(query, topic=()), now=now, done_cutoff=done_cutoff,
-                               open_statuses=store.open_statuses())
+                               open_statuses=store.open_statuses(ws))
     trees = {}
     for view in ("tasks", "notes", "archive"):
         counts: dict[str, int] = {}
@@ -276,37 +266,36 @@ def view_topic_trees(cards: list[store.Card], query: card_query.Query, *, now: d
     return trees
 
 
-def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
+def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
     ``include`` IDs (the open card and its navigation trail), which are echoed back.
     Workspace-wide figures are in ``meta``.
     """
-    store.pin_demo_state()
-    store.maybe_seed_demo()
-    cfg = store.policy()
+    store.pin_demo_state(ws)
+    store.maybe_seed_demo(ws)
+    cfg = store.policy(ws)
     query = query or card_query.DEFAULT
     statuses = list(cfg.get("statuses", {}))
-    tasks = store.discover(cache=CARD_CACHE)
+    tasks = store.discover(cache=cache, ws=ws)
     ordered = sorted(
         tasks,
         key=lambda t: statuses.index(t.frontmatter.get("status") or "")
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
-    ws_root = workspace_root()
-    meta = dashboard_meta(api_token=api_token, items=tasks, cfg=cfg)
+    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg)
     now = datetime.now()
-    meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now))
+    meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now), ws=ws)
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
-    done_cutoff = card_query.default_done_cutoff(query, store.done_window(), date.today())
+    done_cutoff = card_query.default_done_cutoff(query, store.done_window(ws), date.today())
     collections = collection_results(
-        ordered, query, now=now, open_statuses=store.open_statuses(), done_cutoff=done_cutoff,
+        ordered, query, now=now, open_statuses=store.open_statuses(ws), done_cutoff=done_cutoff,
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
-    meta["topic_trees"] = view_topic_trees(ordered, query, now=now, done_cutoff=done_cutoff,
+    meta["topic_trees"] = view_topic_trees(ws, ordered, query, now=now, done_cutoff=done_cutoff,
                                            topics=[*meta["workspace_usage"]["topic"], *operations.suggested_topics(cfg)])
-    drafts = draft_store.list_drafts(ws_root)
+    drafts = draft_store.list_drafts(ws.root)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
     meta["draft_count"] = len(drafts)
@@ -327,7 +316,7 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
         if str(card.frontmatter["id"]) in wanted
     ]
     return {
-        "tasks": [task_to_dict(card, detail=False, cfg=cfg, rank=rank, ws_root=ws_root) for card in selected_cards],
+        "tasks": [task_to_dict(card, ws=ws, detail=False, cfg=cfg, rank=rank) for card in selected_cards],
         "statuses": statuses,
         "meta": meta,
         "query": card_query.query_to_mapping(query),
@@ -337,14 +326,13 @@ def dashboard_payload(*, api_token: str = "", query: card_query.Query | None = N
     }
 
 
-def search_cards(query_text: str, *, limit: int = 12) -> dict:
+def search_cards(ws: Workspace, cache: store.CardCache, query_text: str, *, limit: int = 12) -> dict:
     """Return ranked card summaries across the workspace for the quick-search palette."""
-    store.pin_demo_state()
-    store.maybe_seed_demo()
-    cfg = store.policy()
+    store.pin_demo_state(ws)
+    store.maybe_seed_demo(ws)
+    cfg = store.policy(ws)
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
-    ws_root = workspace_root()
-    cards = store.discover(cache=CARD_CACHE)
+    cards = store.discover(cache=cache, ws=ws)
     needle = (query_text or "").strip()
     capped = max(1, min(int(limit), 30))
 
@@ -374,6 +362,6 @@ def search_cards(query_text: str, *, limit: int = 12) -> dict:
         matched = [card for _, card in scored[:capped]]
 
     return {
-        "items": [task_to_dict(card, detail=False, cfg=cfg, rank=rank, ws_root=ws_root) for card in matched],
+        "items": [task_to_dict(card, ws=ws, detail=False, cfg=cfg, rank=rank) for card in matched],
         "query": needle,
     }

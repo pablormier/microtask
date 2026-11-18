@@ -32,6 +32,7 @@ _here = Path(__file__).resolve().parent
 sys.path.insert(0, str(_here))
 
 import policy_parser
+from workspace import Workspace
 import validation
 
 
@@ -48,7 +49,7 @@ def main() -> int:
         return 2
 
     try:
-        repo_root = policy_parser.workspace_root()
+        repo_root = Workspace.resolve().root
         effective_policy = policy_parser.load_policy(repo_root)
     except (OSError, ValueError) as error:
         print("FAILED: invalid policy:", file=sys.stderr)

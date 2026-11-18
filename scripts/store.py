@@ -50,7 +50,9 @@ time_log_entries = card_format.time_log_entries
 
 
 def _ws(ws: Workspace | None) -> Workspace:
-    return ws if ws is not None else Workspace.resolve()
+    if ws is None:
+        raise RuntimeError("workspace is required")
+    return ws
 
 
 
@@ -123,10 +125,10 @@ def due_kind_value(fm: dict[str, object]) -> object:
 
 
 
-def due_kind_error(value: object, due: object, cfg: dict | None = None) -> str | None:
+def due_kind_error(value: object, due: object, cfg: dict) -> str | None:
     if due is None:
         return None if value is None else "due_kind must be null when due is null"
-    allowed = (cfg or policy()).get("due_kinds", {})
+    allowed = cfg.get("due_kinds", {})
     if not isinstance(value, str) or not isinstance(allowed, dict) or value not in allowed:
         choices = ", ".join(str(name) for name in allowed) if isinstance(allowed, dict) else ""
         return f"due_kind must be one of {choices or 'the effective policy values'} when due is set"

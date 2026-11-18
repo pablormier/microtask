@@ -12,6 +12,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
 import cli as tasklib
 import store
 import transaction  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 COMMON = "priority: medium\nproject: null\ntopic: null\ndue: null\ndue_kind: null\ncreated: 2026-01-01\nupdated: 2026-01-01\ntags: []\n"
 TASK = f"---\nid: t\ntitle: Task\nkind: task\nstatus: inbox\ntype: task\n{COMMON}---\nBody\n"
@@ -23,6 +24,7 @@ class KindHintTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.ws = Workspace.at(SOURCE_ROOT)
 
     def write(self, name: str, text: str) -> Path:
         path = self.root / name
@@ -45,27 +47,27 @@ class KindHintTests(unittest.TestCase):
         note = self.write("b-note.md", NOTE)
         read = store.Card.read
         with patch.object(store.Card, "read", side_effect=read, autospec=True) as spy:
-            tasks = store.read_cards(self.root, "task")
+            tasks = store.read_cards(self.root, "task", ws=self.ws)
         self.assertEqual([card.path.name for card in tasks], ["a-task.md"])
         self.assertNotIn(note, [call.args[0] for call in spy.call_args_list])
-        self.assertEqual([card.path.name for card in store.read_cards(self.root)], ["a-task.md", "b-note.md"])
-        self.assertEqual([card.path.name for card in store.read_cards(self.root, "note")], ["b-note.md"])
+        self.assertEqual([card.path.name for card in store.read_cards(self.root, ws=self.ws)], ["a-task.md", "b-note.md"])
+        self.assertEqual([card.path.name for card in store.read_cards(self.root, "note", ws=self.ws)], ["b-note.md"])
 
     def test_unmatched_header_falls_back_to_full_parse(self) -> None:
         # A trailing comment defeats the cheap pattern; the full parser still finds the kind.
         self.write("n.md", NOTE.replace("kind: note", "kind: note # reference"))
-        self.assertEqual([card.path.name for card in store.read_cards(self.root, "note")], ["n.md"])
-        self.assertEqual(store.read_cards(self.root, "task"), [])
+        self.assertEqual([card.path.name for card in store.read_cards(self.root, "note", ws=self.ws)], ["n.md"])
+        self.assertEqual(store.read_cards(self.root, "task", ws=self.ws), [])
 
     def test_malformed_note_is_not_hidden_by_a_task_only_read_when_hint_is_unclear(self) -> None:
         self.write("bad.md", "---\ntitle: x\n---\nbody\n")
         with self.assertRaises(ValueError):
-            store.read_cards(self.root, "task")
+            store.read_cards(self.root, "task", ws=self.ws)
 
     def test_read_cards_rejects_a_task_with_an_unknown_status(self) -> None:
         self.write("t.md", TASK.replace("status: inbox", "status: bogus"))
         with self.assertRaisesRegex(ValueError, "invalid or missing task status"):
-            store.read_cards(self.root)
+            store.read_cards(self.root, ws=self.ws)
 
     def test_validate_still_catches_a_malformed_note(self) -> None:
         (self.root / "cards").mkdir()

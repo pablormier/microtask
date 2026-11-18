@@ -41,10 +41,10 @@ def gh_json(*args: str, cwd: Path | None = None) -> object:
         raise RuntimeError(f"gh returned invalid JSON: {error}") from error
 
 
-def resolve_repo(explicit: str | None, ws: workspace.Workspace | None = None) -> str:
+def resolve_repo(explicit: str | None, ws: workspace.Workspace) -> str:
     if explicit:
         return explicit
-    repo_root = (ws or workspace.Workspace.resolve()).root
+    repo_root = ws.root
     status = git_ops.workspace_status(repo_root)
     if status.state != "ready":
         if status.state == "missing":
@@ -65,8 +65,7 @@ def resolve_repo(explicit: str | None, ws: workspace.Workspace | None = None) ->
     return repo
 
 
-def capture_label(ws: workspace.Workspace | None = None) -> str:
-    resolved = ws or workspace.Workspace.resolve()
+def capture_label(resolved: workspace.Workspace) -> str:
     template = resolved.root / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
     if not template.is_file():
         template = resolved.app_root / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
@@ -123,8 +122,8 @@ def issue_timestamp(value: str) -> tuple[str, str]:
     return parsed.strftime("%Y-%m-%d-%H%M%S"), parsed.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def real_workspace_items(ws: workspace.Workspace | None = None) -> list[store.Card]:
-    return store.read_cards(store.real_cards_root(ws))
+def real_workspace_items(ws: workspace.Workspace) -> list[store.Card]:
+    return store.read_cards(store.real_cards_root(ws), ws=ws)
 
 
 def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.Card]]:
@@ -149,7 +148,7 @@ def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.
 def render_capture(
     repo: str,
     issue: tuple[int, str, str, str, str],
-    ws: workspace.Workspace | None = None,
+    ws: workspace.Workspace,
 ) -> tuple[str, bytes]:
     number, title, body, url, created_at = issue
     identity = source_identity(url)
@@ -194,10 +193,9 @@ def validate_existing_sources(
 def capture_issues(
     repo: str,
     issues: list[tuple[int, str, str, str, str]],
-    ws: workspace.Workspace | None = None,
+    resolved_ws: workspace.Workspace,
 ) -> tuple[list[str], list[int], list[int], dict[int, list[store.Card]]]:
     """Recheck markers and commit the complete import as one locked transaction."""
-    resolved_ws = ws or workspace.Workspace.resolve()
     with transaction.time_mutation_lock(resolved_ws):
         items = real_workspace_items(resolved_ws)
         index = existing_issues(repo, items)
@@ -234,19 +232,18 @@ def capture_issues(
         return imported_ids, imported_numbers, existing_numbers, index
 
 
-def main(argv: list[str] | None = None, ws: workspace.Workspace | None = None) -> int:
+def main(argv: list[str] | None, resolved_ws: workspace.Workspace) -> int:
     parser = argparse.ArgumentParser(prog="mt import-github", description="Capture open labeled GitHub issues as notes for review.")
     parser.add_argument("--repo", metavar="OWNER/REPO")
     parser.add_argument("--json", action="store_true", help="print a machine-readable capture receipt")
     args = parser.parse_args(argv)
-    resolved_ws = ws or workspace.Workspace.resolve()
     if not transaction.run_validator(resolved_ws):
         return 1
     try:
         label = capture_label(resolved_ws)
         repo = resolve_repo(args.repo, resolved_ws)
         issues = [issue_values(issue) for issue in list_issues(repo, label, cwd=resolved_ws.root)]
-        imported_ids, imported_numbers, existing_numbers, index = capture_issues(repo, issues, ws=resolved_ws)
+        imported_ids, imported_numbers, existing_numbers, index = capture_issues(repo, issues, resolved_ws)
         captured_numbers = set(existing_numbers) | set(imported_numbers)
         # Every listed issue now has a durable local capture; sync it before closing any issue.
         sync_status = 0
@@ -302,4 +299,4 @@ def main(argv: list[str] | None = None, ws: workspace.Workspace | None = None) -
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(None, workspace.Workspace.resolve()))

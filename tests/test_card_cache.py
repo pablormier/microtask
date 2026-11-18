@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import cli as tasklib
 import store
 import transaction  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = SOURCE_ROOT / "examples" / "cards"
@@ -26,14 +27,15 @@ class CardCacheTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "cards"
+        self.ws = Workspace.at(SOURCE_ROOT)
         self.root.mkdir()
         for name in (TASK, OTHER_TASK, NOTE):
             shutil.copy2(EXAMPLES / name, self.root / name)
         self.cache = store.CardCache()
 
     def assert_equivalent(self) -> list[store.Card]:
-        cached = store.read_cards(self.root, cache=self.cache)
-        self.assertEqual(cached, store.read_cards(self.root))
+        cached = store.read_cards(self.root, cache=self.cache, ws=self.ws)
+        self.assertEqual(cached, store.read_cards(self.root, ws=self.ws))
         return cached
 
     def count_parses(self, action) -> int:
@@ -44,7 +46,7 @@ class CardCacheTests(unittest.TestCase):
     def test_unchanged_files_are_not_parsed_again(self) -> None:
         first = self.assert_equivalent()
         second = []
-        parses = self.count_parses(lambda: second.extend(store.read_cards(self.root, cache=self.cache)))
+        parses = self.count_parses(lambda: second.extend(store.read_cards(self.root, cache=self.cache, ws=self.ws)))
         self.assertEqual(parses, 0)
         self.assertEqual(len(second), 3)
         self.assertTrue(all(a is b for a, b in zip(first, second)))
@@ -56,9 +58,9 @@ class CardCacheTests(unittest.TestCase):
         replacement.write_text(path.read_text(encoding="utf-8").replace("Fix per-target metric aggregation", "Fix the metric aggregation"),
                                encoding="utf-8")
         os.replace(replacement, path)
-        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
+        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache, ws=self.ws)), 1)
         self.assert_equivalent()
-        titles = [card.title for card in store.read_cards(self.root, cache=self.cache)]
+        titles = [card.title for card in store.read_cards(self.root, cache=self.cache, ws=self.ws)]
         self.assertIn("Fix the metric aggregation", titles)
 
     def test_in_place_rewrite_with_restored_mtime_is_detected(self) -> None:
@@ -75,9 +77,9 @@ class CardCacheTests(unittest.TestCase):
             self.fail("test setup did not restore mtime, size and inode")
         if after.st_ctime_ns == before.st_ctime_ns:
             self.skipTest("this filesystem's ctime did not change on an in-place write")
-        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache)), 1)
+        self.assertEqual(self.count_parses(lambda: store.read_cards(self.root, cache=self.cache, ws=self.ws)), 1)
         self.assert_equivalent()
-        self.assertIn("Fix per-target metric calculation", [card.title for card in store.read_cards(self.root, cache=self.cache)])
+        self.assertIn("Fix per-target metric calculation", [card.title for card in store.read_cards(self.root, cache=self.cache, ws=self.ws)])
 
     def test_deleted_cards_disappear_and_new_cards_appear(self) -> None:
         self.assert_equivalent()
@@ -92,7 +94,7 @@ class CardCacheTests(unittest.TestCase):
         other = Path(self.temporary.name) / "other"
         other.mkdir()
         shutil.copy2(EXAMPLES / TASK, other / TASK)
-        store.read_cards(other, cache=self.cache)
+        store.read_cards(other, cache=self.cache, ws=self.ws)
         self.assert_equivalent()
         self.assertIn(other / TASK, self.cache.entries)
 
@@ -102,9 +104,9 @@ class CardCacheTests(unittest.TestCase):
         good = path.read_text(encoding="utf-8")
         path.write_text("no frontmatter here\n", encoding="utf-8")
         with self.assertRaises(ValueError) as uncached:
-            store.read_cards(self.root)
+            store.read_cards(self.root, ws=self.ws)
         with self.assertRaises(ValueError) as cached:
-            store.read_cards(self.root, cache=self.cache)
+            store.read_cards(self.root, cache=self.cache, ws=self.ws)
         self.assertEqual(str(cached.exception), str(uncached.exception))
         self.assertNotIn(path, self.cache.entries)
         path.write_text(good, encoding="utf-8")
@@ -112,18 +114,18 @@ class CardCacheTests(unittest.TestCase):
 
     def test_status_policy_is_checked_on_every_read(self) -> None:
         self.assert_equivalent()
-        allowed = [name for name in store.statuses() if name != "active"]
+        allowed = [name for name in store.statuses(self.ws) if name != "active"]
         with mock.patch.object(store, "statuses", return_value=allowed):
             with self.assertRaises(ValueError) as uncached:
-                store.read_cards(self.root)
+                store.read_cards(self.root, ws=self.ws)
             with self.assertRaises(ValueError) as cached:
-                store.read_cards(self.root, cache=self.cache)
+                store.read_cards(self.root, cache=self.cache, ws=self.ws)
         self.assertEqual(str(cached.exception), str(uncached.exception))
 
     def test_kind_filter_does_not_evict_other_cards(self) -> None:
-        notes = store.read_cards(self.root, "note", cache=self.cache)
+        notes = store.read_cards(self.root, "note", cache=self.cache, ws=self.ws)
         self.assertEqual([card.path.name for card in notes], [NOTE])
-        read_all = lambda: store.read_cards(self.root, cache=self.cache)
+        read_all = lambda: store.read_cards(self.root, cache=self.cache, ws=self.ws)
         self.assertEqual(self.count_parses(read_all), 2)
         self.assert_equivalent()
         self.assertEqual(self.count_parses(read_all), 0)
@@ -144,7 +146,8 @@ import sys
 sys.path.insert(0, 'tools')
 import taskweb
 from pathlib import Path
-titles = lambda: [task['title'] for task in taskweb.dashboard_payload()['tasks']]
+ws, cache = taskweb.Workspace.resolve(), taskweb.store.CardCache()
+titles = lambda: [task['title'] for task in taskweb.dashboard_payload(ws, cache)['tasks']]
 print(titles()[0])
 path = Path('cards') / {TASK!r}
 path.write_text(path.read_text(encoding='utf-8').replace('Fix per-target metric aggregation', 'Changed title'), encoding='utf-8')

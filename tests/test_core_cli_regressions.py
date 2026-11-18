@@ -644,7 +644,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(module)
-        policy = module.load_policy()
+        policy = module.load_policy(self.root)
         self.assertEqual(policy["statuses"]["someday"], "Maybe later")
         self.assertEqual(policy["rules"]["max_doing_tasks"], "2")
 
@@ -760,7 +760,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             "sys.path.insert(0, 'scripts')\n"
             "import cli as tasklib\n"
             "try:\n"
-            "    with tasklib.managed_temp_directory('failure-') as directory:\n"
+            "    with tasklib.managed_temp_directory('failure-', ws=tasklib.Workspace.resolve()) as directory:\n"
             "        open(directory + '/probe', 'w').write('temporary')\n"
             "        raise RuntimeError('validation failed')\n"
             "except RuntimeError:\n"

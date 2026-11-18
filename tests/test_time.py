@@ -380,7 +380,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(task.read_bytes(), original)
 
     def test_lock_files_stay_in_repo_state_dir_across_demo_transition(self) -> None:
-        effective_policy = copy.deepcopy(store.policy())
+        effective_policy = copy.deepcopy(store.policy(tasklib.Workspace.at(self.root)))
         original_validate_changes = tasklib.validate_item_changes
 
         def validate_while_locked(*args, **kwargs) -> None:
@@ -525,7 +525,7 @@ class TimeTrackingTests(unittest.TestCase):
 
     def test_saved_session_syncs_even_when_timer_cleanup_fails(self) -> None:
         self.initialize_git()
-        effective_policy = copy.deepcopy(store.policy())
+        effective_policy = copy.deepcopy(store.policy(tasklib.Workspace.at(self.root)))
         effective_policy.setdefault("rules", {})["auto_sync"] = True
         for cleanup_result in (False, OSError("timer cleanup failed")):
             with self.subTest(cleanup_result=cleanup_result):
@@ -666,7 +666,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.add_task("Start during sync")
         sync_entered = threading.Event()
         release_sync = threading.Event()
-        effective_policy = copy.deepcopy(store.policy())
+        effective_policy = copy.deepcopy(store.policy(tasklib.Workspace.at(self.root)))
         effective_policy.setdefault("rules", {})["auto_sync"] = True
 
         def wait_for_sync(*_args: object, **_kwargs: object) -> int:

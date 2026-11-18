@@ -200,7 +200,7 @@ path = Path(sys.argv[1])
 note = taskweb.store.Card.read(path)
 expected = hashlib.sha256(note.raw.encode('utf-8')).hexdigest()
 path.write_bytes(note.raw.replace('Some **bold** note content.', 'Concurrent edit').encode('utf-8'))
-payload = taskweb.task_to_dict(note)
+payload = taskweb.task_to_dict(note, ws=taskweb.Workspace.resolve())
 print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'expected': expected}))
 """
         result = subprocess.run([sys.executable, "-c", source, str(self.note)],
@@ -257,7 +257,7 @@ print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'exp
 
     def test_server_serves_vendored_files_and_refuses_other_paths(self) -> None:
         with mock.patch.dict(os.environ, {"MT_WORKSPACE": str(self.root)}):
-            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token")
+            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token", taskweb.Workspace.at(self.root))
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -519,7 +519,7 @@ view_labels:
         fields["processing_instructions"] = "Review this note.\n\n## Content\n\n```python\nunfinished"
         self.note.write_text(taskweb.card_format.render_document(fields, body))
         item = taskweb.store.Card.read(self.note)
-        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item]))
+        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item]), ws=taskweb.Workspace.at(self.root))
         self.assertEqual(payload["body"], body)
         self.assertEqual(payload["processing_instructions"], fields["processing_instructions"])
         self.assertNotIn("sections", payload)
@@ -540,7 +540,7 @@ view_labels:
         fields["next_action"] = f"Read **details** in @{target.short_ref}"
         self.tasks[0].write_text(taskweb.card_format.render_document(fields, body))
         item = taskweb.store.Card.read(self.tasks[0])
-        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item, target]))
+        payload = taskweb.task_to_dict(item, taskweb.store.ReferenceIndex([item, target]), ws=taskweb.Workspace.at(self.root))
         self.assertEqual(payload["body"], body)
         self.assertEqual(payload["next_action"], fields["next_action"])
         self.assertNotIn("sections", payload)
@@ -1093,7 +1093,7 @@ view_labels:
         args = taskweb.parse_args(["--project", "Big project", "--project", "Other", "--topic", "work/infra",
                                    "--updated-before", "1y", "--needs-review"])
         year_ago = taskweb.card_format.relative_date("1y", date.today()).isoformat()
-        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(args)),
+        self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123, taskweb.board_filters(taskweb.Workspace.at(self.root), args)),
                          "http://127.0.0.1:8123/?project=Big+project&project=Other&topic=work%2Finfra"
                          f"&needs_review=true&updated_before={year_ago}")
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
@@ -1102,13 +1102,13 @@ view_labels:
         tasklib = taskweb.cli
         args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.object(tasklib.subprocess, "run") as run:
-            tasklib.command_web(args)
+            tasklib.command_web(args, ws=taskweb.Workspace.at(self.root))
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--project"):],
                          ["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.dict(os.environ, {"MT_PROJECT": "env-project"}), \
                 mock.patch.object(tasklib.subprocess, "run") as run:
-            tasklib.command_web(taskweb.parse_args([]))
+            tasklib.command_web(taskweb.parse_args([]), ws=taskweb.Workspace.at(self.root))
         self.assertEqual(run.call_args.args[0][-2:], ["--project", "env-project"])
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
@@ -1195,14 +1195,14 @@ sys.path.insert(0, 'tools')
 import taskweb
 original = taskweb.dashboard_payload
 builds = 0
-def counted(**kwargs):
+def counted(*args, **kwargs):
     global builds
     builds += 1
-    payload = original(**kwargs)
+    payload = original(*args, **kwargs)
     payload['response_builds'] = builds
     return payload
 taskweb.dashboard_payload = counted
-taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
+taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=True)
 """
         process = subprocess.Popen([sys.executable, '-c', source], cwd=self.root,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
@@ -2342,7 +2342,7 @@ taskweb.serve_dashboard('127.0.0.1', 0, no_open=True)
         versions = iter(["v1", "v1", "v2", "v2"])
         with mock.patch.object(taskweb, "application_version", side_effect=lambda *_: next(versions)), \
              mock.patch.dict(os.environ, {"MT_WORKSPACE": str(self.root)}):
-            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token")
+            server = taskweb.TaskWebServer(("127.0.0.1", 0), "test-token", taskweb.Workspace.at(self.root))
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:

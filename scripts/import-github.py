@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import import_github
+from workspace import Workspace
 
 if __name__ == "__main__":
-    raise SystemExit(import_github.main())
+    raise SystemExit(import_github.main(None, Workspace.resolve()))

@@ -218,7 +218,7 @@ def save_time_session(
     base = active_root(resolved)
     relative = str(task.path.relative_to(base))
     try:
-        transaction.apply_item_transaction({relative: updated.encode("utf-8")}, expected={relative: original}, source_root=base)
+        transaction.apply_item_transaction({relative: updated.encode("utf-8")}, expected={relative: original}, source_root=base, ws=resolved)
     except (OSError, ValueError):
         return False, "time log failed validation; running timer was retained"
     return True, "saved"
@@ -305,7 +305,7 @@ def focus_context(tasks: list["Task"], *, actor: str | None = None, ws: Workspac
     Saved selection never suppresses alerts or changes the candidate order.
     """
     resolved = _ws(ws)
-    actor = current_username(actor)
+    actor = current_username(actor, ws=resolved)
     rank = {name: index for index, name in enumerate(store.policy(resolved).get("priorities", {}))}
     tasks = [task for task in tasks if task.frontmatter.get("status") != "done"]
     available = [task for task in tasks
@@ -347,7 +347,7 @@ def focus_context(tasks: list["Task"], *, actor: str | None = None, ws: Workspac
             action = "work"
         action_label = {"coordinate": "Check with the owner", "followup": "Follow up",
                         "review": "Review the commitment", "work": "Allow time for this"}[action]
-        alerts.append({**item_json_record(task), "action": action, "action_label": action_label})
+        alerts.append({**item_json_record(task, ws=resolved), "action": action, "action_label": action_label})
     return {"selected": selected, "mode": mode, "actor": actor,
             "generated_at": now_stamp(), "candidates": candidates, "alerts": alerts,
             "followup_ids": [str(task.frontmatter.get("id") or task.path.stem)
@@ -570,9 +570,10 @@ def render_new_card(
     archived: bool = False,
     hidden: bool = False,
     needs_review: bool = False,
+    ws: Workspace,
 ) -> str:
     """Render a new card; tasks fill status and type from policy defaults."""
-    cfg = store.policy()
+    cfg = store.policy(ws)
     default_status, default_priority, default_type = task_defaults(cfg)
     if kind == "task":
         status, task_type = status or default_status, task_type or default_type
@@ -605,13 +606,14 @@ def render_converted_note(task: Card, today: str) -> str:
 
 def render_converted_task(note: Card, today: str, *, status_override: str | None = None,
                           type_override: str | None = None,
-                          next_action_override: str | None = None) -> str:
-    cfg = store.policy()
+                          next_action_override: str | None = None, ws: Workspace) -> str:
+    cfg = store.policy(ws)
     default_status, _priority, default_type = task_defaults(cfg)
     status = status_override or default_status
     task_type = type_override or default_type
-    if status not in open_statuses():
-        raise ValueError(f"task status must be one of: {', '.join(open_statuses())}")
+    allowed_open = open_statuses(ws)
+    if status not in allowed_open:
+        raise ValueError(f"task status must be one of: {', '.join(allowed_open)}")
     if task_type not in cfg.get("types", {}):
         raise ValueError("task type must be an allowed effective policy value")
     properties = {key: value for key, value in note.frontmatter.items()
@@ -723,6 +725,7 @@ def create_card(
             due=shared["due"], due_kind=shared["due_kind"], tags=shared["tags"],
             created_at=created, capture_id=capture_id,
             archived=bool(archived), hidden=bool(hidden), needs_review=bool(needs_review),
+            ws=resolved,
         )
         if kind == "task" and status == "doing":
             frontmatter, body = parse_frontmatter(rendered)
@@ -1429,7 +1432,7 @@ def _bulk_edit_assignments(values: list[str] | dict[str, object]) -> dict[str, s
 
 
 
-def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updated: str) -> str:
+def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updated: str, ws: Workspace) -> str:
     frontmatter, body = card_format.parse_document(raw, expected_kind=kind)
     allowed = card_format.EDITABLE_FIELDS[kind]
     targets: dict[str, object] = {}
@@ -1441,8 +1444,9 @@ def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updat
                 raise ValueError("status 'doing' requires claiming; use 'mt move doing' or 'mt claim'")
             if value == "done":
                 raise ValueError("status 'done' requires completing; use 'mt done'")
-            if value not in open_statuses():
-                valid = [s for s in open_statuses() if s != "doing"]
+            allowed_open = open_statuses(ws)
+            if value not in allowed_open:
+                valid = [s for s in allowed_open if s != "doing"]
                 raise ValueError(f"status must be one of: {', '.join(valid)}")
             target = value
         elif field == "tags":
@@ -1465,21 +1469,21 @@ def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updat
 
 
 
-def _plan_query(plan: dict[str, object]) -> card_query.Query:
+def _plan_query(plan: dict[str, object], ws: Workspace) -> card_query.Query:
     """The query a saved plan holds, checked like one typed on the command line."""
     stored = plan["query"]
     if not isinstance(stored, dict):
         raise ValueError("bulk edit plan has an invalid query")
     try:
         query = card_query.query_from_mapping(stored)
-        card_query.validate(query, statuses=store.statuses(), priorities=list(store.policy().get("priorities", {})))
+        card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
     except card_query.QueryError as error:
         raise ValueError(f"bulk edit plan has an invalid query: {error}") from error
     return query
 
 
 
-def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated: str) -> tuple[dict[str, object], bytes | None]:
+def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated: str, ws: Workspace) -> tuple[dict[str, object], bytes | None]:
     kind = item.kind
     if item.path.is_symlink():
         raise ValueError(f"cannot edit a symlinked card: {item.path}")
@@ -1487,7 +1491,7 @@ def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated
     if original != item.raw.encode("utf-8"):
         raise ValueError(f"conflict: item changed during bulk preview: {item.path}")
     before = {field: item.frontmatter.get(field) for field in assignments}
-    candidate = _apply_bulk_metadata(item.raw, kind, assignments, updated)
+    candidate = _apply_bulk_metadata(item.raw, kind, assignments, updated, ws)
     after_frontmatter = card_format.parse_yaml(card_format.parse_frontmatter(candidate)[0] or "")
     after = {field: after_frontmatter.get(field) for field in assignments}
     changed = candidate.encode("utf-8") != original

@@ -21,13 +21,14 @@ import git_ops  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
 import transaction  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 try:
-    from .web_payloads import current_workspace, task_to_dict, workspace_root
+    from .web_payloads import task_to_dict
 except ImportError:
     if str(Path(__file__).resolve().parent) not in sys.path:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from web_payloads import current_workspace, task_to_dict, workspace_root
+    from web_payloads import task_to_dict
 
 
 class BackgroundSync:
@@ -43,19 +44,19 @@ class BackgroundSync:
         self.again = False
         self.warning = ""
 
-    def request(self) -> None:
-        if not store.policy().get("rules", {}).get("auto_sync", False):
+    def request(self, ws: Workspace) -> None:
+        if not store.policy(ws).get("rules", {}).get("auto_sync", False):
             return
         with self.lock:
             if self.thread is not None:
                 self.again = True
                 return
-            self.thread = threading.Thread(target=self.run, daemon=True)
+            self.thread = threading.Thread(target=self.run, args=(ws,), daemon=True)
             self.thread.start()
 
-    def run(self) -> None:
+    def run(self, ws: Workspace) -> None:
         while True:
-            warning = sync_once()
+            warning = sync_once(ws.for_operation())
             with self.lock:
                 self.warning = warning
                 if not self.again:
@@ -70,9 +71,8 @@ class BackgroundSync:
             thread.join(timeout)
 
 
-def sync_once() -> str:
+def sync_once(ws: Workspace) -> str:
     """Sync the workspace and return a warning, or an empty string on success."""
-    ws = current_workspace()
     status = git_ops.workspace_status(ws.root)
     if status.state in {"missing", "uninitialized"}:
         return transaction.auto_sync_unavailable_message(status, ws)
@@ -91,19 +91,19 @@ def sync_once() -> str:
 UNSYNCED_ACTIONS = {"/api/draft-save", "/api/draft-discard"}
 
 
-def item_by_ref(ref: object) -> dict | None:
+def item_by_ref(ws: Workspace, ref: object) -> dict | None:
     if not isinstance(ref, str) or not store.SHORT_REF_RE.fullmatch(ref):
         return None
-    store.pin_demo_state()
-    store.maybe_seed_demo()
-    items = store.items_by_ref(ref)
+    store.pin_demo_state(ws)
+    store.maybe_seed_demo(ws)
+    items = store.items_by_ref(ref, ws)
     item = items[0] if len(items) == 1 and f"@{items[0].short_ref}" == ref else None
-    return task_to_dict(item, detail=False) if item else None
+    return task_to_dict(item, ws=ws, detail=False) if item else None
 
 
-def _run_operation(action, message: str, *, include_saved_ref: bool = False) -> tuple[HTTPStatus, dict]:
+def _run_operation(ws: Workspace, action, message: str, *, include_saved_ref: bool = False) -> tuple[HTTPStatus, dict]:
     try:
-        result = action(current_workspace())
+        result = action(ws)
     except store.ConflictError as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except store.TaskError as error:
@@ -126,7 +126,7 @@ def valid_utf8(value: str) -> bool:
     return True
 
 
-def handle_review(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_review(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     """Clear needs_review on any card kind, guarded by the loaded content hash."""
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
@@ -136,6 +136,7 @@ def handle_review(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]
     if not item.get("needs_review"):
         return HTTPStatus.OK, {"message": "Already reviewed", "saved_ref": item["ref"]}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws,
             item["ref"],
@@ -149,7 +150,7 @@ def handle_review(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]
     )
 
 
-def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_checkbox(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     """Toggle one task-list checkbox in the card body, guarded by the loaded content hash."""
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
@@ -162,12 +163,13 @@ def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dic
         return HTTPStatus.BAD_REQUEST, {"error": "checked must be true or false"}
     if expected_hash != item.get("content_hash"):
         return HTTPStatus.CONFLICT, {"error": "card changed since it was loaded; refresh and retry", "conflict": True}
-    card = store.items_by_ref(item["ref"])[0]
+    card = store.items_by_ref(item["ref"], ws)[0]
     try:
         new_body = card_format.toggle_task_checkbox(card.body, index, count, checked)
     except ValueError as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws,
             item["ref"],
@@ -182,7 +184,7 @@ def handle_checkbox(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dic
     )
 
 
-def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_draft_save(ws: Workspace, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
     expected_hash = body.get("expected_hash")
     if expected_hash is not None and not _valid_sha256(expected_hash):
@@ -225,7 +227,7 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
         return HTTPStatus.BAD_REQUEST, {"error": "new drafts require a non-empty title or text"}
     try:
         draft = draft_store.save(
-            workspace_root(),
+            ws.root,
             draft_id=draft_id if isinstance(draft_id, str) else None,
             fields=fields,
             body=body["body"],
@@ -239,13 +241,13 @@ def handle_draft_save(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     return HTTPStatus.OK, {"message": "Draft saved", "saved_draft": draft}
 
 
-def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_draft_discard(ws: Workspace, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     try:
-        removed = draft_store.discard(workspace_root(), str(draft_id), expected_hash)
+        removed = draft_store.discard(ws.root, str(draft_id), expected_hash)
     except draft_store.DraftConflict as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except (OSError, ValueError) as error:
@@ -255,12 +257,13 @@ def handle_draft_discard(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     return HTTPStatus.OK, {"message": "Draft discarded"}
 
 
-def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_draft_finish(ws: Workspace, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_id = body.get("id")
     expected_hash = body.get("expected_hash")
     if not _valid_sha256(expected_hash):
         return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_draft_save(
             ws,
             str(draft_id),
@@ -272,7 +275,7 @@ def handle_draft_finish(body: dict, token: str) -> tuple[HTTPStatus, dict]:
     )
 
 
-def handle_card_edit(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_card_edit(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     expected_hash = body.get("expected_hash")
     text = body.get("body")
     if not _valid_sha256(expected_hash):
@@ -280,6 +283,7 @@ def handle_card_edit(item: dict, body: dict, token: str) -> tuple[HTTPStatus, di
     if not isinstance(text, str) or not valid_utf8(text):
         return HTTPStatus.BAD_REQUEST, {"error": "body must be valid UTF-8 text"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws,
             item["ref"],
@@ -294,7 +298,7 @@ def handle_card_edit(item: dict, body: dict, token: str) -> tuple[HTTPStatus, di
     )
 
 
-def handle_card_metadata(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_card_metadata(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     expected_hash = body.get("expected_hash")
     patch = body.get("patch")
     if not _valid_sha256(expected_hash):
@@ -302,6 +306,7 @@ def handle_card_metadata(item: dict, body: dict, token: str) -> tuple[HTTPStatus
     if not isinstance(patch, dict) or not patch:
         return HTTPStatus.BAD_REQUEST, {"error": "metadata patch must be a non-empty object"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_card_metadata(
             ws,
             item["ref"],
@@ -316,15 +321,16 @@ def handle_card_metadata(item: dict, body: dict, token: str) -> tuple[HTTPStatus
     )
 
 
-def handle_move(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_move(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     destination = body.get("status")
     if item["kind"] != "task" or item["status"] == "done":
         return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can move"}
-    open_statuses = [status for status in store.statuses() if status != "done"]
+    open_statuses = store.open_statuses(ws)
     if destination not in open_statuses:
         return HTTPStatus.BAD_REQUEST, {"error": "invalid destination status"}
-    label = store.policy().get("statuses", {}).get(str(destination)) or destination
+    label = store.policy(ws).get("statuses", {}).get(str(destination)) or destination
     return _run_operation(
+        ws,
         lambda ws: operations.op_move(
             ws, item["ref"], str(destination), match_mode="exact", sync=False
         ),
@@ -332,11 +338,12 @@ def handle_move(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     )
 
 
-def handle_comment(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_comment(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     message = body.get("message")
     if not isinstance(message, str) or not message.strip():
         return HTTPStatus.BAD_REQUEST, {"error": "comment requires text"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_comment(
             ws, item["ref"], [message], match_mode="exact", sync=False
         ),
@@ -344,16 +351,17 @@ def handle_comment(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict
     )
 
 
-def handle_time_start(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_time_start(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if item["kind"] != "task" or item["status"] == "done":
         return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can start a timer"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_time_start(ws, item["ref"], sync=False),
         "Timer started",
     )
 
 
-def handle_time_stop(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_time_stop(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if item["kind"] != "task":
         return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
     ends = {key: body.get(key) for key in ("at", "duration") if body.get(key) not in (None, "")}
@@ -365,6 +373,7 @@ def handle_time_stop(item: dict, body: dict, token: str) -> tuple[HTTPStatus, di
             return HTTPStatus.BAD_REQUEST, {"error": f"{key} must be text"}
         cleaned_ends[key] = value.strip()
     return _run_operation(
+        ws,
         lambda ws: operations.op_time_end(
             ws,
             query=item["ref"],
@@ -377,21 +386,23 @@ def handle_time_stop(item: dict, body: dict, token: str) -> tuple[HTTPStatus, di
     )
 
 
-def handle_time_cancel(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_time_cancel(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if item["kind"] != "task":
         return HTTPStatus.BAD_REQUEST, {"error": "this task has no running timer"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_time_end(ws, query=item["ref"], action="cancel", sync=False),
         "Timer discarded; no time recorded",
     )
 
 
-def handle_done(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_done(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if item["kind"] != "task" or item["status"] == "done":
         return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can be marked done"}
     comment = body.get("comment")
     comments = [comment] if isinstance(comment, str) and comment.strip() else ()
     return _run_operation(
+        ws,
         lambda ws: operations.op_complete(
             ws, item["ref"], comments=comments, match_mode="exact", sync=False
         ),
@@ -400,12 +411,13 @@ def handle_done(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
 
 
 def handle_flag_update(field: str, message: str):
-    def _handler(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+    def _handler(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
         flag = body.get(field)
         if not isinstance(flag, bool):
             return HTTPStatus.BAD_REQUEST, {"error": f"{field} must be true or false"}
         value = "true" if flag else "false"
         return _run_operation(
+            ws,
             lambda ws: operations.op_edit(
                 ws, item["ref"], assignments=[f"{field}={value}"], match_mode="exact", sync=False
             ),
@@ -415,14 +427,15 @@ def handle_flag_update(field: str, message: str):
     return _handler
 
 
-def handle_priority(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_priority(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     priority = body.get("priority")
-    allowed_priorities = list(store.policy().get("priorities", {}).keys())
+    allowed_priorities = list(store.policy(ws).get("priorities", {}).keys())
     if not isinstance(priority, str) or priority not in allowed_priorities:
         return HTTPStatus.BAD_REQUEST, {"error": "invalid priority"}
     if priority == item.get("priority"):
         return HTTPStatus.BAD_REQUEST, {"error": "priority unchanged"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws, item["ref"], assignments=[f"priority={priority}"], match_mode="exact", sync=False
         ),
@@ -430,7 +443,7 @@ def handle_priority(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dic
     )
 
 
-def handle_due_set(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_due_set(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     due = body.get("due")
     due_time = body.get("due_time")
     due_kind = body.get("due_kind")
@@ -452,10 +465,11 @@ def handle_due_set(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict
     else:
         value = due
         message = f"Deadline set to {due}"
-    allowed_kinds = list(store.policy().get("due_kinds", {}).keys())
+    allowed_kinds = list(store.policy(ws).get("due_kinds", {}).keys())
     if due_kind not in allowed_kinds:
         return HTTPStatus.BAD_REQUEST, {"error": "invalid due kind"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws,
             item["ref"],
@@ -467,10 +481,11 @@ def handle_due_set(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict
     )
 
 
-def handle_due_clear(item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_due_clear(ws: Workspace, item: dict, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     if not item.get("due"):
         return HTTPStatus.BAD_REQUEST, {"error": "item has no due date"}
     return _run_operation(
+        ws,
         lambda ws: operations.op_edit(
             ws,
             item["ref"],
@@ -507,16 +522,16 @@ ITEM_ACTION_HANDLERS = {
 }
 
 
-def handle_api_action(path: str, body: dict, token: str) -> tuple[HTTPStatus, dict]:
+def handle_api_action(ws: Workspace, path: str, body: dict, token: str) -> tuple[HTTPStatus, dict]:
     draft_handler = DRAFT_ACTION_HANDLERS.get(path)
     if draft_handler is not None:
-        return draft_handler(body, token)
+        return draft_handler(ws, body, token)
 
     item_handler = ITEM_ACTION_HANDLERS.get(path)
     if item_handler is None:
         return HTTPStatus.NOT_FOUND, {"error": "not found"}
 
-    item = item_by_ref(body.get("ref"))
+    item = item_by_ref(ws, body.get("ref"))
     if item is None:
         return HTTPStatus.BAD_REQUEST, {"error": "unknown item ref"}
-    return item_handler(item, body, token)
+    return item_handler(ws, item, body, token)

@@ -5,15 +5,14 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
-import os
 import re
 
 import card_format
 import card_linter
 from vendor import yaml
 
-
 APP_ROOT = Path(__file__).resolve().parent.parent
+
 CORE_STATUSES = ("inbox", "active", "doing", "waiting", "done")
 _STATUS_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -100,17 +99,7 @@ def parse_policy_yaml(content: str) -> dict:
         raise ValueError("policy YAML must be a mapping")
     return parsed
 
-def workspace_root() -> Path:
-    """Folder holding the cards and policy: MT_WORKSPACE when set, else the application's own."""
-    value = os.environ.get("MT_WORKSPACE")
-    if not value:
-        return APP_ROOT
-    path = Path(value)
-    return path.resolve() if path.is_absolute() else path
-
-
-def load_policy(root: Path | None = None) -> dict:
-    root = root or workspace_root()
+def load_policy(root: Path) -> dict:
     policy_path = root / "mt-policy.yaml"
     local_policy_path = root / "mt-policy.local.yaml"
     policy = parse_policy_yaml(policy_path.read_text(encoding="utf-8"))

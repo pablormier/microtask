@@ -21,6 +21,7 @@ import cli  # noqa: E402
 import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402, F401
 import store  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 try:
     from .web_actions import (
@@ -62,10 +63,8 @@ try:
         vendor_file,
     )
     from .web_payloads import (
-        CARD_CACHE,
         MAX_INCLUDED_IDS,
         bootstrap_config,
-        current_workspace,
         dashboard_detail,
         dashboard_meta,
         dashboard_payload,
@@ -74,7 +73,6 @@ try:
         request_query,
         search_cards,
         task_to_dict,
-        workspace_root,
     )
     from .web_queries import collection_results  # noqa: F401
 except ImportError:  # Direct script entry point or file-based test loader.
@@ -118,10 +116,8 @@ except ImportError:  # Direct script entry point or file-based test loader.
         vendor_file,
     )
     from web_payloads import (  # noqa: F401
-        CARD_CACHE,
         MAX_INCLUDED_IDS,
         bootstrap_config,
-        current_workspace,
         dashboard_detail,
         dashboard_meta,
         dashboard_payload,
@@ -130,15 +126,17 @@ except ImportError:  # Direct script entry point or file-based test loader.
         request_query,
         search_cards,
         task_to_dict,
-        workspace_root,
     )
     from web_queries import collection_results  # noqa: F401
 
 
 class TaskWebServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], token: str):
+    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace):
         super().__init__(address, TaskWebHandler)
         self.token = token
+        self.workspace = workspace
+        # Parsed cards reused across requests; every read re-checks each file's stat signature.
+        self.cache = store.CardCache()
         self.sync = BackgroundSync()
         self.app_version = application_version(APP_ROOT)
         self._cached_restart_notice = ""
@@ -202,7 +200,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_vendor_file(*found)
             return
         if url.path in ("/", "/index.html"):
-            page = build_html(bootstrap_config(self.server.token))
+            page = build_html(bootstrap_config(self.server.workspace, self.server.token))
             self.send_html(page)
             return
         if url.path == "/api/item":
@@ -211,7 +209,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": "one card id is required"})
                 return
             try:
-                item = dashboard_detail(values[0])
+                item = dashboard_detail(self.server.workspace.for_operation(), self.server.cache, values[0])
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
                 return
@@ -224,7 +222,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             try:
                 params = parse_qs(url.query)
                 include = params.pop("include", None)
-                payload = dashboard_payload(api_token=self.server.token, include=include, query=request_query(params))
+                ws = self.server.workspace.for_operation()
+                payload = dashboard_payload(ws, self.server.cache, api_token=self.server.token, include=include,
+                                            query=request_query(ws, params))
                 payload["sync_warning"] = self.server.sync.warning
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
@@ -247,13 +247,13 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.BAD_REQUEST, {"error": "limit must be an integer"})
                 return
             try:
-                self.send_json(HTTPStatus.OK, search_cards(q, limit=limit))
+                self.send_json(HTTPStatus.OK, search_cards(self.server.workspace.for_operation(), self.server.cache, q, limit=limit))
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
         if self.path == "/api/drafts":
             try:
-                self.send_json(HTTPStatus.OK, {"drafts": draft_store.list_drafts(workspace_root())})
+                self.send_json(HTTPStatus.OK, {"drafts": draft_store.list_drafts(self.server.workspace.root)})
             except (OSError, ValueError) as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
@@ -276,27 +276,30 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "request body must be an object"})
             return
+        ws = self.server.workspace.for_operation()
         try:
-            query = request_query(body.get("query"))
+            query = request_query(ws, body.get("query"))
         except card_query.QueryError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
-        status, payload = handle_api_action(self.path, body, self.server.token)
+        status, payload = handle_api_action(ws, self.path, body, self.server.token)
         if status == HTTPStatus.OK:
             if self.path not in UNSYNCED_ACTIONS:
-                self.server.sync.request()
+                self.server.sync.request(ws)
             # Actions return receipts; build the queried collection once, after success.
-            payload = {**dashboard_payload(api_token=self.server.token, query=query, include=body.get("include")),
+            # A fresh handle: the write may have ended demo mode.
+            payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
+                                           api_token=self.server.token, query=query, include=body.get("include")),
                        "sync_warning": self.server.sync.warning,
                        "restart_notice": self.server.restart_notice(),
                        **payload}
         self.send_json(status, payload)
 
 
-def board_filters(args: argparse.Namespace) -> dict:
+def board_filters(ws: Workspace, args: argparse.Namespace) -> dict:
     """The board filters given on the command line (--project, --topic, ...), in canonical form."""
     query = card_query.query_from_args(args)
-    card_query.validate(query, statuses=store.statuses(), priorities=list(store.policy().get("priorities", {})))
+    card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
     return card_query.query_to_mapping(query)
 
 
@@ -307,10 +310,10 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
     return f"http://{host}:{port}/" + (f"?{query}" if query else "")
 
 
-def serve_dashboard(host: str, port: int, *, no_open: bool, filters: dict | None = None) -> int:
+def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None) -> int:
     token = secrets.token_urlsafe(24)
     try:
-        server = TaskWebServer((host, port), token)
+        server = TaskWebServer((host, port), token, workspace)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
@@ -338,7 +341,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    return serve_dashboard(args.host, args.port, no_open=args.no_open, filters=board_filters(args))
+    # The process edge: `mt web` starts this script with the selected workspace in its environment.
+    workspace = Workspace.resolve()
+    return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
+                           filters=board_filters(workspace, args))
 
 
 if __name__ == "__main__":
