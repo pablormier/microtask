@@ -29,7 +29,6 @@
           <button class="mt-segment" type="button" :aria-pressed="mode === 'archive'" @click="mode = 'archive'" x-text="viewLabel('archive')"></button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'deadlines'" @click="mode = 'deadlines'">Deadlines</button>
         </div>
-        <p class="mt-demo-banner" x-show="demo">Demo workspace — bundled examples; every action works on them. Create your first task to start your own workspace.</p>
         <details class="mt-card-menu mt-display-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
           <summary class="mt-menu-trigger" aria-label="Display settings" title="Display settings">
             <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/></svg>
