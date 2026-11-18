@@ -6,6 +6,7 @@ import argparse
 import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 from pathlib import Path
 import secrets
@@ -21,6 +22,7 @@ import cli  # noqa: E402
 import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402, F401
 import store  # noqa: E402
+import transaction  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 try:
@@ -133,11 +135,14 @@ except ImportError:  # Direct script entry point or file-based test loader.
 class TaskWebServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], token: str, workspace: Workspace):
         super().__init__(address, TaskWebHandler)
+        self.requested_host = address[0]  # As given on the command line, which may be a name.
         self.token = token
         self.workspace = workspace
         # Parsed cards reused across requests; every read re-checks each file's stat signature.
         self.cache = store.CardCache()
         self.sync = BackgroundSync()
+        # A failure from before this process started stays visible until a sync succeeds.
+        self.sync.warning = transaction.read_sync_error(workspace)[1]
         self.app_version = application_version(APP_ROOT)
         self._cached_restart_notice = ""
 
@@ -149,8 +154,49 @@ class TaskWebServer(ThreadingHTTPServer):
         return self._cached_restart_notice
 
 
+def split_host_header(value: str) -> tuple[str, int | None]:
+    """Split a Host header into a lowercase host (IPv6 keeps its brackets) and a port."""
+    value = value.strip().lower()
+    if value.startswith("["):
+        host, _, rest = value.partition("]")
+        host, port = host + "]", rest[1:] if rest.startswith(":") else ""
+    else:
+        host, _, port = value.partition(":")
+    return host, int(port) if port.isdigit() else None
+
+
 class TaskWebHandler(BaseHTTPRequestHandler):
     server: TaskWebServer
+
+    def host_allowed(self) -> bool:
+        """Accept only the addresses this server is meant to be reached at, with its port.
+
+        A page on another site can resolve its own name to this machine (DNS rebinding) and
+        then read the dashboard, token included. Browsers always send the name they used, so
+        a Host that is not ours is refused. Loopback names and the bound address are allowed.
+        A server bound to all interfaces (0.0.0.0 or ::) has no single address to compare, so
+        it accepts any IP literal, such as a LAN or Tailscale address, but never a DNS name.
+        """
+        host, port = split_host_header(self.headers.get("Host", ""))
+        if port != self.server.server_address[1]:
+            return False
+        bound = {name.lower() for name in (self.server.requested_host, self.server.server_address[0])}
+        bound_hosts = {f"[{name}]" if ":" in name else name for name in bound}
+        if host in {"localhost", "127.0.0.1", "[::1]"} or host in bound_hosts:
+            return True
+        if bound & {"", "0.0.0.0", "::"}:
+            try:
+                ipaddress.ip_address(host.strip("[]"))
+            except ValueError:
+                return False
+            return True
+        return False
+
+    def reject_host(self) -> bool:
+        if self.host_allowed():
+            return False
+        self.send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "unrecognized Host header"})
+        return True
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -191,6 +237,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
+        if self.reject_host():
+            return
         url = urlsplit(self.path)
         if url.path.startswith("/vendor/"):
             found = vendor_file(unquote(url.path))
@@ -260,6 +308,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:
+        if self.reject_host():
+            return
         if self.headers.get("X-Microtask-Token") != self.server.token:
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
             return

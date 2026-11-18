@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from datetime import datetime
 import fcntl
 from functools import wraps
 import inspect
@@ -374,7 +375,9 @@ def _run_auto_sync(ws: Workspace | None = None) -> int:
         return 0
     status = git_ops.workspace_status(resolved.root)
     if status.state in {"missing", "uninitialized"}:
-        print(auto_sync_unavailable_message(status, resolved))
+        message = auto_sync_unavailable_message(status, resolved)
+        record_sync_result(message, resolved)
+        print(message)
         return 0
     print("Auto-syncing task changes...")
     result = command_sync(argparse.Namespace(message=None), ws=resolved)
@@ -393,7 +396,9 @@ def run_auto_sync_for_receipt(ws: Workspace | None = None) -> str | None:
         return None
     status = git_ops.workspace_status(resolved.root)
     if status.state in {"missing", "uninitialized"}:
-        return auto_sync_unavailable_message(status, resolved)
+        message = auto_sync_unavailable_message(status, resolved)
+        record_sync_result(message, resolved)
+        return message
     output = io.StringIO()
     errors = io.StringIO()
     with redirect_stdout(output), redirect_stderr(errors):
@@ -496,10 +501,56 @@ def task_commit_message(changes: list[tuple[str, str, str | None]], ws: Workspac
 
 
 
+class _TeeStderr:
+    """Pass writes to the real stderr and keep a copy."""
+
+    def __init__(self, target, copy: io.StringIO) -> None:
+        self.target = target
+        self.copy = copy
+
+    def write(self, text: str) -> int:
+        self.copy.write(text)
+        return self.target.write(text)
+
+    def flush(self) -> None:
+        self.target.flush()
+
+
+def record_sync_result(message: str, ws: Workspace | None = None) -> None:
+    """Keep the last sync failure in .mt/last-sync-error; an empty message clears it."""
+    path = _ws(ws).sync_error_path()
+    try:
+        if message:
+            record = {"time": datetime.now().replace(microsecond=0).isoformat(), "message": message}
+            atomic_write(path, (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8"))
+        else:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass  # The record is a convenience; it must not turn a finished sync into a failure.
+
+
+def read_sync_error(ws: Workspace | None = None) -> tuple[str, str]:
+    """Return (time, message) of the last failed sync, or ("", "") when the last sync succeeded."""
+    try:
+        record = json.loads(_ws(ws).sync_error_path().read_text(encoding="utf-8"))
+        return str(record.get("time", "")), str(record["message"])
+    except (OSError, ValueError, KeyError, AttributeError):
+        return "", ""
+
+
 def command_sync(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
+    errors = io.StringIO()
     with sync_serialization_lock(resolved):
-        return _command_sync_serialized(args, ws=resolved)
+        real_stderr = sys.stderr
+        sys.stderr = _TeeStderr(real_stderr, errors)
+        try:
+            result = _command_sync_serialized(args, ws=resolved)
+        finally:
+            sys.stderr = real_stderr
+    lines = [line for line in errors.getvalue().splitlines() if not line.startswith(("Workspace: ", "Application: "))]
+    record_sync_result("" if result == 0 else "\n".join(lines).strip() or f"sync failed (exit {result})", resolved)
+    return result
 
 
 

@@ -75,16 +75,16 @@ def sync_once(ws: Workspace) -> str:
     """Sync the workspace and return a warning, or an empty string on success."""
     status = git_ops.workspace_status(ws.root)
     if status.state in {"missing", "uninitialized"}:
-        return transaction.auto_sync_unavailable_message(status, ws)
+        message = transaction.auto_sync_unavailable_message(status, ws)
+        transaction.record_sync_result(message, ws)
+        return message
     output = io.StringIO()
     errors = io.StringIO()
     with redirect_stdout(output), redirect_stderr(errors):
         returncode = transaction.command_sync(argparse.Namespace(message=None), ws=ws)
     if returncode == 0:
         return ""
-    error_lines = [line for line in errors.getvalue().splitlines()
-                   if not line.startswith(("Workspace: ", "Application: "))]
-    return "\n".join([*error_lines, output.getvalue()]).strip() or "automatic sync failed"
+    return transaction.read_sync_error(ws)[1] or "automatic sync failed"
 
 
 # Draft autosaves change only drafts/, which sync does not need to publish on every keystroke.

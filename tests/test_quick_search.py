@@ -77,8 +77,9 @@ class QuickSearchTests(unittest.TestCase):
         class FakeHandler(taskweb.TaskWebHandler):
             def __init__(self, path):
                 self.path = path
-                self.server = SimpleNamespace(workspace=workspace_under_test, cache=cache_under_test)
-                self.headers = {}
+                self.server = SimpleNamespace(workspace=workspace_under_test, cache=cache_under_test,
+                                              server_address=("127.0.0.1", 8080), requested_host="127.0.0.1")
+                self.headers = {"Host": "127.0.0.1:8080"}
                 self.rfile = io.BytesIO()
                 self.wfile = io.BytesIO()
                 self.status = None

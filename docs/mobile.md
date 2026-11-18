@@ -90,6 +90,12 @@ To access it securely from your phone:
    **Add to Home Screen** for quick access. `mt web` automatically syncs edits
    with `origin` in the background.
 
+`mt web` answers only requests whose `Host` header is `localhost`, `127.0.0.1`,
+`[::1]` or the `--host` address, each with the server's port. Anything else gets
+`421`. This stops a web page from reaching the dashboard through a DNS name that
+points at your machine. With `--host 0.0.0.0` or `--host ::`, any IP address is
+accepted, but DNS names are not, so open the dashboard by IP address.
+
 ---
 
 ## Telegram bot with Claude Code on a Raspberry Pi or VPS

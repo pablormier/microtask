@@ -339,11 +339,8 @@ def write_focus_task_id(task_id: str, ws: Workspace | None = None) -> None:
 
 def write_focus_state(task_id: str, mode: str, ws: Workspace | None = None) -> None:
     path = focus_state_path(ws)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"task_id": task_id, "mode": mode}, ensure_ascii=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps({"task_id": task_id, "mode": mode}, ensure_ascii=True, indent=2) + "\n"
+    atomic_write(path, text.encode("utf-8"))
 
 
 

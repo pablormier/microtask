@@ -247,6 +247,9 @@ class Workspace:
     def sync_lock_path(self) -> Path:
         return self.root / ".mt" / "sync.lock"
 
+    def sync_error_path(self) -> Path:
+        return self.root / ".mt" / "last-sync-error"
+
     def scratch_root(self) -> Path:
         return self.root / ".mt" / "tmp"
 

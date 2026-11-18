@@ -23,6 +23,7 @@ from cli_helpers import (
 )
 import git_ops
 import store
+import transaction
 from store import (
     _ws,
     active_root,
@@ -296,6 +297,15 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
             detail = str(repository["detail"])
         for line in textwrap.wrap(detail, width - 5, break_long_words=True, break_on_hyphens=False):
             print(f"     {line}")
+    failed_at, failure = transaction.read_sync_error(resolved)
+    if failure:
+        print()
+        section("LAST SYNC FAILED")
+        if failed_at:
+            print(f"  {failed_at}")
+        for line in failure.splitlines():
+            for wrapped in textwrap.wrap(line, width - 5, break_long_words=True, break_on_hyphens=False) or [""]:
+                print(f"     {wrapped}")
     return 0
 
 
