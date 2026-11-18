@@ -259,6 +259,25 @@ ready for `mt update` itself;
 `--local` copies the app and your settings from the `mt` you run, never your
 cards, drafts, or local state, and has no Git until you add it.
 
+### A default data-only workspace
+
+If you use one data-only workspace most of the time, set `MT_WORKSPACE` in your
+shell config instead of typing `-R` on every command:
+
+```sh
+export MT_WORKSPACE="$HOME/Dropbox/todos"   # absolute path to a data-only workspace
+mt list                                     # now lists that workspace
+```
+
+The path must be absolute and must point at a data-only workspace; anything
+else is refused with an error. `-R` still wins, so `mt -R work list` works as
+before. Remove the line to go back to the workspace `mt` lives in.
+
+It applies to every `mt` you run, wherever you are. `./mt` inside a full
+workspace, and agents whose skills call plain `mt`, also use this workspace.
+`mt info` shows which workspace is active. With several workspaces in regular
+use, prefer `-R` and aliases.
+
 ### Agents in another project
 
 For agents working in a project to track their work, install microtask's
