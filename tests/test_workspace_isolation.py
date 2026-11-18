@@ -129,6 +129,8 @@ class WorkspaceIsolationTests(unittest.TestCase):
         self.assertIn("time_entries", card_format.parse_document(self.card_text("Alpha task"))[0])
 
         self.assertEqual(snapshot(self.roots["b"]), self.b_before)
+        # The CLI, dashboard and timer operations above all read A's shared policy cache; none modified it.
+        self.assertEqual(self.a.policy(), Workspace.at(self.roots["a"], app_root=SOURCE_ROOT).policy())
 
 
 if __name__ == "__main__":

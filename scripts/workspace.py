@@ -77,11 +77,24 @@ def rebase_demo_dates(text: str) -> str:
     )
 
 
-def _stat_mtime(path: Path) -> int | None:
+def _stat_signature(path: Path) -> tuple[int, int, int, int] | None:
     try:
-        return path.stat().st_mtime_ns
+        stat = path.stat()
     except FileNotFoundError:
         return None
+    return stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino
+
+
+class PolicyCache:
+    """Parsed policy shared by the handles of one workspace, reloaded when a policy file changes.
+
+    The file signatures and the parsed policy are stored together as one value, so a
+    thread never pairs a new signature with an old policy. Callers must treat the
+    returned policy as read-only.
+    """
+
+    def __init__(self) -> None:
+        self.entry: tuple[tuple[object, object], dict] | None = None
 
 
 class Workspace:
@@ -94,13 +107,13 @@ class Workspace:
         app_root: Path = APP_ROOT,
         environ: Mapping[str, str] | None = None,
         demo: bool | None = None,
+        policy_cache: PolicyCache | None = None,
     ) -> None:
         self.root = Path(root)
         self.app_root = Path(app_root)
         self.environ = dict(os.environ if environ is None else environ)
         self._demo_state: bool | None = demo
-        self._policy_stamp: tuple[int | None, int | None] | None = None
-        self._policy_cache: dict | None = None
+        self._policy_cache = policy_cache if policy_cache is not None else PolicyCache()
 
     @classmethod
     def at(
@@ -130,8 +143,9 @@ class Workspace:
         return cls(resolve_workspace_root(env, app_root=resolved_app), app_root=resolved_app, environ=env)
 
     def for_operation(self) -> Workspace:
-        """Return a fresh Workspace handle that resolves demo mode per operation."""
-        return Workspace(self.root, app_root=self.app_root, environ=self.environ, demo=None)
+        """Return a fresh Workspace handle that resolves demo mode per operation and shares the policy cache."""
+        return Workspace(self.root, app_root=self.app_root, environ=self.environ, demo=None,
+                         policy_cache=self._policy_cache)
 
     @property
     def is_data_only(self) -> bool:
@@ -148,18 +162,18 @@ class Workspace:
 
     def policy(self) -> dict:
         stamp = (
-            _stat_mtime(self.root / "mt-policy.yaml"),
-            _stat_mtime(self.root / "mt-policy.local.yaml"),
+            _stat_signature(self.root / "mt-policy.yaml"),
+            _stat_signature(self.root / "mt-policy.local.yaml"),
         )
-        if self._policy_cache is not None and self._policy_stamp == stamp:
-            return self._policy_cache
+        entry = self._policy_cache.entry
+        if entry is not None and entry[0] == stamp:
+            return entry[1]
         raw = policy_parser.load_policy(self.root)
         view = {key: value for key, value in raw.items() if key in _DETERMINISTIC_POLICY_KEYS}
         rules = raw.get("rules")
         if isinstance(rules, dict):
             view["rules"] = {key: value for key, value in rules.items() if key in _DETERMINISTIC_RULE_KEYS}
-        self._policy_stamp = stamp
-        self._policy_cache = view
+        self._policy_cache.entry = (stamp, view)
         return view
 
     def statuses(self) -> list[str]:
