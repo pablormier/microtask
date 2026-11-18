@@ -151,6 +151,8 @@ changed in your workspace, and you can undo any of it.
 - [Using microtask from your phone](docs/mobile.md): Codex Cloud / Claude mobile
   apps, ChatGPT GitHub issue capture (`mt import-github`), `mt web` over
   Tailscale, and an optional Telegram bot on a Pi/VPS
+- [Hosting for a few people](docs/hosting.md): one dashboard per user on a
+  Linux server, behind a sign-in proxy
 - `mt help` and `mt COMMAND --help`: every command and option
 
 Contributing: read [CONTRIBUTING.md](CONTRIBUTING.md) and the [test guide](tests/README.md).

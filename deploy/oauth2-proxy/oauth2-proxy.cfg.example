@@ -1,0 +1,27 @@
+# Example oauth2-proxy config for the forward-auth setup in deploy/caddy.
+# Copy to /etc/oauth2-proxy/oauth2-proxy.cfg and fill in the placeholders.
+# Run it with: oauth2-proxy --config /etc/oauth2-proxy/oauth2-proxy.cfg
+
+http_address = "127.0.0.1:4180"
+reverse_proxy = true
+set_xauthrequest = true
+
+# Caddy answers the browser, so oauth2-proxy has no upstream of its own.
+upstreams = ["static://202"]
+
+# OAuth app. Its redirect URI must be the redirect_url below.
+provider = "google"
+client_id = "YOUR_CLIENT_ID"
+client_secret = "YOUR_CLIENT_SECRET"
+redirect_url = "https://auth.mt.example.com/oauth2/callback"
+
+# Only the addresses in this file can sign in. add-user.sh appends to it.
+authenticated_emails_file = "/etc/oauth2-proxy/emails.txt"
+
+# One sign-in cookie for every user host under the domain.
+cookie_domains = [".mt.example.com"]
+whitelist_domains = [".mt.example.com"]
+cookie_secure = true
+cookie_secret = "GENERATE_WITH_THE_COMMAND_BELOW"
+# Generate the cookie secret (32 random bytes, URL-safe base64):
+#   python3 -c 'import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'

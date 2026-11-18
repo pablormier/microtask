@@ -1,0 +1,38 @@
+# Site for @USER@. Only @EMAIL@ may use it.
+# Rendered by deploy/add-user.sh. Placeholders are @USER@, @EMAIL@, @HOST@, @PORT@.
+@HOST@ {
+	route {
+		# Remove anything the client sent in the headers that oauth2-proxy sets.
+		request_header -X-Auth-Request-User
+		request_header -X-Auth-Request-Email
+		request_header -X-Auth-Request-Preferred-Username
+		request_header -X-Auth-Request-Groups
+		request_header -X-Auth-Request-Access-Token
+
+		# Sign-in pages and the sign-out endpoint live on every host.
+		reverse_proxy /oauth2/* 127.0.0.1:4180 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Uri {uri}
+		}
+
+		# Ask oauth2-proxy whether the browser is signed in.
+		forward_auth 127.0.0.1:4180 {
+			uri /oauth2/auth
+			header_up X-Real-IP {remote_host}
+			copy_headers X-Auth-Request-Email
+
+			@unauthenticated status 401
+			handle_response @unauthenticated {
+				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+			}
+		}
+
+		# Signed in as someone else.
+		@not_owner {
+			not header X-Auth-Request-Email @EMAIL@
+		}
+		respond @not_owner "Forbidden" 403
+
+		reverse_proxy 127.0.0.1:@PORT@
+	}
+}

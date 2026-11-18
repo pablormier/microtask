@@ -141,6 +141,31 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(ancestor.returncode, 0)
         self.assertIn("Nothing was pushed", result.stdout)
 
+    def test_update_leaves_deploy_files_alone_and_still_installs_other_paths(self) -> None:
+        existing = self.workspace / "deploy" / "add-user.sh"
+        existing_contents = existing.read_bytes()
+        (self.upstream / "deploy" / "add-user.sh").write_text("#!/bin/sh\nchanged\n", encoding="utf-8")
+        (self.upstream / "deploy" / "new-file.txt").write_text("new\n", encoding="utf-8")
+        (self.upstream / "docs" / "new-page.md").write_text("# New page\n", encoding="utf-8")
+        self.git(self.upstream, "add", "-A")
+        self.git(self.upstream, "commit", "-m", "Change deploy and docs")
+
+        preview = self.run_update("--check", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        listed = "\n".join(json.loads(preview.stdout)["application_changes"])
+        self.assertIn("docs/new-page.md", listed)
+        self.assertNotIn("deploy/", listed)
+
+        result = self.run_update()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Added: docs/new-page.md", result.stdout)
+        self.assertNotIn("deploy/", result.stdout)
+        self.assertEqual((self.workspace / "docs" / "new-page.md").read_text(), "# New page\n")
+        self.assertEqual(existing.read_bytes(), existing_contents)
+        self.assertFalse((self.workspace / "deploy" / "new-file.txt").exists())
+        self.assertEqual(self.git(self.workspace, "status", "--porcelain").stdout, "")
+
     def test_check_previews_changes_without_updating(self) -> None:
         self.commit_upstream_change("# New upstream\n")
         before = self.git(self.workspace, "rev-parse", "HEAD").stdout.strip()

@@ -1,0 +1,38 @@
+# Template unit: one dashboard per user. Start it with
+#   systemctl enable --now mt-web@alice
+# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves /srv/mt/alice.
+[Unit]
+Description=microtask dashboard for %i
+After=network.target
+
+[Service]
+Type=simple
+User=mt
+Group=mt
+EnvironmentFile=/etc/mt/%i.env
+WorkingDirectory=/srv/mt/%i
+Environment=HOME=/srv/mt/%i
+# Every workspace carries its own mt, so each user runs the code in their own checkout.
+ExecStart=/srv/mt/%i/mt web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME}
+Restart=on-failure
+RestartSec=3
+# mt web waits up to 60 seconds for a running sync after SIGTERM.
+TimeoutStopSec=90
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# All dashboards run as the same account. These two lines give this service an
+# empty /srv/mt with only its own workspace bound in, so it cannot read the
+# other users' workspaces. ReadWritePaths stays because ProtectSystem=strict
+# also makes the bind mount read-only.
+TemporaryFileSystem=/srv/mt
+BindPaths=/srv/mt/%i
+ReadWritePaths=/srv/mt/%i
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

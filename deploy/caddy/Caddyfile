@@ -1,0 +1,11 @@
+# Top-level Caddyfile for a hosted microtask server.
+# Install it as /etc/caddy/Caddyfile. Replace mt.example.com with your domain.
+
+# Sign-in host. oauth2-proxy listens on 127.0.0.1:4180 and the Google (or other)
+# OAuth app redirects back to https://auth.mt.example.com/oauth2/callback.
+auth.mt.example.com {
+	reverse_proxy 127.0.0.1:4180
+}
+
+# One file per user, written by deploy/add-user.sh.
+import /etc/caddy/mt-users/*.caddy

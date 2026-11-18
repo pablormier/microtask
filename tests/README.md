@@ -26,6 +26,9 @@ terminology, or exact documentation wording.
 the CLI and the dashboard, an interrupted switch, a pulled second timer, the upgrade
 from `.mt/time-running`, simultaneous starts and the single-write stop.
 
+`test_deploy.py` runs `deploy/add-user.sh` in a temporary root with `--no-systemctl`
+(skipped without bash) and checks the files it writes.
+
 `tests/support.py` provides shared CLI execution (`run_cli`) and a deterministic
 `FakeClock` so time-tracking tests avoid wall-clock sleeps. `test_operations_api.py`
 tests core write operations and typed errors directly against a data-only

@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = "refs/remotes/upstream/main"
 WORKSPACE_FILES = {"mt-policy.yaml", "mt-policy.local.yaml"}
 WORKSPACE_PREFIXES = ("cards/", "drafts/", ".mt/")
+# Hosting files for the server operator; `mt update` never installs or changes them.
+NOT_INSTALLED_PREFIXES = ("deploy/",)
 
 
 class UpdateError(Exception):
@@ -38,7 +40,8 @@ def checked_git(*args: str) -> str:
 
 
 def application_path(path: str) -> bool:
-    return path not in WORKSPACE_FILES and not path.startswith(WORKSPACE_PREFIXES)
+    return (path not in WORKSPACE_FILES
+            and not path.startswith(WORKSPACE_PREFIXES + NOT_INSTALLED_PREFIXES))
 
 
 def tree_paths(revision: str) -> set[str]:
