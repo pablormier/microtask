@@ -8,12 +8,15 @@ For one person who wants the dashboard on a phone, [Tailscale](mobile.md) is
 simpler. Run `mt web` on your machine and open it over your tailnet. You need
 no domain, proxy or certificates.
 
-**Untested.** The scripts and tests in this repository were run on macOS only.
-Nothing here was run against a real Caddy, oauth2-proxy or systemd. The
-`add-user.sh` script and the update exclusion are covered by tests. The Caddy
-syntax, the oauth2-proxy options and the systemd directives were written from
-memory. They have not been checked against the documentation or run. Before the
-first real user, run these:
+Local installs are unaffected. Nothing here changes how `./mt` or `mt -R` work
+on your own machine.
+
+**Untested.** The scripts and tests in this repository were run on macOS only,
+with `--root` and `--no-systemctl`. Nothing here was run against a real Caddy,
+oauth2-proxy or systemd, and `upgrade.sh` has not run as the `mt` user with
+`runuser`. The Caddy syntax, the oauth2-proxy options and the systemd directives
+were written from memory. They have not been checked against the documentation
+or run. Before the first real user, run these:
 
 ```sh
 caddy validate --config /etc/caddy/Caddyfile
@@ -31,10 +34,24 @@ browser --> Caddy (HTTPS, one site per user) --> mt web on 127.0.0.1:810x
                +--> oauth2-proxy on 127.0.0.1:4180 (Google sign-in)
 ```
 
-- Each user has a workspace at `/srv/mt/NAME` and a systemd service
-  `mt-web@NAME` that runs that workspace's own `mt web` on a local port.
+The app and the data are kept apart:
+
+```
+/opt/microtask/v1.4.0/    one read-only checkout per release, owned by root
+/opt/microtask/v1.5.0/
+/opt/microtask/current    link to the active version
+/opt/microtask/previous   link to the version before it
+/srv/mt/alice/            alice's data-only workspace: cards, settings, Git
+/srv/mt/bob/
+```
+
+- Every user runs the same app from `/opt/microtask/current`. A workspace in
+  `/srv/mt/NAME` holds cards, `mt-policy.yaml`, Git and `.mt/` state, and no app
+  files. The service `mt-web@NAME` runs
+  `/opt/microtask/current/mt -R /srv/mt/NAME web` on a local port.
 - The service sees an empty `/srv/mt` with only its own workspace inside, so a
-  dashboard cannot read another user's cards.
+  dashboard cannot read another user's cards. `/opt/microtask` is read-only to
+  the service.
 - Caddy gets a certificate for each user's name and asks oauth2-proxy who the
   visitor is. Only the owner's email reaches the dashboard. Anyone else gets 403.
 - Caddy removes any `X-Auth-Request-*` headers the client sends, so they cannot
@@ -68,17 +85,24 @@ Replace `mt.example.com` with your domain in every file below.
    sudo mkdir -p /srv/mt /etc/mt /etc/caddy/mt-users /etc/oauth2-proxy
    ```
 
-2. Get this repository onto the server, for example in `/opt/microtask-deploy`.
-   `add-user.sh` uses its `install.sh` to create each workspace.
+2. Install the first version. Pick a release tag, such as `v1.4.0`. There is no
+   app on the server yet, so run the script from any checkout of the
+   repository. This one can be deleted afterwards.
 
    ```sh
-   sudo git clone https://github.com/pablormier/microtask.git /opt/microtask-deploy
+   git clone --branch v1.4.0 https://github.com/pablormier/microtask.git /tmp/microtask-kit
+   sudo /tmp/microtask-kit/deploy/upgrade.sh v1.4.0
    ```
+
+   The script clones the tag into `/opt/microtask/v1.4.0`, makes it read-only
+   and points `/opt/microtask/current` at it. With no workspaces yet there is
+   nothing to check. From now on use the scripts in
+   `/opt/microtask/current/deploy/`.
 
 3. Install the service template.
 
    ```sh
-   sudo cp /opt/microtask-deploy/deploy/systemd/mt-web@.service /etc/systemd/system/
+   sudo cp /opt/microtask/current/deploy/systemd/mt-web@.service /etc/systemd/system/
    sudo systemctl daemon-reload
    ```
 
@@ -89,8 +113,8 @@ Replace `mt.example.com` with your domain in every file below.
    readable only by the account that runs it.
 
 5. Install the Caddyfile. Copy `deploy/caddy/Caddyfile` to `/etc/caddy/Caddyfile`
-   and edit the domain. The script reads `deploy/caddy/user.caddy.template` from
-   the deploy checkout.
+   and edit the domain. `add-user.sh` reads `deploy/caddy/user.caddy.template`
+   from its own checkout.
 
    ```sh
    sudo systemctl reload caddy
@@ -98,54 +122,101 @@ Replace `mt.example.com` with your domain in every file below.
 
 ## Add a user
 
-Run this as root from the deploy checkout:
+Run this as root:
 
 ```sh
-sudo /opt/microtask-deploy/deploy/add-user.sh alice alice@example.com alice.mt.example.com
+sudo /opt/microtask/current/deploy/add-user.sh alice alice@example.com alice.mt.example.com
 ```
 
-The script checks the name, refuses to overwrite an existing user, creates
-`/srv/mt/alice`, picks the next free port from 8101, writes `/etc/mt/alice.env`
-and `/etc/caddy/mt-users/alice.caddy`, adds the email to
-`/etc/oauth2-proxy/emails.txt`, starts `mt-web@alice` and reloads Caddy.
+The script checks the name, refuses to overwrite an existing user, creates the
+workspace `/srv/mt/alice` with `mt init --data`, picks the next free port from
+8101, writes `/etc/mt/alice.env` and `/etc/caddy/mt-users/alice.caddy`, adds the
+email to `/etc/oauth2-proxy/emails.txt`, starts `mt-web@alice` and reloads Caddy.
+It needs no network.
 
 Then open `https://alice.mt.example.com`. The first visit asks for a Google
 sign-in. oauth2-proxy may need a restart to read a new line in the emails file.
 
 Useful options: `--dry-run` prints the plan and writes nothing. `--root DIR`
 puts every path under `DIR`, and `--no-systemctl` skips the chown, systemd and
-Caddy steps. These two are for trying the script on another machine. `--source`
-(or `MT_SOURCE`) sets the git URL the workspace is cloned from.
+Caddy steps. These two are for trying the script on another machine. `--app DIR`
+(or `MT_APP_DIR`) sets which version creates the workspace. The default is
+`/opt/microtask/current`.
 
-A workspace created this way has an `upstream` remote and no `origin`, and
-`auto_sync` is off in the shipped policy. Nothing in it syncs anywhere.
+A new workspace has a Git repository with one commit, no `origin` remote, and
+`auto_sync` off. Nothing in it syncs anywhere.
+
+## Upgrading
+
+Upgrade every user at once to a release tag:
+
+```sh
+sudo /opt/microtask/current/deploy/upgrade.sh v1.5.0
+```
+
+The script does this in order:
+
+1. Clones the tag into `/opt/microtask/v1.5.0`, compiles the Python files and
+   makes the folder read-only for everyone except root. It builds the folder in
+   a temporary directory and renames it into place, so a failed clone leaves
+   nothing behind.
+2. Runs `mt -R /srv/mt/NAME validate` with the new version for every workspace.
+   It runs as the `mt` user with `runuser` (or `sudo -u` where `runuser` is
+   missing). If any workspace fails, the script names it and stops. `current`
+   stays where it was and no service restarts. The new folder stays in place.
+3. Points `previous` at the old version, then replaces `current` with a link to
+   the new one in a single atomic rename.
+4. Restarts every enabled `mt-web@NAME` service and prints the active version.
+
+Running it again for the current version does nothing and exits 0. It refuses
+a tag whose folder already exists but is not current.
+
+Dashboards are down for a moment while they restart. Cards are not touched by
+an upgrade. If a release changes the service template, compare it with the
+installed copy, then copy it and reload systemd:
+
+```sh
+diff /opt/microtask/current/deploy/systemd/mt-web@.service /etc/systemd/system/mt-web@.service
+sudo cp /opt/microtask/current/deploy/systemd/mt-web@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart 'mt-web@*'
+```
+
+## Rolling back
+
+```sh
+sudo /opt/microtask/current/deploy/upgrade.sh --rollback
+```
+
+This swaps `current` and `previous`, each with an atomic rename, and restarts
+the services.
+Running it twice returns to where you started. It refuses when there is no
+`previous`. It does not validate the workspaces, so use it when the new version
+misbehaves.
+
+## Removing old versions
+
+Version folders are kept. When you no longer need one, remove it by hand. Never
+remove the versions that `current` and `previous` point to.
+
+```sh
+readlink /opt/microtask/current /opt/microtask/previous
+sudo rm -rf /opt/microtask/v1.4.0
+```
 
 ## Backups
 
-Snapshot `/srv/mt` on a schedule. The cards are plain files, so any file backup
-works. For example, with restic:
+Snapshot `/srv/mt` and the files under `/etc` on a schedule. The cards are plain
+files, so any file backup works. For example, with restic:
 
 ```sh
 restic -r /path/to/repo backup /srv/mt /etc/mt /etc/caddy/mt-users /etc/oauth2-proxy
 ```
 
-Keep the backup repository on a different machine or provider. Restore by
-putting the files back and running `systemctl restart mt-web@NAME`.
-
-## Upgrading
-
-Each workspace holds its own copy of the code. To upgrade a user:
-
-```sh
-sudo -u mt /srv/mt/alice/mt update --check
-sudo -u mt /srv/mt/alice/mt update
-sudo systemctl restart mt-web@alice
-```
-
-`mt update` needs network access to GitHub and a clean working tree. It does not
-install or change the `deploy/` directory. Update the deploy checkout itself
-with `git pull`, and copy a changed service template to
-`/etc/systemd/system/` followed by `systemctl daemon-reload`.
+You do not need to back up `/opt/microtask`. Recreate it by running
+`upgrade.sh TAG` for the version you were on. Keep the backup repository on a
+different machine or provider. Restore by putting the files back, running
+`upgrade.sh` for the tag, and running `systemctl restart mt-web@NAME`.
 
 ## Removing a user
 
@@ -156,7 +227,8 @@ sudo systemctl reload caddy
 ```
 
 Remove the email from `/etc/oauth2-proxy/emails.txt`. Delete `/srv/mt/alice` only
-after you have a backup of it.
+after you have a backup of it. Upgrades check every folder in `/srv/mt`, so move
+or delete a removed user's workspace to keep it out of them.
 
 ## What this kit does not cover
 

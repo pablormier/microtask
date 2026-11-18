@@ -1,6 +1,7 @@
 # Template unit: one dashboard per user. Start it with
 #   systemctl enable --now mt-web@alice
-# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves /srv/mt/alice.
+# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the data-only
+# workspace /srv/mt/alice with the app in /opt/microtask/current.
 [Unit]
 Description=microtask dashboard for %i
 After=network.target
@@ -12,8 +13,9 @@ Group=mt
 EnvironmentFile=/etc/mt/%i.env
 WorkingDirectory=/srv/mt/%i
 Environment=HOME=/srv/mt/%i
-# Every workspace carries its own mt, so each user runs the code in their own checkout.
-ExecStart=/srv/mt/%i/mt web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME}
+Environment=PYTHONDONTWRITEBYTECODE=1
+# One shared, read-only app. upgrade.sh moves the 'current' link and restarts the services.
+ExecStart=/opt/microtask/current/mt -R /srv/mt/%i web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME}
 Restart=on-failure
 RestartSec=3
 # mt web waits up to 60 seconds for a running sync after SIGTERM.
@@ -21,6 +23,7 @@ TimeoutStopSec=90
 
 NoNewPrivileges=true
 PrivateTmp=true
+# strict leaves /opt/microtask read-only, which is what we want for the app.
 ProtectSystem=strict
 ProtectHome=true
 # All dashboards run as the same account. These two lines give this service an

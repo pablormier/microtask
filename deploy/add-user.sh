@@ -6,17 +6,19 @@
 #   add-user.sh alice alice@example.com alice.mt.example.com
 #
 # Options:
-#   --root DIR        prefix for /srv, /etc (or set MT_DEPLOY_ROOT); for tests
+#   --root DIR        prefix for /srv, /etc, /opt (or set MT_DEPLOY_ROOT); for tests
 #   --no-systemctl    do not chown, enable the service, or reload Caddy
 #   --dry-run         print what would happen and change nothing
-#   --source URL      git URL or path to clone the workspace from (or MT_SOURCE)
+#   --app DIR         microtask version that creates the workspace (or MT_APP_DIR);
+#                     default is /opt/microtask/current
 #
-# Run it as root from a checkout of microtask on the server.
+# Run it as root. The workspace holds cards, settings and Git only. The
+# service runs the app from /opt/microtask/current (see upgrade.sh).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root="${MT_DEPLOY_ROOT:-}"
-source_url="${MT_SOURCE:-}"
+app_dir="${MT_APP_DIR:-}"
 service_user="${MT_SERVICE_USER:-mt}"
 first_port=8101
 no_systemctl=""
@@ -35,7 +37,7 @@ positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --root) [[ $# -ge 2 ]] || die "--root needs a directory"; root="$2"; shift 2 ;;
-    --source) [[ $# -ge 2 ]] || die "--source needs a value"; source_url="$2"; shift 2 ;;
+    --app) [[ $# -ge 2 ]] || die "--app needs a directory"; app_dir="$2"; shift 2 ;;
     --no-systemctl) no_systemctl=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -66,10 +68,10 @@ caddy_dir="$root/etc/caddy/mt-users"
 caddy_file="$caddy_dir/$user.caddy"
 emails_file="${OAUTH2_EMAILS_FILE:-$root/etc/oauth2-proxy/emails.txt}"
 template="${MT_CADDY_TEMPLATE:-$script_dir/caddy/user.caddy.template}"
-install_script="${MT_INSTALL_SCRIPT:-$script_dir/../install.sh}"
+app_dir="${app_dir:-$root/opt/microtask/current}"
 
 [[ -f "$template" ]] || die "missing Caddy template: $template"
-[[ -x "$install_script" ]] || die "missing install script: $install_script"
+[[ -x "$app_dir/mt" ]] || die "no microtask at $app_dir; run upgrade.sh first or pass --app"
 for path in "$workspace" "$env_file" "$caddy_file"; do
   [[ ! -e "$path" ]] || die "user $user already exists ($path is present)"
 done
@@ -112,20 +114,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Create the workspace the way a local user does: install.sh clones microtask
-# with an 'upstream' remote only. There is no 'origin' and auto_sync is off in
-# the shipped policy, so nothing in it syncs. Output is captured so install.sh
-# never stops to ask for a repository URL.
+# Create a data-only workspace: cards/, mt-policy.yaml and a Git repository, with
+# no app files. The shipped policy has auto_sync off and init adds no 'origin'
+# remote, so nothing in it syncs. The Git identity is set for this one commit
+# because root on a server often has none. Bytecode is not written, so nothing
+# lands in the read-only app folder.
 mkdir -p "$(dirname "$workspace")"
 created+=("$workspace")
-install_args=("$workspace" --no-path)
-if [[ -n "$source_url" ]]; then
-  install_log="$(MT_UPSTREAM_URL="$source_url" "$install_script" "${install_args[@]}" 2>&1 </dev/null)" \
-    || { echo "$install_log" >&2; die "could not create the workspace"; }
-else
-  install_log="$("$install_script" "${install_args[@]}" 2>&1 </dev/null)" \
-    || { echo "$install_log" >&2; die "could not create the workspace"; }
-fi
+init_log="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 \
+  GIT_AUTHOR_NAME=microtask GIT_AUTHOR_EMAIL=microtask@localhost \
+  GIT_COMMITTER_NAME=microtask GIT_COMMITTER_EMAIL=microtask@localhost \
+  "$app_dir/mt" init --data "$workspace" 2>&1 </dev/null)" \
+  || { echo "$init_log" >&2; die "could not create the workspace"; }
 
 mkdir -p "$env_dir"
 created+=("$env_file")
