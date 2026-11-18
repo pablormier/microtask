@@ -8,9 +8,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
+from collections.abc import Iterable
 from pathlib import Path
 import secrets
+import signal
 import sys
+import threading
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -133,8 +136,9 @@ except ImportError:  # Direct script entry point or file-based test loader.
 
 
 class TaskWebServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace):
+    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = ()):
         super().__init__(address, TaskWebHandler)
+        self.allow_hosts = {name.lower() for name in allow_hosts}  # NAME or NAME:PORT, from --allow-host.
         self.requested_host = address[0]  # As given on the command line, which may be a name.
         self.token = token
         self.workspace = workspace
@@ -173,11 +177,16 @@ class TaskWebHandler(BaseHTTPRequestHandler):
 
         A page on another site can resolve its own name to this machine (DNS rebinding) and
         then read the dashboard, token included. Browsers always send the name they used, so
-        a Host that is not ours is refused. Loopback names and the bound address are allowed.
+        a Host that is not ours is refused. Loopback names, the bound address and the names given
+        with --allow-host (any port, unless the option names one) are allowed.
         A server bound to all interfaces (0.0.0.0 or ::) has no single address to compare, so
         it accepts any IP literal, such as a LAN or Tailscale address, but never a DNS name.
         """
         host, port = split_host_header(self.headers.get("Host", ""))
+        for entry in self.server.allow_hosts:
+            name, allowed_port = split_host_header(entry)
+            if host == name and allowed_port in (None, port):
+                return True
         if port != self.server.server_address[1]:
             return False
         bound = {name.lower() for name in (self.server.requested_host, self.server.server_address[0])}
@@ -360,10 +369,11 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
     return f"http://{host}:{port}/" + (f"?{query}" if query else "")
 
 
-def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None) -> int:
+def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
+                    allow_hosts: Iterable[str] = ()) -> int:
     token = secrets.token_urlsafe(24)
     try:
-        server = TaskWebServer((host, port), token, workspace)
+        server = TaskWebServer((host, port), token, workspace, allow_hosts)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
@@ -372,11 +382,19 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
     if not no_open:
         cli.open_in_browser(url)
     print(url, flush=True)
+    # Process supervisors stop us with SIGTERM; treat it like Ctrl-C so the cleanup below runs.
+    previous = None
+    if threading.current_thread() is threading.main_thread():
+        def interrupt(signum, frame):
+            raise KeyboardInterrupt
+        previous = signal.signal(signal.SIGTERM, interrupt)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         return 0
     finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
         server.server_close()
         # Let a sync that already started finish publishing the last change.
         server.sync.wait(timeout=60)
@@ -394,7 +412,7 @@ def main(argv: list[str]) -> int:
     # The process edge: `mt web` starts this script with the selected workspace in its environment.
     workspace = Workspace.resolve()
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
-                           filters=board_filters(workspace, args))
+                           filters=board_filters(workspace, args), allow_hosts=args.allow_host)
 
 
 if __name__ == "__main__":

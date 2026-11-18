@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -22,6 +23,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "tools"))
 
 import card_format  # noqa: E402
 import cli_admin  # noqa: E402
+import cli_helpers  # noqa: E402
 import cli_cards  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
@@ -121,8 +123,8 @@ class RobustnessTests(unittest.TestCase):
 
     # Host allowlist
 
-    def serve(self, host: str) -> tuple[taskweb.TaskWebServer, int]:
-        server = taskweb.TaskWebServer((host, 0), "test-token", self.ws)
+    def serve(self, host: str, allow_hosts: tuple = ()) -> tuple[taskweb.TaskWebServer, int]:
+        server = taskweb.TaskWebServer((host, 0), "test-token", self.ws, allow_hosts)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(thread.join, 5)
@@ -174,6 +176,94 @@ class RobustnessTests(unittest.TestCase):
         self.assertEqual(self.request(port, f"[fd7a::1]:{port}")[0], 200)
         self.assertEqual(self.request(port, f"evil.example:{port}")[0], 421)
         self.assertEqual(self.request(port, "192.168.1.20:1")[0], 421)
+
+    def test_allowed_host_names_match_any_port_and_case(self) -> None:
+        _, port = self.serve("127.0.0.1", {"tasks.example.com"})
+        for header in ("tasks.example.com", "tasks.example.com:443", "TASKS.example.com:8443", f"tasks.example.com:{port}"):
+            with self.subTest(header=header):
+                self.assertEqual(self.request(port, header)[0], 200)
+        for header in (f"evil.example:{port}", "evil.example", "sub.tasks.example.com", f"tasks.example.com.evil.example:{port}"):
+            with self.subTest(header=header):
+                self.assertEqual(self.request(port, header)[0], 421)
+        self.assertEqual(self.request(port, f"127.0.0.1:{port}")[0], 200)
+
+    def test_an_allowed_host_with_a_port_accepts_only_that_port(self) -> None:
+        _, port = self.serve("127.0.0.1", {"tasks.example.com:8443"})
+        self.assertEqual(self.request(port, "Tasks.example.com:8443")[0], 200)
+        for header in ("tasks.example.com", "tasks.example.com:443", f"tasks.example.com:{port}"):
+            with self.subTest(header=header):
+                self.assertEqual(self.request(port, header)[0], 421)
+
+    def test_allow_host_values_are_validated_and_forwarded_by_mt_web(self) -> None:
+        parser = argparse.ArgumentParser()
+        cli_helpers.add_web_arguments(parser)
+        args = parser.parse_args(["--allow-host", "Tasks.Example.com", "--allow-host", "other.example:8443"])
+        self.assertEqual(args.allow_host, ["tasks.example.com", "other.example:8443"])
+        self.assertEqual(parser.parse_args([]).allow_host, [])
+        for value in ("", "a/b", "a b", "*", "*.example.com", "example.com:", "example.com:x", "example.com:0"):
+            with self.subTest(value=value), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args(["--allow-host", value])
+        launched = []
+        with mock.patch.object(cli_admin.os, "execve", lambda path, command, env: launched.append(command)), \
+                mock.patch.object(cli_admin.os, "chdir"):
+            self.assertEqual(cli_admin.command_web(args, ws=self.ws), 0)
+        command = launched[0]
+        self.assertEqual([command[i + 1] for i, item in enumerate(command) if item == "--allow-host"],
+                         ["tasks.example.com", "other.example:8443"])
+
+    # Shutdown
+
+    @staticmethod
+    def kill_group(process: subprocess.Popen) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def start_dashboard_process(self, *command: str) -> tuple[subprocess.Popen, str]:
+        environment = {**os.environ, "MT_WORKSPACE": str(self.root), "MT_USERNAME": "tester"}
+        # Its own process group, so cleanup also stops any child it left behind.
+        process = subprocess.Popen([sys.executable, *command], cwd=self.root, env=environment, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        self.addCleanup(self.kill_group, process)
+        self.addCleanup(process.wait)
+        self.addCleanup(process.stdout.close)
+        self.addCleanup(process.stderr.close)
+        url = process.stdout.readline().strip()
+        self.assertTrue(url.startswith("http://127.0.0.1:"), url)
+        return process, url
+
+    def test_sigterm_runs_the_same_cleanup_as_ctrl_c(self) -> None:
+        marker = self.base / "waited"
+        source = f"""
+import sys
+sys.path.insert(0, {str(SOURCE_ROOT / "tools")!r})
+sys.path.insert(0, {str(SOURCE_ROOT / "scripts")!r})
+import taskweb, web_actions
+from pathlib import Path
+def wait(self, timeout=None):
+    Path({str(marker)!r}).write_text("waited")
+web_actions.BackgroundSync.wait = wait
+raise SystemExit(taskweb.serve_dashboard(taskweb.Workspace.resolve(), "127.0.0.1", 0, no_open=True))
+"""
+        process, _ = self.start_dashboard_process("-c", source)
+        process.send_signal(signal.SIGTERM)
+        self.assertEqual(process.wait(timeout=10), 0, process.stderr.read())
+        self.assertTrue(marker.exists())
+
+    def test_the_dashboard_script_exits_cleanly_on_sigterm(self) -> None:
+        process, _ = self.start_dashboard_process(str(SOURCE_ROOT / "tools" / "taskweb.py"), "--no-open", "--port", "0")
+        process.send_signal(signal.SIGTERM)
+        self.assertEqual(process.wait(timeout=10), 0, process.stderr.read())
+
+    def test_mt_web_is_the_dashboard_process_so_sigterm_reaches_it(self) -> None:
+        # `mt web` replaces itself with the dashboard, so a supervisor's SIGTERM (sent to the one
+        # process it started) reaches the server instead of an `mt` wrapper that would leave it running.
+        process, _ = self.start_dashboard_process(str(SOURCE_ROOT / "scripts" / "mt_main.py"), "web", "--no-open", "--port", "0")
+        process.send_signal(signal.SIGTERM)
+        # No stderr read here: a dashboard orphaned by the old wrapper would keep the pipe open.
+        self.assertEqual(process.wait(timeout=10), 0)
 
     # Timers through body edits
 

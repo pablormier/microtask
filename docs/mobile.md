@@ -96,6 +96,11 @@ To access it securely from your phone:
 points at your machine. With `--host 0.0.0.0` or `--host ::`, any IP address is
 accepted, but DNS names are not, so open the dashboard by IP address.
 
+Behind a reverse proxy that forwards the public `Host` (Caddy does by default),
+pass `--allow-host tasks.example.com` (repeatable; `NAME:PORT` also pins the
+port, while a bare name accepts any port). Otherwise configure the proxy to send
+the backend address as `Host`.
+
 ---
 
 ## Telegram bot with Claude Code on a Raspberry Pi or VPS

@@ -330,11 +330,32 @@ def show_workspace(*, command: str | None = None, ws: Workspace | None = None) -
         )
 
 
+def allow_host_name(value: str) -> str:
+    """Validate an --allow-host value (NAME or NAME:PORT) and return it in lowercase."""
+    text = value.strip().lower()
+    if text.startswith("["):  # An IPv6 literal keeps its brackets.
+        name, _, rest = text.partition("]")
+        name, port = name + "]", rest[1:] if rest.startswith(":") else rest
+    else:
+        name, _, port = text.partition(":")
+    valid = (len(name.strip("[]")) > 0 and (name.startswith("[") == name.endswith("]")) and not any(char in "[]" for char in name[1:-1])
+             and (name.startswith("[") or ":" not in port)
+             and not any(char.isspace() or char in "/\\*@?#" for char in text)
+             and (text == name or (port.isdigit() and 0 < int(port) < 65536)))
+    if not valid:
+        raise argparse.ArgumentTypeError(f"invalid host name {value!r}; use NAME or NAME:PORT, without wildcards or paths")
+    return text
+
+
 def add_web_arguments(parser: argparse.ArgumentParser) -> None:
     """Keep the public CLI and standalone dashboard entry point consistent."""
     parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument("--host", default="127.0.0.1", help="server host; defaults to 127.0.0.1")
     parser.add_argument("--port", type=int, default=0, help="server port; defaults to an available port")
+    parser.add_argument("--allow-host", action="append", default=[], type=allow_host_name, metavar="NAME",
+                        help="also accept this Host header name (NAME or NAME:PORT; any port when none is given); "
+                             "repeatable. Use it behind a reverse proxy that keeps the public Host; "
+                             "otherwise configure the proxy to send the backend address as Host")
     card_query.add_query_arguments(parser)
 
 

@@ -1145,15 +1145,15 @@ view_labels:
     def test_mt_web_passes_each_repeated_filter_to_the_dashboard(self) -> None:
         tasklib = taskweb.cli
         args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
-        with mock.patch.object(tasklib.subprocess, "run") as run:
+        with mock.patch.object(tasklib.os, "execve") as run, mock.patch.object(tasklib.os, "chdir"):
             tasklib.command_web(args, ws=taskweb.Workspace.at(self.root))
-        command = run.call_args.args[0]
+        command = run.call_args.args[1]
         self.assertEqual(command[command.index("--project"):],
                          ["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.dict(os.environ, {"MT_PROJECT": "env-project"}), \
-                mock.patch.object(tasklib.subprocess, "run") as run:
+                mock.patch.object(tasklib.os, "execve") as run, mock.patch.object(tasklib.os, "chdir"):
             tasklib.command_web(taskweb.parse_args([]), ws=taskweb.Workspace.at(self.root))
-        self.assertEqual(run.call_args.args[0][-2:], ["--project", "env-project"])
+        self.assertEqual(run.call_args.args[1][-2:], ["--project", "env-project"])
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
         for path in [*self.tasks, self.note]:

@@ -78,7 +78,7 @@ class QuickSearchTests(unittest.TestCase):
             def __init__(self, path):
                 self.path = path
                 self.server = SimpleNamespace(workspace=workspace_under_test, cache=cache_under_test,
-                                              server_address=("127.0.0.1", 8080), requested_host="127.0.0.1")
+                                              server_address=("127.0.0.1", 8080), requested_host="127.0.0.1", allow_hosts=set())
                 self.headers = {"Host": "127.0.0.1:8080"}
                 self.rfile = io.BytesIO()
                 self.wfile = io.BytesIO()

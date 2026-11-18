@@ -577,6 +577,8 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         command.extend(["--host", args.host])
     if args.port is not None:
         command.extend(["--port", str(args.port)])
+    for name in getattr(args, "allow_host", None) or []:
+        command.extend(["--allow-host", name])
     query = command_query(args, ws=resolved)
     if query is None:
         return 2
@@ -586,7 +588,11 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
             command.append(flag)
         else:
             command.extend(arg for item in (value if isinstance(value, list) else [value]) for arg in (flag, item))
-    try:
-        return subprocess.run(command, cwd=resolved.root, check=False, env=workspace_env(resolved)).returncode
-    except KeyboardInterrupt:
-        return 130
+    # Become the dashboard instead of waiting on it as a child: a supervisor's SIGTERM (for
+    # example `docker stop`) then reaches the server itself, which closes and finishes a running
+    # sync. Ctrl-C and the exit code behave as before.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os.chdir(resolved.root)
+    os.execve(sys.executable, command, workspace_env(resolved))
+    return 0  # Not reached, except when tests replace os.execve.
