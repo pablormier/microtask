@@ -189,7 +189,8 @@ def dashboard_meta(ws: Workspace, *, api_token: str = "", items: list[store.Card
     item_values = items or []
     # Timers live on the cards the payload already loaded, so a refresh reads no extra files.
     timers = {
-        store.card_task_id(card): {**timer, "saved": store.timer_session_saved(card, timer)}
+        store.card_task_id(card): {**timer, "saved": store.timer_session_saved(card, timer),
+                                   "title": card.title, "ref": f"@{card.short_ref}"}
         for card in item_values
         if card.kind == "task" and (timer := card_format.timer_from(card.frontmatter)) is not None
     }

@@ -285,14 +285,14 @@ def apply_item_transaction(
             path = base / relative
             current = original[relative] if relative in original else (path.read_bytes() if path.is_file() else None)
             if current != value:
-                raise ValueError(f"item changed before transaction: {relative}")
+                raise store.StaleCardError(f"item changed before transaction: {relative}")
     warnings = validate_item_changes(changes, deletions=deletions, source_root=base, previous=original, ws=resolved)
     try:
         for relative, before in original.items():
             path = base / relative
             current = path.read_bytes() if path.is_file() else None
             if current != before:
-                raise ValueError(f"item changed before transaction: {relative}")
+                raise store.StaleCardError(f"item changed before transaction: {relative}")
         for relative in deletions:
             path = base / relative
             if path.exists():

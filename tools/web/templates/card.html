@@ -10,6 +10,7 @@
                   <div class="mt-card-topic" :title="'Topic: ' + task.topic" x-text="topicSegments(task.topic).join(' › ')"></div>
                 </template>
                 <span class="mt-badge mt-badge-warning mt-needs-review" x-show="task.needs_review">Needs review</span>
+                <span class="mt-badge mt-badge-accent mt-timer-badge" x-show="timerRunningFor(task) && !timerStale(task)" :title="timerBadgeTitle(task)" x-text="timerBadgeLabel(task)"></span>
                 <span class="mt-badge mt-badge-warning" x-show="timerStale(task)" title="This timer has run longer than the warning threshold. Check the duration before saving.">Check timer</span>
                 <template x-if="task.claimed_by">
                   <div class="mt-ref" :title="'Claimed at ' + task.claimed_at" x-text="'Working: ' + task.claimed_by"></div>

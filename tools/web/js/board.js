@@ -473,10 +473,43 @@ function taskBoard() {
     },
 
     runningTimeSeconds(task) {
-      const timer = task && this.runningTimers[task.id];
+      return this.timerElapsedSeconds(task && this.runningTimers[task.id]);
+    },
+
+    timerElapsedSeconds(timer) {
       if (!timer || timer.saved) return 0;
       const current = this.nowSeconds !== null ? this.nowSeconds : this.now;
       return Math.max(0, Math.floor(current / 1000) - Number(timer.start_epoch || 0));
+    },
+
+    // Every running timer, oldest first, so a switch that stopped halfway shows both cards.
+    runningTimerList() {
+      return Object.entries(this.runningTimers || {})
+        .map(([id, timer]) => ({ ...timer, id }))
+        .sort((a, b) => Number(a.start_epoch || 0) - Number(b.start_epoch || 0));
+    },
+
+    timerStartLabel(timer) {
+      const start = String((timer && timer.start) || "");
+      const now = new Date(this.now);
+      const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+      return start.slice(0, 10) === today ? start.slice(11, 16) : start.slice(0, 10) + " " + start.slice(11, 16);
+    },
+
+    timerMetaLabel(timer) {
+      const elapsed = timer.saved ? "session saved" : this.formatTrackedTime(this.timerElapsedSeconds(timer));
+      return [timer.ref, "started " + this.timerStartLabel(timer), timer.by, elapsed].filter(Boolean).join(" · ");
+    },
+
+    timerBadgeLabel(task) {
+      const timer = task && this.runningTimers[task.id];
+      if (!timer) return "";
+      return timer.saved ? "Timer saved" : "Timer " + this.formatTrackedTime(this.runningTimeSeconds(task));
+    },
+
+    timerBadgeTitle(task) {
+      const timer = task && this.runningTimers[task.id];
+      return timer ? "Timer started " + this.timerStartLabel(timer) + (timer.by ? " by " + timer.by : "") : "";
     },
 
     hasTrackedTime(task) {

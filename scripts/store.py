@@ -101,6 +101,11 @@ class ConflictError(TaskError):
 
 
 
+class StaleCardError(ConflictError, ValueError):
+    """A card changed on disk after the operation read it, so nothing was written (HTTP 409)."""
+
+
+
 class ValidationError(TaskError, ValueError):
     """Card or workspace validation failed and changes were rolled back (HTTP 400)."""
 

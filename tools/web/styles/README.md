@@ -29,8 +29,9 @@ selector specificity as their base and follow it in the stylesheet.
   dialogs, full-screen composer) and small phone `30rem` (480px). Media query
   `rem` is the browser default 16px, not the page's scaled font size.
 - **Toolbar:** brand and view tabs on the left; the Display menu, then actions
-  (Filters, Clear filters, Resume, and the primary New last) on the right. The
-  Filters toggle counts active filters. Search, Filters and New stay enabled
+  (Timers while any run, Filters, Clear filters, Resume, and the primary New
+  last) on the right. The Filters toggle counts active filters, and Timers
+  counts running timers and lists each one's card, start time and owner. Search, Filters and New stay enabled
   while the workspace loads; a click then runs once it has loaded (`whenReady`).
   At narrow widths the view tabs move to
   their own row. On phones the tabs share that row evenly (scrolling only

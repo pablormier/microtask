@@ -164,6 +164,10 @@ class TimerCardTests(unittest.TestCase):
             status, board = self.call(base, "/api/items")
             self.assertEqual(status, 200)
             self.assertEqual(set(board["meta"]["time_running"]), {old.stem, new.stem})
+            # Each timer names its card, so the board can list both even when a filter hides one.
+            self.assertEqual({timer["title"] for timer in board["meta"]["time_running"].values()},
+                             {"Old timed task", "New timed task"})
+            self.assertEqual(board["meta"]["time_running"][old.stem]["ref"], self.ref(old))
             new_start = self.timers()[new.stem]["start"]
             self.assertEqual(self.entries(old), [])
 
@@ -365,7 +369,7 @@ class TimerCardTests(unittest.TestCase):
                 task = self.add_task(f"Replaced under {action}")
                 operations.op_time_start(self.ws, self.ref(task), sync=False)
                 with self.replace_timer_after_snapshot(task):
-                    with self.assertRaises(store.TaskError) as raised:
+                    with self.assertRaises(store.ConflictError) as raised:
                         operations.op_time_end(self.ws, query=self.ref(task), action=action, sync=False)
                 self.assertIn("changed before transaction", str(raised.exception))
                 card = store.Card.read(task)

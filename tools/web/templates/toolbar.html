@@ -50,6 +50,25 @@
           </div>
         </details>
         <div class="mt-toolbar-actions">
+          <details class="mt-card-menu mt-timers-menu" x-show="runningTimerList().length" x-cloak
+                   @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+            <summary class="mt-menu-trigger mt-timers-trigger"
+                     :aria-label="runningTimerList().length === 1 ? '1 running timer' : runningTimerList().length + ' running timers'"
+                     :title="runningTimerList().length === 1 ? '1 running timer' : runningTimerList().length + ' running timers'">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></svg>
+              <span class="mt-timers-label">Timers</span>
+              <span class="mt-badge mt-badge-accent" x-text="runningTimerList().length"></span>
+            </summary>
+            <div class="mt-card-menu-items mt-menu-start mt-timers-menu-items">
+              <span class="mt-menu-label">Running timers</span>
+              <template x-for="timer in runningTimerList()" :key="timer.id">
+                <a class="mt-timers-item" :href="referenceHref(timer)" @click="$el.closest('details').open = false">
+                  <span class="mt-timers-item-title" x-text="timer.title"></span>
+                  <span class="mt-timers-item-meta" x-text="timerMetaLabel(timer)"></span>
+                </a>
+              </template>
+            </div>
+          </details>
           <button type="button" class="mt-button mt-quick-search-trigger"
                   @click="whenReady(() => openQuickSearch())" aria-label="Quick search">
             <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

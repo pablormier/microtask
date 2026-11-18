@@ -1648,6 +1648,9 @@ def _time_end_locked(
                 {relative: card_format.render_document(properties, body).encode("utf-8")},
                 expected={relative: task.raw.encode("utf-8")}, source_root=base, ws=resolved,
             )
+        except store.StaleCardError as error:
+            raise ConflictError(f"card changed since the timer was read; nothing was written, run the command again: {error}",
+                                exit_code=1) from error
         except (OSError, ValueError) as error:
             raise InputError(f"could not cancel timer: {error}", exit_code=1) from error
         cancelled = Card.read(task.path)
@@ -1671,6 +1674,9 @@ def _time_end_locked(
     already_saved = timer_session_saved(task, timer)
     try:
         updated_task = _stop_timer_card(resolved, task, end_epoch, now_stamp())
+    except store.StaleCardError as error:
+        raise ConflictError(f"card changed since the timer was read; nothing was written, run the command again: {error}",
+                            exit_code=1) from error
     except (OSError, ValueError) as error:
         raise ValidationError(f"time log failed validation; running timer was retained: {error}", exit_code=1) from error
     summary = (

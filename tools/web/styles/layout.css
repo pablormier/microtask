@@ -70,6 +70,14 @@
 .mt-display-menu-items .mt-segment { flex: 1 1 0; }
 .mt-menu-label { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .mt-menu-label:not(:first-child) { margin-top: 6px; }
+/* Running timers: a labelled count in the actions, opening a list of each timer's card. */
+.mt-timers-menu > summary.mt-menu-trigger { gap: 6px; width: auto; height: var(--mt-control-size); padding-inline: 10px; font-weight: 600; }
+.mt-timers-menu-items { gap: 2px; width: min(22rem, calc(100vw - 24px)); padding: 8px; }
+.mt-timers-item { display: grid; gap: 2px; padding: 6px 8px; border-radius: var(--mt-radius-md); color: var(--mt-text); text-decoration: none; }
+.mt-timers-item:hover { background: var(--mt-surface-hover); }
+.mt-timers-item:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 0; }
+.mt-timers-item-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.mt-timers-item-meta { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
 .mt-toolbar-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -140,7 +148,12 @@
   /* Search and Filters show as icons so the actions fit on the brand row. */
   .mt-title-row { flex-wrap: wrap; }
   .mt-toolbar-actions { gap: 6px; }
-  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label { display: none; }
+  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label, .mt-timers-label { display: none; }
+  .mt-timers-menu > summary.mt-menu-trigger { padding-inline: 6px; }
+  /* The timers list spans the action row, below it, so it stays on screen. */
+  .mt-toolbar-actions { position: relative; }
+  .mt-toolbar-actions .mt-timers-menu { position: static; }
+  .mt-toolbar-actions .mt-timers-menu-items { right: 0; left: 0; width: auto; }
   /* The logo alone names the app; the wordmark stays for screen readers. */
   .mt-brand-wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .mt-filter-toggle .mt-badge { min-width: 1.25rem; padding-inline: 5px; }

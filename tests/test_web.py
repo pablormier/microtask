@@ -938,6 +938,42 @@ view_labels:
         self.assertIs(payload["request"]["payload"]["hidden"], False)
         self.assertIs(payload["reset"], False)
 
+    def test_running_timer_list_badge_and_menu_labels(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        js_source = json.dumps(load_js(self.root / "tools/web"))
+        probe = (
+            'const fs = require("fs");\n'
+            'global.document = {getElementById: id => ({textContent: JSON.stringify('
+            'id === "task-data" ? [] : id === "mt-statuses" ? [] : {interactive: true})})};\n'
+            f'eval({js_source} + `\n'
+            'const app = taskBoard(); app.applyPayload({tasks: [], meta: {}, statuses: []}); app.ready = true;\n'
+            'app.now = new Date(2026, 5, 15, 10, 30, 0).getTime();\n'
+            'const epoch = new Date(2026, 5, 15, 10, 0, 0).getTime() / 1000;\n'
+            'app.runningTimers = {\n'
+            '  later: {start: "2026-06-15T10:20:00", start_epoch: epoch + 1200, by: "ana", saved: false, title: "Later", ref: "@bbb"},\n'
+            '  earlier: {start: "2026-06-14T09:05:00", start_epoch: epoch - 89700, by: "ana", saved: false, title: "Earlier", ref: "@aaa"},\n'
+            '};\n'
+            'const list = app.runningTimerList();\n'
+            'console.log(JSON.stringify({order: list.map(timer => timer.id), meta: list.map(timer => app.timerMetaLabel(timer)), '
+            'badge: app.timerBadgeLabel({id: "later"}), title: app.timerBadgeTitle({id: "later"}), none: app.timerBadgeLabel({id: "x"}), '
+            'href: referenceHref(list[0])}));\n'
+            '`);\n'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True, check=False)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        # Oldest first, so after an interrupted switch the timer to stop is at the top.
+        self.assertEqual(payload["order"], ["earlier", "later"])
+        self.assertEqual(payload["meta"], ["@aaa · started 2026-06-14 09:05 · ana · 25h 25m 00s",
+                                           "@bbb · started 10:20 · ana · 00h 10m 00s"])
+        self.assertEqual(payload["badge"], "Timer 00h 10m 00s")
+        self.assertEqual(payload["title"], "Timer started 10:20 by ana")
+        self.assertEqual(payload["none"], "")
+        self.assertEqual(payload["href"], "#mt-card-earlier")
+
     def test_timer_button_state_and_fixed_width_time_format(self) -> None:
         node = shutil.which("node")
         if not node:
