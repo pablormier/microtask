@@ -35,7 +35,6 @@ from operations import (
     capture_title,
     card_text_option,
     check_claim,
-    cleanup_lifecycle_timer,
     create_card,
     finish_lifecycle_timer,
     focus_context,
@@ -689,7 +688,6 @@ def _apply_bulk_plan_locked(args: argparse.Namespace, ws: Workspace | None = Non
         expected: dict[str, bytes] = {}
         changes: dict[str, bytes] = {}
         receipts = []
-        finished_timers = []
         seen: set[str] = set()
         timestamp = now_stamp()
         for entry in plan["items"]:
@@ -750,8 +748,7 @@ def _apply_bulk_plan_locked(args: argparse.Namespace, ws: Workspace | None = Non
                     if parsed.get("status") != item.frontmatter.get("status"):
                         raw = transition_claim(item, raw, str(parsed["status"]), username, timestamp)
                     if parsed.get("status") != "doing" or parsed.get("archived") is True or parsed.get("hidden") is True:
-                        raw, timer = finish_lifecycle_timer(item, raw, int(clock_time.time()), ws=resolved_ws)
-                        finished_timers.append((item, timer))
+                        raw, _timer = finish_lifecycle_timer(item, raw, int(clock_time.time()), ws=resolved_ws)
                 changes[relative_text] = raw.encode("utf-8")
             receipts.append({"ref": entry["ref"], "path": relative_text, "changed": changed})
         changed_count = len(changes)
@@ -764,8 +761,6 @@ def _apply_bulk_plan_locked(args: argparse.Namespace, ws: Workspace | None = Non
             raise ValueError("bulk edit plan counts do not match the current cards")
         if changes:
             transaction.apply_item_transaction(changes, expected=expected, source_root=base, ws=resolved_ws)
-            for item, timer in finished_timers:
-                cleanup_lifecycle_timer(item, timer, ws=resolved_ws)
     except (OSError, ValueError) as error:
         prefix = "conflict" if "conflict:" in str(error) else "bulk edit failed validation; changes rolled back"
         print(f"error: {error}" if prefix == "conflict" else f"error: {prefix}: {error}", file=sys.stderr)

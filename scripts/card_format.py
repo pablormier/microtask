@@ -27,13 +27,16 @@ FIELD_ORDER = (
     "project", "topic", "due", "due_kind", "created", "updated",
     "completed", "archived", "hidden", "needs_review", "tags",
     "next_action", "processing_instructions", *CLAIM_FIELDS,
-    *GITHUB_SOURCE_FIELDS, "comments", "time_entries",
+    *GITHUB_SOURCE_FIELDS, "comments", "time_entries", "timer",
 )
 EDITABLE_METADATA = frozenset({
     "title", *BOOLEAN_METADATA, "topic", "due", "due_kind", "priority", "project", "tags",
     "next_action", "processing_instructions",
 })
-TASK_ONLY_FIELDS = frozenset({"next_action", "status", "type", "completed", "time_entries", *CLAIM_FIELDS})
+TASK_ONLY_FIELDS = frozenset({
+    "next_action", "status", "type", "completed", "time_entries", "timer", *CLAIM_FIELDS,
+})
+TIMER_FIELDS = frozenset({"session_id", "start", "start_epoch", "by"})
 COMMON_REQUIRED = (
     "id", "title", "kind", "priority", "created", "updated",
 )
@@ -178,6 +181,31 @@ def validate_records(properties: dict[str, object]) -> list[str]:
             elapsed = record.get("elapsed_seconds")
             if type(elapsed) is not int or elapsed < 0:
                 errors.append(f"{prefix}.elapsed_seconds must be a non-negative integer")
+    return errors
+
+
+def validate_timer(properties: dict[str, object]) -> list[str]:
+    """Check the running-timer property; a card holds at most one."""
+    if "timer" not in properties:
+        return []
+    timer = properties["timer"]
+    if not isinstance(timer, dict):
+        return ["timer must be a mapping"]
+    if set(timer) != TIMER_FIELDS:
+        return ["timer must contain exactly session_id, start, start_epoch, and by"]
+    errors: list[str] = []
+    session_id = timer["session_id"]
+    if not isinstance(session_id, str) or not re.fullmatch(r"[0-9a-f]{32}", session_id):
+        errors.append("timer.session_id must be 32 lowercase hexadecimal characters")
+    if not isinstance(timer["start"], str) or not is_timestamp(timer["start"]):
+        errors.append("timer.start must be a local ISO timestamp")
+    if type(timer["start_epoch"]) is not int:
+        errors.append("timer.start_epoch must be an integer")
+    owner = timer["by"]
+    if not isinstance(owner, str) or not owner.strip() or owner != owner.strip() or any(
+        char in owner for char in "\r\n\x00"
+    ):
+        errors.append("timer.by must be a non-empty single-line name")
     return errors
 
 
@@ -396,6 +424,7 @@ def validate_properties(properties: dict[str, object], *, kind: str | None = Non
     errors.extend(_validate_organization_fields(properties, effective_kind=effective_kind))
     errors.extend(_validate_provenance_and_claims(properties, stored_kind=stored_kind))
     errors.extend(validate_records(properties))
+    errors.extend(validate_timer(properties))
     return errors
 
 
@@ -442,6 +471,12 @@ def time_entries_from(properties: dict[str, object]) -> list[dict[str, object]]:
     if errors:
         raise ValueError(errors[0])
     return [dict(entry) for entry in entries if isinstance(entry, dict)]
+
+
+def timer_from(properties: dict[str, object]) -> dict[str, object] | None:
+    """The running timer of already validated card properties, if any."""
+    timer = properties.get("timer")
+    return dict(timer) if isinstance(timer, dict) else None
 
 
 def time_log_entries(markdown: str | None) -> list[dict[str, object]]:

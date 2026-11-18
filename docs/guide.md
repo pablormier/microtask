@@ -127,11 +127,13 @@ mt done @4e91a7c2 --note "Appointment booked"
   2026-11-10T11:00`. The end defaults to now. Times are local, without offsets;
   a bare `HH:MM[:SS]` means today. `elapsed_seconds` is authoritative, including
   across daylight saving changes; reports sum it rather than subtracting timestamps.
-- `mt time status` lists owners and orphan timers. Clear an orphan with
-  `mt time cancel TASK_ID`; cancel discards the session. Malformed local timer
-  state is preserved in `.mt/recovery/` with a warning so card operations can
-  continue. `rules.timer_warn_hours` (default 8) flags long timers in status and
-  the board, without capping time. Running timers stay local to this checkout.
+- `mt time status` lists every running timer with its owner, card and start.
+  Several at once is normal: `--parallel` allows it and a sync can bring one
+  in. Settle one with `mt time stop REF`, or discard it with `mt time cancel
+  REF`. A running timer is the `timer` property of its card (see
+  [card files](cards.md)), so it syncs like any other edit.
+  `rules.timer_warn_hours` (default 8) flags long timers in status and the
+  board, without capping time.
 
 ## Topics, projects, and tags
 

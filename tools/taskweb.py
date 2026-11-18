@@ -283,9 +283,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
         status, payload = handle_api_action(ws, self.path, body, self.server.token)
+        if self.path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed")):
+            self.server.sync.request(ws)
         if status == HTTPStatus.OK:
-            if self.path not in UNSYNCED_ACTIONS:
-                self.server.sync.request(ws)
             # Actions return receipts; build the queried collection once, after success.
             # A fresh handle: the write may have ended demo mode.
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,

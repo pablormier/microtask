@@ -105,10 +105,13 @@ def _run_operation(ws: Workspace, action, message: str, *, include_saved_ref: bo
     try:
         result = action(ws)
     except store.ConflictError as error:
-        return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
+        payload: dict[str, object] = {"error": str(error), "conflict": True}
+        if error.sync_needed:
+            payload["sync_needed"] = True  # Part of the change was saved; the server still syncs it.
+        return HTTPStatus.CONFLICT, payload
     except store.TaskError as error:
         return HTTPStatus.BAD_REQUEST, {"error": str(error)}
-    payload: dict[str, object] = {"message": message}
+    payload = {"message": message}
     if include_saved_ref:
         payload["saved_ref"] = result.receipt.get("ref")
     return HTTPStatus.OK, payload

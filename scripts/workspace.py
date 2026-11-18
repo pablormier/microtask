@@ -183,14 +183,18 @@ class Workspace:
         return [name for name in self.statuses() if name != "done"]
 
     def pin_demo(self) -> bool:
-        """Pin the demo decision so mid-command mutations stay consistent."""
+        """Pin the demo decision so mid-command mutations stay consistent.
+
+        A running timer lives on a real card, and a workspace with cards is not
+        empty, so only a legacy timer file not yet imported keeps it real.
+        """
         enabled = self.policy().get("rules", {}).get("demo_workspace", True)
         self._demo_state = bool(
             enabled
             and self.root == self.app_root
             and (self.app_root / "examples").is_dir()
             and self.is_empty()
-            and not (self.root / ".mt" / "time-running").exists()
+            and not self.real_legacy_timer_path().exists()
         )
         return self._demo_state
 
@@ -227,10 +231,15 @@ class Workspace:
             return self.demo_root() / "focus"
         return self.root / ".mt" / "focus"
 
-    def time_timer_path(self) -> Path:
+    def real_legacy_timer_path(self) -> Path:
+        """Where releases before timers moved onto cards kept real-workspace timers."""
+        return self.root / ".mt" / "time-running"
+
+    def legacy_timer_path(self) -> Path:
+        """The old timer file for the active cards (demo mode kept its own); read once, then renamed."""
         if self.demo_active():
             return self.demo_root() / "time-running"
-        return self.root / ".mt" / "time-running"
+        return self.real_legacy_timer_path()
 
     def mutation_lock_path(self) -> Path:
         return self.root / ".mt" / "time-mutation.lock"

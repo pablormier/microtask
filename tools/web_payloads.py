@@ -157,6 +157,7 @@ def task_to_dict(
 def dashboard_detail(ws: Workspace, cache: store.CardCache, identity: str) -> dict | None:
     store.pin_demo_state(ws)
     store.maybe_seed_demo(ws)
+    transaction.migrate_legacy_timers_if_pending(ws)
     items = store.discover(cache=cache, ws=ws)
     item = next((item for item in items if str(item.frontmatter.get("id") or item.path.stem) == identity), None)
     return task_to_dict(item, store.ReferenceIndex(items), ws=ws) if item else None
@@ -185,12 +186,13 @@ def dashboard_meta(ws: Workspace, *, api_token: str = "", items: list[store.Card
     rules = cfg.get("rules", {})
     raw_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
     max_doing = int(str(raw_limit)) if raw_limit is not None and str(raw_limit).isdigit() else 1
-    timers = transaction.read_time_timers(ws)
-    timers = {
-        task_id: {**timer, "saved": store.timer_session_saved(task_id, timer, ws)}
-        for task_id, timer in timers.items()
-    }
     item_values = items or []
+    # Timers live on the cards the payload already loaded, so a refresh reads no extra files.
+    timers = {
+        store.card_task_id(card): {**timer, "saved": store.timer_session_saved(card, timer)}
+        for card in item_values
+        if card.kind == "task" and (timer := card_format.timer_from(card.frontmatter)) is not None
+    }
     workspace_tags: set[str] = set()
     usage: dict[str, dict[str, int]] = {"project": {}, "topic": {}, "tag": {}}
     for item in item_values:
@@ -275,6 +277,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     """
     store.pin_demo_state(ws)
     store.maybe_seed_demo(ws)
+    transaction.migrate_legacy_timers_if_pending(ws)
     cfg = store.policy(ws)
     query = query or card_query.DEFAULT
     statuses = list(cfg.get("statuses", {}))

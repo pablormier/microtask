@@ -133,7 +133,7 @@ HTML_TEMPLATE = """<!doctype html>
 
 
 def render_metadata(properties: dict[str, object], *, is_card: bool) -> str:
-    hidden = {"title", "comments", "time_entries", "processing_instructions", "next_action"} if is_card else set()
+    hidden = {"title", "comments", "time_entries", "timer", "processing_instructions", "next_action"} if is_card else set()
     fields = []
     for key, value in properties.items():
         if key in hidden:

@@ -61,14 +61,15 @@ from store import (
     select_cards,
     slugify,
     task_by_id,
+    time_entry_from_timer,
     time_session_for,
+    timer_session_saved,
 )
 import transaction
 from transaction import (
     MutationReceipt,
     _require_mutation_lock,
     auto_sync_after_mutation,
-    read_time_timers,
     time_mutation_lock,
 )
 from workspace import Workspace
@@ -176,40 +177,41 @@ def append_completion_note(raw: str, notes: list[str], today: str) -> str:
 
 
 
+def settle_timer(raw: str, end_epoch: int) -> tuple[str, dict | None]:
+    """Remove the card's running timer and record its session, in the one text.
+
+    Returns the new text and the timer that was settled, or ``raw`` unchanged
+    and None when no timer runs. A session the card already holds is not
+    recorded twice.
+    """
+    properties, body = card_format.parse_document(raw)
+    timer = card_format.timer_from(properties)
+    if timer is None:
+        return raw, None
+    del properties["timer"]
+    if not any(entry["session_id"] == timer["session_id"] for entry in card_format.time_entries_from(properties)):
+        records = properties.setdefault("time_entries", [])
+        if not isinstance(records, list):
+            raise ValueError("time_entries must be a list")
+        records.append(time_entry_from_timer(timer, end_epoch))
+    return card_format.render_document(properties, body), timer
+
+
+
 def finish_lifecycle_timer(
     task: Card, raw: str, end_epoch: int, ws: Workspace | None = None,
 ) -> tuple[str, dict | None]:
-    """Stage a session in the same card transaction as its lifecycle change."""
-    task_id = str(task.frontmatter.get("id") or task.path.stem)
-    timer = read_time_timers(ws).get(task_id)
-    if timer:
-        entry, already_saved = time_session_for(task_id, timer, end_epoch, ws=ws)
-        if not already_saved:
-            raw = append_time_entry(raw, entry)
-    return raw, timer
-
-
-
-def cleanup_lifecycle_timer(task: Card, timer: dict | None, ws: Workspace | None = None) -> None:
-    if timer:
-        try:
-            transaction.clear_time_timer(
-                str(task.frontmatter.get("id") or task.path.stem),
-                str(timer["session_id"]),
-                ws=ws,
-            )
-        except OSError as error:
-            print(f"warning: session saved, but timer cleanup failed: {error}; retry time stop safely", file=sys.stderr)
+    """Stage the session in the same card write as its lifecycle change."""
+    return settle_timer(raw, end_epoch)
 
 
 
 def save_time_session(
     task: Card, timer: dict[str, object], end_epoch: int, ws: Workspace | None = None,
 ) -> tuple[bool, str]:
-    """Append one session; restore the card and retain timer state on validation failure."""
+    """Append one session to a card without touching its timer; report validation failure."""
     resolved = _ws(ws)
-    task_id = str(task.frontmatter.get("id") or task.path.stem)
-    entry, already_saved = time_session_for(task_id, timer, end_epoch, ws=resolved)
+    entry, already_saved = time_session_for(task, timer, end_epoch)
     if already_saved:
         return True, "already saved"
     original = task.path.read_bytes()
@@ -220,7 +222,7 @@ def save_time_session(
     try:
         transaction.apply_item_transaction({relative: updated.encode("utf-8")}, expected={relative: original}, source_root=base, ws=resolved)
     except (OSError, ValueError):
-        return False, "time log failed validation; running timer was retained"
+        return False, "time log failed validation"
     return True, "saved"
 
 
@@ -848,7 +850,6 @@ def _commit_item_write(
     failure_prefix: str,
     summary: str,
     receipt_fn=None,
-    timer: dict | None = None,
 ) -> WriteResult:
     _require_mutation_lock()
     base = active_root(resolved)
@@ -864,8 +865,6 @@ def _commit_item_write(
         if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
             raise ConflictError(f"{failure_prefix}: {error}") from error
         raise ValidationError(f"{failure_prefix}: {error}") from error
-    if timer:
-        cleanup_lifecycle_timer(item, timer, ws=resolved)
     saved = Card.read(item.path)
     receipt = receipt_fn(saved, updated=True) if receipt_fn is not None else saved_receipt(saved, updated=True, ws=resolved)
     return WriteResult(
@@ -886,7 +885,6 @@ def _commit_item_change(
     summary: str,
     as_json: bool = False,
     receipt_fn=None,
-    timer: dict | None = None,
     ws: Workspace | None = None,
 ) -> int | MutationReceipt:
     resolved = _ws(ws)
@@ -902,8 +900,6 @@ def _commit_item_change(
     except (OSError, ValueError) as error:
         print(f"error: {failure_prefix}: {error}", file=sys.stderr)
         return 1
-    if timer:
-        cleanup_lifecycle_timer(item, timer, ws=resolved)
     return _finish_mutation(
         Card.read(item.path),
         updated=True,
@@ -942,7 +938,7 @@ def _complete_locked(
     updated = card_format.replace_property(updated, "completed", completed_at)
     updated = transition_claim(task, updated, "done", username, completed_at)
     try:
-        updated, timer = finish_lifecycle_timer(task, updated, completed_epoch, ws=resolved)
+        updated, _timer = finish_lifecycle_timer(task, updated, completed_epoch, ws=resolved)
         updated = append_completion_note(updated, list(notes), completion_day)
         updated = append_comments(updated, list(comments), completed_at)
     except ValueError as error:
@@ -953,7 +949,6 @@ def _complete_locked(
         updated,
         failure_prefix="completion failed validation; change rolled back",
         summary=f"Completed and validated: {task.path.name}",
-        timer=timer,
     )
 
 
@@ -1021,9 +1016,8 @@ def _move_locked(
     updated = transition_claim(task, updated, destination, username, moved_at)
     try:
         updated = append_comments(updated, list(comments), moved_at)
-        timer = None
         if destination != "doing" or task.frontmatter.get("claimed_by") != username:
-            updated, timer = finish_lifecycle_timer(task, updated, moved_epoch, ws=resolved)
+            updated, _timer = finish_lifecycle_timer(task, updated, moved_epoch, ws=resolved)
     except ValueError as error:
         raise InputError(f"move update failed: {error}", exit_code=1) from error
     return _commit_item_write(
@@ -1032,7 +1026,6 @@ def _move_locked(
         updated,
         failure_prefix="move failed validation; change rolled back",
         summary=f"Moved to {destination} and validated: {task.path.name}",
-        timer=timer,
     )
 
 
@@ -1325,12 +1318,10 @@ def _edit_locked(
             properties, body = card_format.parse_document(raw, expected_kind=kind)
             properties["updated"] = timestamp
             raw = card_format.render_document(properties, body, expected_kind=kind)
-        timer = None
         if item.is_task and (properties.get("status") != "doing"
                              or properties.get("archived") is True or properties.get("hidden") is True):
-            raw, timer = finish_lifecycle_timer(item, raw, int(clock_time.time()), ws=resolved)
+            raw, _timer = finish_lifecycle_timer(item, raw, int(clock_time.time()), ws=resolved)
         edited_item = save_item_edit(item, raw, guard_args, ws=resolved)
-        cleanup_lifecycle_timer(item, timer, ws=resolved)
     except TaskError:
         raise
     except (OSError, ValueError) as error:
@@ -1509,6 +1500,24 @@ def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated
 
 
 
+def _stop_timer_card(
+    resolved: Workspace, card: Card, end_epoch: int, timestamp: str,
+) -> Card:
+    """Stop one card's timer in a single atomic card write; return the card as saved."""
+    updated, timer = settle_timer(card.raw, end_epoch)
+    if timer is None:
+        return card
+    updated = card_format.replace_property(updated, "updated", timestamp)
+    base = active_root(resolved)
+    relative = str(card.path.relative_to(base))
+    transaction.apply_item_transaction(
+        {relative: updated.encode("utf-8")}, expected={relative: card.raw.encode("utf-8")},
+        source_root=base, ws=resolved,
+    )
+    return Card.read(card.path)
+
+
+
 def _time_start_locked(
     resolved: Workspace,
     query: str,
@@ -1527,53 +1536,49 @@ def _time_start_locked(
         if is_archived(task) or is_hidden(task):
             raise ValueError("unarchive and unhide the task before starting a timer")
         task_id = str(task.frontmatter.get("id") or task.path.stem)
-        timers = read_time_timers(resolved)
-        if task_id in timers:
+        # One snapshot of the running timers; the cards in it are what any stop is built from.
+        running = {store.card_task_id(card): (card, timer)
+                   for card, timer in transaction.read_time_timer_cards(resolved)}
+        if task_id in running:
             raise ValueError(f"timer already running for [@{task.short_ref}] {task.title}")
         started_epoch = int(clock_time.time())
         timestamp = local_stamp(started_epoch)
+        timer = {"session_id": uuid.uuid4().hex, "start": timestamp,
+                 "start_epoch": started_epoch, "by": username}
         updated = task.raw
         if task.frontmatter.get("status") != "doing" or task.frontmatter.get("claimed_by") != username:
             updated = card_format.replace_property(updated, "status", "doing")
-            updated = card_format.replace_property(updated, "updated", timestamp)
             updated = transition_claim(task, updated, "doing", username, timestamp)
+        updated = card_format.replace_property(updated, "timer", timer)
+        updated = card_format.replace_property(updated, "updated", timestamp)
         base = active_root(resolved)
         relative = str(task.path.relative_to(base))
-        changes = {relative: updated.encode("utf-8")}
-        expected = {relative: task.raw.encode("utf-8")}
-        if not parallel:
-            for other_id, other_timer in list(timers.items()):
-                if other_timer["by"] != username:
-                    continue
-                other = task_by_id(other_id, ws=resolved)
-                if other is None:
-                    raise ValueError(f"running timer task no longer exists: {other_id}; use mt time cancel {other_id}")
-                entry, already_saved = time_session_for(other_id, other_timer, started_epoch, ws=resolved)
-                if not already_saved:
-                    other_raw = append_time_entry(other.raw, entry)
-                    other_raw = card_format.replace_property(other_raw, "updated", timestamp)
-                    other_path = str(other.path.relative_to(base))
-                    changes[other_path] = other_raw.encode("utf-8")
-                    expected[other_path] = other.raw.encode("utf-8")
-                del timers[other_id]
-        timer = {"session_id": uuid.uuid4().hex, "start": timestamp,
-                 "start_epoch": started_epoch, "by": username}
-        transaction.apply_item_transaction(changes, expected=expected, source_root=base, ws=resolved)
-        try:
-            timers[task_id] = timer
-            transaction.write_time_timers(timers, ws=resolved)
-        except OSError:
-            transaction.apply_item_transaction(expected, expected=changes, source_root=base, ws=resolved)
-            raise
+        transaction.apply_item_transaction(
+            {relative: updated.encode("utf-8")}, expected={relative: task.raw.encode("utf-8")},
+            source_root=base, ws=resolved,
+        )
     except (OSError, ValueError) as error:
         raise ConflictError(f"could not start timer: {error}", exit_code=1) from error
+    if not parallel:
+        # Second, separate write per card. If this stops early, both timers keep
+        # running, which is an ordinary state that `mt time stop` resolves.
+        for other_id, (other, other_timer) in sorted(running.items()):
+            if other_timer["by"] != username:
+                continue
+            try:
+                _stop_timer_card(resolved, other, max(started_epoch, int(other_timer["start_epoch"])), timestamp)
+            except (OSError, ValueError) as error:
+                raise ConflictError(
+                    f"started the timer, but could not stop the timer on {other.title}: "
+                    f"{error}; both timers are running, use mt time stop on the one to end",
+                    exit_code=1, sync_needed=True,
+                ) from error
     saved = Card.read(task.path)
-    changed = any(content != expected[path] for path, content in changes.items())
     return WriteResult(
         card=saved,
-        receipt=saved_receipt(saved, updated=changed, ws=resolved),
+        receipt=saved_receipt(saved, updated=True, ws=resolved),
         message=f"Started timer for [@{task.short_ref}] {task.title} at {timer['start']} ({username}).",
-        changed=changed,
+        changed=True,
     )
 
 
@@ -1606,53 +1611,52 @@ def _time_end_locked(
 ) -> WriteResult:
     _require_mutation_lock()
     try:
-        timers = read_time_timers(resolved)
+        # One snapshot: the owner check and the write both use the card and timer chosen here.
+        running = {store.card_task_id(card): (card, timer)
+                   for card, timer in transaction.read_time_timer_cards(resolved)}
     except ValueError as error:
         raise InputError(str(error), exit_code=1) from error
-    if not timers:
+    if not running:
         raise NotFoundError("no timer is running", exit_code=1, prefixed=True)
     query = query.strip()
-    if query in timers:
-        task_id, timer = query, timers[query]
+    if query in running:
+        task, timer = running[query]
     elif query:
-        task = _resolve_unique_card(resolved, query, kind="task")
-        task_id = str(task.frontmatter.get("id") or task.path.stem)
-        timer = timers.get(task_id)
-        if timer is None:
-            raise NotFoundError(f"no timer is running for [@{task.short_ref}] {task.title}", exit_code=1, prefixed=True)
-    elif len(owned := {key: value for key, value in timers.items()
-                       if value["by"] == current_username(by, ws=resolved)}) == 1:
-        task_id, timer = next(iter(owned.items()))
+        found = _resolve_unique_card(resolved, query, kind="task")
+        selected = running.get(str(found.frontmatter.get("id") or found.path.stem))
+        if selected is None:
+            raise NotFoundError(f"no timer is running for [@{found.short_ref}] {found.title}", exit_code=1, prefixed=True)
+        task, timer = selected
+    elif len(owned := {key: value for key, value in running.items()
+                       if value[1]["by"] == current_username(by, ws=resolved)}) == 1:
+        task, timer = next(iter(owned.values()))
     elif not owned:
         raise NotFoundError("no timer is running for this user; specify a task", exit_code=1, prefixed=True)
     else:
-        refs = []
-        for running_task_id in sorted(owned):
-            running_task = task_by_id(running_task_id, ws=resolved)
-            refs.append(f"@{running_task.short_ref}" if running_task else running_task_id)
+        refs = [f"@{card.short_ref}" for _, (card, _timer) in sorted(owned.items())]
         raise ConflictError(f"multiple timers are running; specify a task: {', '.join(refs)}", exit_code=1)
-    task = task_by_id(task_id, ws=resolved)
     if timer["by"] != current_username(by, ws=resolved):
         raise ConflictError(f"timer belongs to {timer['by']}; use --by {shlex.quote(str(timer['by']))}", exit_code=1)
-    if task is None and action != "cancel":
-        raise NotFoundError(
-            f"running timer task no longer exists: {task_id}; use mt time cancel {task_id}",
-            exit_code=1,
-            prefixed=True,
-        )
+    base = active_root(resolved)
+    relative = str(task.path.relative_to(base))
     if action == "cancel":
+        properties, body = card_format.parse_document(task.raw)
+        del properties["timer"]
+        properties["updated"] = now_stamp()
         try:
-            transaction.clear_time_timer(task_id, str(timer["session_id"]), ws=resolved)
-        except OSError as error:
+            transaction.apply_item_transaction(
+                {relative: card_format.render_document(properties, body).encode("utf-8")},
+                expected={relative: task.raw.encode("utf-8")}, source_root=base, ws=resolved,
+            )
+        except (OSError, ValueError) as error:
             raise InputError(f"could not cancel timer: {error}", exit_code=1) from error
-        label = f"[@{task.short_ref}] {task.title}" if task else task_id
+        cancelled = Card.read(task.path)
         return WriteResult(
-            card=task,
-            receipt=saved_receipt(task, updated=False, ws=resolved) if task else {"cancelled": True, "task_id": task_id},
-            message=f"Cancelled timer for {label}; no time recorded.",
-            changed=False,
+            card=cancelled,
+            receipt=saved_receipt(cancelled, updated=True, ws=resolved),
+            message=f"Cancelled timer for [@{task.short_ref}] {task.title}; no time recorded.",
+            changed=True,
         )
-    assert task is not None
     try:
         end_epoch = int(clock_time.time())
         if at:
@@ -1664,27 +1668,19 @@ def _time_end_locked(
     except ValueError as error:
         raise InputError(str(error), exit_code=2) from error
     elapsed = max(0, end_epoch - int(timer["start_epoch"]))
-    saved, message = save_time_session(task, timer, end_epoch, ws=resolved)
-    if not saved:
-        raise ValidationError(message, exit_code=1)
+    already_saved = timer_session_saved(task, timer)
     try:
-        if not transaction.clear_time_timer(task_id, str(timer["session_id"]), ws=resolved):
-            raise ConflictError("timer state changed after saving; retry stop safely", exit_code=1, sync_needed=True)
-    except OSError as error:
-        raise ConflictError(
-            f"session saved, but timer cleanup failed ({error}); retry stop safely",
-            exit_code=1,
-            sync_needed=True,
-        ) from error
-    updated_task = Card.read(task.path)
+        updated_task = _stop_timer_card(resolved, task, end_epoch, now_stamp())
+    except (OSError, ValueError) as error:
+        raise ValidationError(f"time log failed validation; running timer was retained: {error}", exit_code=1) from error
     summary = (
         "Timer session was already saved; cleared the running state."
-        if message == "already saved"
+        if already_saved
         else f"Stopped timer for [@{task.short_ref}] {task.title}: {format_duration(elapsed)}."
     )
     return WriteResult(
         card=updated_task,
-        receipt=saved_receipt(updated_task, updated=(message != "already saved"), ws=resolved),
+        receipt=saved_receipt(updated_task, updated=not already_saved, ws=resolved),
         message=summary,
         changed=True,
     )

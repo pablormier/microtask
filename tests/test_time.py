@@ -59,6 +59,16 @@ class TimeTrackingTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def timers(self) -> dict[str, dict]:
+        """Running timers as the cards hold them."""
+        return store.running_timers(tasklib.Workspace.at(self.root, demo=False))
+
+    def set_timer(self, task: Path, **fields: object) -> None:
+        """Change fields of a card's running timer in place, as a pull or an editor could."""
+        properties, body = tasklib.card_format.parse_document(task.read_text())
+        properties["timer"] = {**properties["timer"], **fields}
+        task.write_text(tasklib.card_format.render_document(properties, body))
+
     @staticmethod
     def log_content(raw: str) -> str | None:
         return tasklib.time_log_entries(raw)
@@ -71,14 +81,12 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(claimed.frontmatter["status"], "doing")
         self.assertTrue(claimed.frontmatter["claimed_by"])
         self.assertFalse((self.root / ".mt" / "focus").exists())
-        state = self.root / ".mt" / "time-running"
-        timers_data = json.loads(state.read_text())
-        timers_data[task.stem]["start_epoch"] -= 2
-        state.write_text(json.dumps(timers_data), encoding="utf-8")
-        first_timer = timers_data[task.stem]
+        first_timer = self.timers()[task.stem]
+        self.set_timer(task, start_epoch=first_timer["start_epoch"] - 2)
+        first_timer = self.timers()[task.stem]
         switched = self.run_mt("time", "start", "Other running task")
         self.assertEqual(switched.returncode, 0, switched.stderr)
-        timers = json.loads(state.read_text())
+        timers = self.timers()
         self.assertEqual(set(timers), {other.stem})
         entry = tasklib.time_log_entries(task.read_text())[0]
         self.assertEqual(entry["session_id"], first_timer["session_id"])
@@ -88,7 +96,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(duplicate.returncode, 1)
         self.assertIn("timer already running", duplicate.stderr)
         self.assertEqual(self.run_mt("time", "stop").returncode, 0)
-        self.assertFalse(state.exists())
+        self.assertEqual(self.timers(), {})
         self.assertEqual(self.run_mt("time", "start", "Track focus session").returncode, 0)
         self.assertEqual(self.run_mt("time", "stop").returncode, 0)
         entries = tasklib.time_log_entries(task.read_text())
@@ -103,32 +111,31 @@ class TimeTrackingTests(unittest.TestCase):
         for title, owner in (("Alice first", "alice"), ("Bob task", "bob"), ("Alice next", "alice")):
             result = self.run_mt("time", "start", title, "--by", owner)
             self.assertEqual(result.returncode, 0, result.stderr)
-        state = self.root / ".mt/time-running"
-        timers = json.loads(state.read_text())
+        timers = self.timers()
         self.assertEqual(set(timers), {second.stem, third.stem})
         self.assertEqual(timers[second.stem]["by"], "bob")
         self.assertEqual(len(tasklib.time_log_entries(first.read_text())), 1)
+        before = second.read_bytes()
         denied = self.run_mt("time", "stop", "Bob task", "--by", "alice")
         self.assertNotEqual(denied.returncode, 0)
-        self.assertEqual(state.read_text(), json.dumps(timers, indent=2) + "\n")
+        self.assertEqual(second.read_bytes(), before)
+        self.assertEqual(self.timers(), timers)
         self.assertEqual(self.run_mt("time", "stop", "--by", "alice").returncode, 0)
-        self.assertEqual(set(json.loads(state.read_text())), {second.stem})
+        self.assertEqual(set(self.timers()), {second.stem})
         self.assertEqual(self.run_mt("time", "cancel", "--by", "bob").returncode, 0)
 
-    def test_orphan_status_stop_and_cancel_by_exact_id(self) -> None:
+    def test_a_card_deleted_by_sync_takes_its_timer_with_it(self) -> None:
         task = self.add_task("Orphan timer")
         self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
         task.unlink()  # Simulate a deletion arriving from sync.
         status = self.run_mt("time", "status")
         self.assertEqual(status.returncode, 0, status.stderr)
-        self.assertIn("missing task " + task.stem, status.stdout)
+        self.assertIn("No timer running.", status.stdout)
         stopped = self.run_mt("time", "stop", task.stem)
         self.assertEqual(stopped.returncode, 1)
-        self.assertIn("time cancel " + task.stem, stopped.stderr)
-        self.assertEqual(self.run_mt("time", "cancel", task.stem).returncode, 0)
-        self.assertFalse((self.root / ".mt/time-running").exists())
+        self.assertIn("no timer is running", stopped.stderr)
 
-    def test_corruption_is_quarantined_and_durable_operations_continue(self) -> None:
+    def test_malformed_legacy_timer_file_is_kept_and_operations_continue(self) -> None:
         cases = ((("done",), b"{broken timer state"),
                  (("convert", "note"), b"[]"), (("delete",), b"\xff"))
         for command, corrupt in cases:
@@ -140,9 +147,11 @@ class TimeTrackingTests(unittest.TestCase):
                 state.write_bytes(corrupt)
                 result = self.run_mt(command[0], title, *command[1:])
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("warning: malformed running timer state moved", result.stderr)
+                self.assertIn("time-running", result.stderr)
                 self.assertFalse(state.exists())
-                self.assertTrue(any(p.read_bytes() == corrupt for p in (self.root / ".mt/recovery").iterdir()))
+                kept = self.root / ".mt/time-running.migrated"
+                self.assertEqual(kept.read_bytes(), corrupt)
+                kept.unlink()
 
     def test_lifecycle_saves_timer_once_with_claim_changes(self) -> None:
         cases = (("move", "waiting"), ("edit", "--hidden"),
@@ -152,22 +161,20 @@ class TimeTrackingTests(unittest.TestCase):
             with self.subTest(command=command):
                 task = self.add_task(f"Lifecycle {index}")
                 self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
-                state = self.root / ".mt/time-running"
-                timer = json.loads(state.read_text())[task.stem]
+                timer = self.timers()[task.stem]
                 result = self.run_mt(command[0], task.stem, *command[1:])
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertFalse(state.exists())
+                self.assertNotIn(task.stem, self.timers())
                 entries = tasklib.time_log_entries(task.read_text())
                 self.assertEqual([entry["session_id"] for entry in entries], [timer["session_id"]])
                 if "--takeover" in command:
                     self.assertEqual(tasklib.Card.read(task).frontmatter["claimed_by"], "bob")
 
-    def test_failed_switch_and_lifecycle_keep_cards_and_timer(self) -> None:
+    def test_failed_start_and_lifecycle_keep_cards_and_timer(self) -> None:
         first = self.add_task("Switch rollback first")
         second = self.add_task("Switch rollback next")
         self.assertEqual(self.run_mt("time", "start", first.stem).returncode, 0)
-        state = self.root / ".mt/time-running"
-        before = {p: p.read_bytes() for p in (first, second, state)}
+        before = {p: p.read_bytes() for p in (first, second)}
         ws = tasklib.Workspace.at(self.root, demo=False)
         with mock.patch.object(transaction, "run_validator", return_value=True), \
              mock.patch.object(transaction, "validate_data_root", side_effect=ValueError("forced failure")):
@@ -197,32 +204,8 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(card.frontmatter["status"], "waiting")
         self.assertNotIn("claimed_by", card.frontmatter)
         self.assertEqual(len(tasklib.time_log_entries(card.raw)), 1)
-        self.assertFalse((self.root / ".mt/time-running").exists())
-
-    def test_failed_sidecar_write_rolls_back_switch(self) -> None:
-        first = self.add_task("Sidecar switch first")
-        second = self.add_task("Sidecar switch second")
-        self.assertEqual(self.run_mt("time", "start", first.stem).returncode, 0)
-        state = self.root / ".mt/time-running"
-        before = {p: p.read_bytes() for p in (first, second, state)}
-        ws = tasklib.Workspace.at(self.root, demo=False)
-        with mock.patch.object(transaction, "run_validator", return_value=True), \
-             mock.patch.object(transaction, "write_time_timers", side_effect=OSError("forced failure")):
-            self.assertEqual(tasklib.command_time_start(argparse.Namespace(query=[second.stem]), ws=ws), 1)
-        for path, raw in before.items():
-            self.assertEqual(path.read_bytes(), raw)
-
-    def test_legacy_owner_uses_claimant_and_is_persisted_on_read(self) -> None:
-        task = self.add_task("Legacy claimant")
-        self.assertEqual(self.run_mt("time", "start", task.stem, "--by", "alice").returncode, 0)
-        state = self.root / ".mt/time-running"
-        timers = json.loads(state.read_text())
-        del timers[task.stem]["by"]
-        state.write_text(json.dumps(timers))
-        result = self.run_mt("time", "status", env={**os.environ, "MT_USERNAME": "bob"})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("alice", result.stdout)
-        self.assertEqual(json.loads(state.read_text())[task.stem]["by"], "alice")
+        self.assertNotIn("timer", card.frontmatter)
+        self.assertEqual(self.timers(), {})
 
     def test_backdated_add_adjusted_stop_and_stale_warning(self) -> None:
         task = self.add_task("Forgotten timer")
@@ -238,11 +221,8 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(entries[1]["start"], "2020-01-03T09:00:00")
         for flags in (("--duration", "2h"), ("--at", "2020-01-04T11:00")):
             self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
-            state = self.root / ".mt/time-running"
-            timers = json.loads(state.read_text())
-            timers[task.stem].update(start="2020-01-04T09:00:00",
-                                    start_epoch=int(store.datetime(2020, 1, 4, 9).timestamp()))
-            state.write_text(json.dumps(timers))
+            self.set_timer(task, start="2020-01-04T09:00:00",
+                           start_epoch=int(store.datetime(2020, 1, 4, 9).timestamp()))
             self.assertIn("long-running timer", self.run_mt("time", "status").stdout)
             mutation_start = tasklib.now_stamp()
             result = self.run_mt("time", "stop", task.stem, *flags)
@@ -260,7 +240,7 @@ class TimeTrackingTests(unittest.TestCase):
         for flags in (("--duration", "2h"), ("--at", "2020-01-01T00:00"), ("--at", "bad")):
             self.assertNotEqual(self.run_mt("time", "stop", task.stem, *flags).returncode, 0)
             self.assertEqual(task.read_bytes(), before)
-            self.assertTrue((self.root / ".mt/time-running").exists())
+            self.assertIn(task.stem, self.timers())
         policy = self.run_mt("policy", "--json")
         self.assertEqual(float(json.loads(policy.stdout)["rules"]["timer_warn_hours"]), 8)
 
@@ -281,28 +261,28 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(entry["end"], "2020-01-02T10:00:00")
         self.assertEqual(entry["elapsed_seconds"], 3600)
 
-    def test_cancel_discards_only_selected_timer_and_never_changes_cards(self) -> None:
+    def test_cancel_discards_only_selected_timer_and_records_no_time(self) -> None:
         first = self.add_task("Cancel forgotten timer")
         second = self.add_task("Keep other timer")
         self.assertEqual(self.run_mt("time", "add", "Cancel forgotten timer", "5m").returncode, 0)
         for title in ("Cancel forgotten timer", "Keep other timer"):
             self.assertEqual(self.run_mt("time", "start", title, "--parallel").returncode, 0)
-        state = self.root / ".mt" / "time-running"
+        entries_before = tasklib.time_log_entries(first.read_text())
         before = {path: path.read_bytes() for path in (first, second)}
-        timers = state.read_bytes()
         ambiguous = self.run_mt("time", "cancel")
         self.assertNotEqual(ambiguous.returncode, 0)
-        self.assertEqual(state.read_bytes(), timers)
+        self.assertEqual({path: path.read_bytes() for path in (first, second)}, before)
         cancelled = self.run_mt("time", "cancel", "Cancel forgotten timer")
         self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
-        self.assertEqual(set(json.loads(state.read_text())), {second.stem})
+        self.assertEqual(set(self.timers()), {second.stem})
+        self.assertEqual(tasklib.time_log_entries(first.read_text()), entries_before)
+        self.assertEqual(second.read_bytes(), before[second])
         missing = self.run_mt("time", "cancel", "Cancel forgotten timer")
         self.assertNotEqual(missing.returncode, 0)
         self.assertEqual(self.run_mt("time", "cancel").returncode, 0)
-        self.assertFalse(state.exists())
+        self.assertEqual(self.timers(), {})
         self.assertNotEqual(self.run_mt("time", "cancel").returncode, 0)
-        for path, raw in before.items():
-            self.assertEqual(path.read_bytes(), raw)
+        self.assertEqual(tasklib.time_log_entries(second.read_text()), [])
 
     def test_list_and_remove_sessions_preserve_other_content_and_running_timers(self) -> None:
         task = self.add_task("Correct recorded time")
@@ -322,8 +302,7 @@ class TimeTrackingTests(unittest.TestCase):
         original = task.read_text()
         other_before = other.read_bytes()
         self.assertEqual(self.run_mt("time", "start", "Correct recorded time").returncode, 0)
-        state = self.root / ".mt" / "time-running"
-        timers_before = state.read_bytes()
+        timers_before = self.timers()
 
         listed = self.run_mt("time", "list")
         self.assertEqual(listed.returncode, 0, listed.stderr)
@@ -341,7 +320,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(tasklib.card_format.parse_document(after)[1], tasklib.card_format.parse_document(original)[1])
         self.assertNotIn("updated: 2000-01-01T00:00:00", after)
         self.assertEqual(other.read_bytes(), other_before)
-        self.assertEqual(state.read_bytes(), timers_before)
+        self.assertEqual(self.timers(), timers_before)
         self.assertEqual(self.run_mt("time", "remove", str(second["session_id"])).returncode, 0)
         self.assertFalse(tasklib.time_log_entries(task.read_text()))
         self.assertEqual(self.run_mt("time", "report").stdout.strip(), "[@" + tasklib.Card.read(other).short_ref + "] Keep recorded time: 15m\nTotal: 15m")
@@ -389,21 +368,11 @@ class TimeTrackingTests(unittest.TestCase):
                     fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             original_validate_changes(*args, **kwargs)
 
-        timer = {
-            "demo-task": {
-                "session_id": "a" * 32,
-                "start": "2026-09-25T12:00:00",
-                "start_epoch": 1790337600,
-            }
-        }
         ws = tasklib.Workspace.at(self.root, app_root=self.root)
         with mock.patch.object(store, "policy", return_value=effective_policy), mock.patch.object(
             tasklib, "validate_item_changes", side_effect=validate_while_locked
         ):
             self.assertTrue(tasklib.demo_active(ws))
-            demo_timer_path = store.time_timer_path(ws)
-            self.assertEqual(demo_timer_path, self.root / ".mt" / "demo" / "time-running")
-            transaction.write_time_timers(timer, ws=ws)
             with tasklib.time_mutation_lock(ws):
                 pass
             with transaction.sync_serialization_lock(ws):
@@ -413,7 +382,6 @@ class TimeTrackingTests(unittest.TestCase):
 
             self.assertEqual(created, 0)
             self.assertFalse(tasklib.demo_active(ws))
-            self.assertEqual(store.time_timer_path(ws), self.root / ".mt" / "time-running")
             with tasklib.time_mutation_lock(ws):
                 pass
             with transaction.sync_serialization_lock(ws):
@@ -424,7 +392,6 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertTrue((lock_dir / "sync.lock").is_file())
         self.assertFalse((lock_dir / "demo" / "time-mutation.lock").exists())
         self.assertFalse((lock_dir / "demo" / "sync.lock").exists())
-        self.assertTrue(demo_timer_path.is_file())
         self.assertFalse((lock_dir / "time-running").exists())
 
     def test_manual_session_reports_by_project_and_topic(self) -> None:
@@ -487,10 +454,8 @@ class TimeTrackingTests(unittest.TestCase):
 
         started = self.run_mt("time", "start", "Stop after timezone change", env=start_env)
         self.assertEqual(started.returncode, 0, started.stderr)
-        state_path = self.root / ".mt" / "time-running"
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        state[task.stem]["start_epoch"] -= 2
-        state_path.write_text(json.dumps(state), encoding="utf-8")
+        state = self.timers()
+        self.set_timer(task, start_epoch=state[task.stem]["start_epoch"] - 2)
 
         stopped = self.run_mt("time", "stop", env=stop_env)
 
@@ -498,16 +463,18 @@ class TimeTrackingTests(unittest.TestCase):
         entry = tasklib.time_log_entries(task.read_text())[0]
         self.assertEqual(entry["start"], state[task.stem]["start"])
         self.assertGreaterEqual(entry["elapsed_seconds"], 1)
-        self.assertFalse((self.root / ".mt" / "time-running").exists())
+        self.assertEqual(self.timers(), {})
 
     def test_retry_after_saved_session_does_not_duplicate_it(self) -> None:
         task = self.add_task("Retry timer stop")
         self.assertEqual(self.run_mt("time", "start", "Retry timer stop").returncode, 0)
-        state = self.root / ".mt" / "time-running"
-        original_state = state.read_bytes()
+        timer = self.timers()[task.stem]
         first_stop = self.run_mt("time", "stop")
         self.assertEqual(first_stop.returncode, 0, first_stop.stderr)
-        state.write_bytes(original_state)
+        # A manual merge brings the finished timer back onto the card.
+        properties, body = tasklib.card_format.parse_document(task.read_text())
+        properties["timer"] = timer
+        task.write_text(tasklib.card_format.render_document(properties, body))
 
         retry = self.run_mt("time", "stop")
 
@@ -515,7 +482,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertIn("already saved", retry.stdout)
         raw = task.read_text(encoding="utf-8")
         self.assertEqual(len(tasklib.time_log_entries(raw)), 1)
-        self.assertFalse(state.exists())
+        self.assertEqual(self.timers(), {})
 
     def test_stop_without_running_timer_fails_clearly(self) -> None:
         stopped = self.run_mt("time", "stop")
@@ -523,38 +490,29 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(stopped.returncode, 1)
         self.assertIn("no timer is running", stopped.stderr)
 
-    def test_saved_session_syncs_even_when_timer_cleanup_fails(self) -> None:
+    def test_stop_syncs_after_its_single_write_and_outside_the_lock(self) -> None:
         self.initialize_git()
         effective_policy = copy.deepcopy(store.policy(tasklib.Workspace.at(self.root)))
         effective_policy.setdefault("rules", {})["auto_sync"] = True
-        for cleanup_result in (False, OSError("timer cleanup failed")):
-            with self.subTest(cleanup_result=cleanup_result):
-                task = self.add_task("Cleanup failure " + str(isinstance(cleanup_result, OSError)))
-                self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
+        task = self.add_task("Sync after stop")
+        self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
 
-                def verify_sync(*_args: object, **_kwargs: object) -> int:
-                    self.assertFalse(getattr(transaction._TIME_LOCK_STATE, "held", False))
-                    self.assertIn("time_entries:", task.read_text())
-                    return 0
+        def verify_sync(*_args: object, **_kwargs: object) -> int:
+            self.assertFalse(getattr(transaction._TIME_LOCK_STATE, "held", False))
+            self.assertIn("time_entries:", task.read_text())
+            self.assertNotIn("timer:", task.read_text())
+            return 0
 
-                args = argparse.Namespace(query=[task.stem], time_command="stop")
-                ws = tasklib.Workspace.at(self.root, demo=False)
-                with (
-                    mock.patch.object(store, "policy", return_value=effective_policy),
-                    mock.patch.object(transaction, "clear_time_timer", **(
-                        {"side_effect": cleanup_result} if isinstance(cleanup_result, OSError)
-                        else {"return_value": cleanup_result}
-                    )),
-                    mock.patch.object(transaction, "command_sync", side_effect=verify_sync) as sync,
-                ):
-                    self.assertEqual(tasklib.command_time_end(args, ws=ws), 1)
-                    sync.assert_called_once()
-                self.assertTrue((self.root / ".mt" / "time-running").is_file())
-                retried = self.run_mt("time", "stop", task.stem)
-                self.assertEqual(retried.returncode, 0, retried.stderr)
-                self.assertEqual(len(tasklib.time_log_entries(task.read_text())), 1)
+        args = argparse.Namespace(query=[task.stem], time_command="stop")
+        ws = tasklib.Workspace.at(self.root, demo=False)
+        with (
+            mock.patch.object(store, "policy", return_value=effective_policy),
+            mock.patch.object(transaction, "command_sync", side_effect=verify_sync) as sync,
+        ):
+            self.assertEqual(tasklib.command_time_end(args, ws=ws), 0)
+            sync.assert_called_once()
 
-    def test_existing_timer_is_kept_when_another_task_timer_starts(self) -> None:
+    def test_existing_legacy_timer_is_imported_and_kept_when_another_task_timer_starts(self) -> None:
         first = self.add_task("Legacy timer")
         second = self.add_task("New timer")
         start_epoch = int(time.time())
@@ -562,11 +520,10 @@ class TimeTrackingTests(unittest.TestCase):
         state.parent.mkdir(parents=True, exist_ok=True)
         legacy = {
             "session_id": "a" * 32,
-            "task_id": first.stem,
             "start": tasklib.local_stamp(start_epoch),
             "start_epoch": start_epoch,
         }
-        state.write_text(json.dumps({first.stem: {key: value for key, value in legacy.items() if key != "task_id"}}) + "\n", encoding="utf-8")
+        state.write_text(json.dumps({first.stem: legacy}) + "\n", encoding="utf-8")
 
         status = self.run_mt("time", "status")
         self.assertEqual(status.returncode, 0, status.stderr)
@@ -574,9 +531,9 @@ class TimeTrackingTests(unittest.TestCase):
         started = self.run_mt("time", "start", "New timer", "--parallel")
 
         self.assertEqual(started.returncode, 0, started.stderr)
-        timers = json.loads(state.read_text(encoding="utf-8"))
-        self.assertEqual({key: value for key, value in timers[first.stem].items() if key != "by"},
-                         {key: value for key, value in legacy.items() if key != "task_id"})
+        self.assertFalse(state.exists())
+        timers = self.timers()
+        self.assertEqual({key: value for key, value in timers[first.stem].items() if key != "by"}, legacy)
         self.assertTrue(timers[first.stem]["by"])
         self.assertEqual(set(timers[second.stem]), {"session_id", "start", "start_epoch", "by"})
         self.assertEqual(self.run_mt("time", "stop", "Legacy timer").returncode, 0)
@@ -591,8 +548,7 @@ class TimeTrackingTests(unittest.TestCase):
         stopped = self.run_mt("time", "stop", "First task timer")
 
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
-        state = json.loads((self.root / ".mt" / "time-running").read_text(encoding="utf-8"))
-        self.assertEqual(set(state), {second.stem})
+        self.assertEqual(set(self.timers()), {second.stem})
         missing = self.run_mt("time", "stop", "First task timer")
         self.assertEqual(missing.returncode, 1)
         self.assertIn("no timer is running for", missing.stderr)
@@ -607,7 +563,7 @@ class TimeTrackingTests(unittest.TestCase):
 
         self.assertEqual(converted.returncode, 0, converted.stderr)
         self.assertIn("kind: note", untimed.read_text(encoding="utf-8"))
-        self.assertEqual(set(json.loads((self.root / ".mt" / "time-running").read_text(encoding="utf-8"))), {timed.stem})
+        self.assertEqual(set(self.timers()), {timed.stem})
         self.assertEqual(self.run_mt("time", "stop", "Task with timer").returncode, 0)
 
     def test_delete_is_blocked_while_task_timer_is_running(self) -> None:
@@ -619,7 +575,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(deleted.returncode, 1)
         self.assertIn("running timer cannot be deleted", deleted.stderr)
         self.assertTrue(task.is_file())
-        self.assertTrue((self.root / ".mt" / "time-running").is_file())
+        self.assertEqual(set(self.timers()), {task.stem})
         self.assertEqual(self.run_mt("time", "stop").returncode, 0)
 
     def test_move_and_time_stop_serialize_without_losing_the_session(self) -> None:
@@ -711,12 +667,11 @@ class TimeTrackingTests(unittest.TestCase):
             results = list(executor.map(start, titles))
 
         self.assertTrue(all(result.returncode == 0 for result in results), [r.stderr for r in results])
-        state = json.loads((self.root / ".mt" / "time-running").read_text(encoding="utf-8"))
-        self.assertEqual(set(state), {task.stem for task in tasks.values()})
+        self.assertEqual(set(self.timers()), {task.stem for task in tasks.values()})
         for title in titles:
             stopped = self.run_mt("time", "stop", title)
             self.assertEqual(stopped.returncode, 0, stopped.stderr)
-        self.assertFalse((self.root / ".mt" / "time-running").exists())
+        self.assertEqual(self.timers(), {})
 
     def test_concurrent_same_task_start_and_different_task_stops(self) -> None:
         first = self.add_task("Contended timer task")
@@ -751,7 +706,7 @@ class TimeTrackingTests(unittest.TestCase):
                 len(tasklib.time_log_entries(task.read_text())),
                 1,
             )
-        self.assertFalse((self.root / ".mt" / "time-running").exists())
+        self.assertEqual(self.timers(), {})
 
     def test_concurrent_stop_and_manual_add_preserve_both_sessions(self) -> None:
         task = self.add_task("Concurrent save sessions")
@@ -774,26 +729,14 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(len({entry["session_id"] for entry in entries}), 2)
         self.assertGreaterEqual(sum(entry["elapsed_seconds"] for entry in entries), 120)
 
-    def test_failed_save_restores_task_and_retains_running_state(self) -> None:
+    def test_failed_save_restores_task_and_retains_running_timer(self) -> None:
         task = self.add_task("Timer save failure")
         other = self.add_task("Existing session ID")
         added = self.run_mt("time", "add", "Existing session ID", "5m")
         self.assertEqual(added.returncode, 0, added.stderr)
         session_id = tasklib.time_log_entries(other.read_text())[0]["session_id"]
-        start_epoch = int(time.time())
-        state = self.root / ".mt" / "time-running"
-        state.parent.mkdir(parents=True, exist_ok=True)
-        state.write_text(
-            json.dumps(
-                {task.stem: {
-                    "session_id": session_id,
-                    "start": tasklib.local_stamp(start_epoch),
-                    "start_epoch": start_epoch,
-                }}
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        self.assertEqual(self.run_mt("time", "start", task.stem).returncode, 0)
+        self.set_timer(task, session_id=session_id)
         original = task.read_bytes()
 
         stopped = self.run_mt("time", "stop")
@@ -801,7 +744,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(stopped.returncode, 1)
         self.assertIn("running timer was retained", stopped.stderr)
         self.assertEqual(task.read_bytes(), original)
-        self.assertTrue(state.is_file())
+        self.assertEqual(set(self.timers()), {task.stem})
 
     def test_completion_stops_timer_and_preserves_saved_log(self) -> None:
         task = self.add_task("Finish timed task")
@@ -816,8 +759,7 @@ class TimeTrackingTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         done_task = task
         raw = done_task.read_text(encoding="utf-8")
-        timers = json.loads((self.root / ".mt" / "time-running").read_text(encoding="utf-8"))
-        self.assertEqual(set(timers), {other.stem})
+        self.assertEqual(set(self.timers()), {other.stem})
         self.assertEqual(self.log_content(raw)[:len(prior_log)], prior_log)
         entries = tasklib.time_log_entries(raw)
         self.assertEqual(len(entries), 2)

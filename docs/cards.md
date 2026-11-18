@@ -31,11 +31,51 @@ The experiments establish prediction performance.
 
 - **Frontmatter** (between the `---` lines) holds the title, kind, status,
   other properties, comments, and saved time entries.
+- **Time**: finished sessions are `time_entries`; a timer that is running is
+  the task's `timer` property (below).
 - **Body**: everything after the frontmatter is ordinary Markdown with no
   required sections. Headings have no special meaning, so you can use tables,
   equations, images, checklists, or code however you like.
 - `next_action` is task-only. `processing_instructions` is optional guidance
   for triage. microtask never reads instructions from the body.
+
+## Running timers
+
+`mt time start` writes the running timer onto the card, together with the
+status and claim change it makes. `mt time stop` removes it and appends the
+finished session to `time_entries` in the same write.
+
+```yaml
+status: doing
+claimed_by: alice
+claimed_at: "2026-11-10T09:00:00"
+timer:
+  session_id: 0123456789abcdef0123456789abcdef
+  start: "2026-11-10T09:00:00"
+  start_epoch: 1794301200
+  by: alice
+time_entries:
+  - session_id: fedcba9876543210fedcba9876543210
+    start: "2026-11-09T14:00:00"
+    end: "2026-11-09T14:30:00"
+    elapsed_seconds: 1800
+```
+
+`timer` is task-only and holds exactly these four fields: a 32-character
+lowercase hexadecimal `session_id`, the local `start` timestamp, `start_epoch`
+as whole seconds since 1970, and the single-line name `by` of the person who
+owns it. A task has at most one. A person may have several timers running on
+different tasks (`--parallel`, or a sync that brings one in); `mt time status`
+and the dashboard list every one, and `mt time stop REF` or `mt time cancel
+REF` settles a specific one. Starting a timer without `--parallel` starts the new
+one first and then stops each of your other timers at that moment, one card per
+write, so an interrupted switch leaves both running.
+
+Timers are part of the card and travel with it through Git. A timer file from
+an older version (`.mt/time-running`) is imported onto its cards the first
+time any command takes the workspace lock, then renamed
+`.mt/time-running.migrated`. An entry whose task no longer exists is reported
+and stays in that file.
 
 ## Editing from scripts and agents
 

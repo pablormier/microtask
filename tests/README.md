@@ -22,6 +22,10 @@ elsewhere. Prefer one canonical test per behavior and extend existing end-to-
 end scenarios when setup is shared. Avoid tests that only assert prose,
 terminology, or exact documentation wording.
 
+`test_timer_cards.py` covers running timers kept on their cards: switching between
+the CLI and the dashboard, an interrupted switch, a pulled second timer, the upgrade
+from `.mt/time-running`, simultaneous starts and the single-write stop.
+
 `tests/support.py` provides shared CLI execution (`run_cli`) and a deterministic
 `FakeClock` so time-tracking tests avoid wall-clock sleeps. `test_operations_api.py`
 tests core write operations and typed errors directly against a data-only

@@ -162,7 +162,7 @@ class ClaimTests(unittest.TestCase):
         self.assertTrue(all(field not in done.frontmatter for field in store.CLAIM_FIELDS))
         self.assertEqual(len(tasklib.time_log_entries(done.raw)), 1)
         self.assertIn("agent:one", "\n".join(comment["text"] for comment in done.frontmatter["comments"]))
-        self.assertFalse((self.root / ".mt/time-running").exists())
+        self.assertNotIn("timer", done.frontmatter)
 
     def test_two_concurrent_users_cannot_both_claim(self) -> None:
         path = self.ready()

@@ -350,11 +350,6 @@ def clear_focus_task_id(ws: Workspace | None = None) -> None:
 
 
 
-def time_timer_path(ws: Workspace | None = None) -> Path:
-    return _ws(ws).time_timer_path()
-
-
-
 def local_stamp(epoch_seconds: int) -> str:
     return datetime.fromtimestamp(epoch_seconds).replace(microsecond=0).isoformat()
 
@@ -394,26 +389,40 @@ def task_by_id(task_id: str, ws: Workspace | None = None) -> Card | None:
 
 
 
-def timer_session_saved(task_id: str, timer: dict[str, object], ws: Workspace | None = None) -> bool:
-    task = task_by_id(task_id, ws=ws)
+def card_task_id(card: Card) -> str:
+    return str(card.frontmatter.get("id") or card.path.stem)
+
+
+
+def running_timer_cards(ws: Workspace | None = None) -> list[tuple[Card, dict[str, object]]]:
+    """Every task card that holds a running timer, with that timer."""
+    return [
+        (card, timer)
+        for card in discover("task", ws=ws)
+        if (timer := card_format.timer_from(card.frontmatter)) is not None
+    ]
+
+
+
+def running_timers(ws: Workspace | None = None) -> dict[str, dict[str, object]]:
+    """Running timers by task id, read from the cards (several per person is normal)."""
+    return {card_task_id(card): timer for card, timer in running_timer_cards(ws)}
+
+
+
+def timer_session_saved(task: Card | None, timer: dict[str, object]) -> bool:
+    """Whether the card already holds this timer's session, e.g. after a manual merge."""
     if task is None:
         return False
-    return any(
-        entry["session_id"] == timer["session_id"]
-        for entry in time_log_entries(task.raw)
-    )
+    return any(entry["session_id"] == timer["session_id"] for entry in time_entries_from(task.frontmatter))
 
 
 
 def time_session_for(
-    task_id: str, timer: dict[str, object], end_epoch: int, ws: Workspace | None = None,
+    task: Card, timer: dict[str, object], end_epoch: int,
 ) -> tuple[dict[str, object], bool]:
     """Return one structured session and whether the task already has its ID."""
-    task = task_by_id(task_id, ws=ws)
-    if task is None:
-        raise ValueError(f"running timer task no longer exists: {task_id}")
-    session_id = str(timer["session_id"])
-    if any(entry["session_id"] == session_id for entry in time_log_entries(task.raw)):
+    if timer_session_saved(task, timer):
         return {}, True
     return time_entry_from_timer(timer, end_epoch), False
 

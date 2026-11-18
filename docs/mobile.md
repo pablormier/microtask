@@ -29,8 +29,8 @@ container, clones your repo, reads [AGENTS.md](../AGENTS.md), and runs `./mt`.
 * **Pull-request workflow:** Cloud sandboxes push to a branch rather than
   `main`, so you'll tap **Merge** in the app or GitHub Mobile before running
   `mt sync` on your computer.
-* **No local `.mt` state:** Machine-local state such as pinned `mt focus` or
-  `mt time` timers is not shared.
+* **No local `.mt` state:** Machine-local state such as the pinned `mt focus`
+  is not shared. Running `mt time` timers are part of their cards, so they sync.
 
 ---
 

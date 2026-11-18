@@ -18,7 +18,8 @@ import tempfile
 import threading
 import uuid
 
-from card_format import is_timestamp, parse_frontmatter, parse_yaml
+import card_format
+from card_format import parse_frontmatter, parse_yaml
 import drafts as draft_store
 import git_ops
 import store
@@ -28,7 +29,6 @@ from store import (
     cards_root,
     current_username,
     task_by_id,
-    time_timer_path,
 )
 import validation
 from workspace import Workspace
@@ -59,6 +59,8 @@ def time_mutation_lock(ws: Workspace | None = None):
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         _TIME_LOCK_STATE.held = True
         try:
+            # Every operation sees timers on cards, so import a pre-upgrade timer file first.
+            migrate_legacy_timers(ws)
             yield
         finally:
             _TIME_LOCK_STATE.held = False
@@ -108,88 +110,103 @@ def serialized_time_mutation(function):
 
 
 
-def read_time_timers(ws: Workspace | None = None) -> dict[str, dict[str, object]]:
+def migrate_legacy_timers_if_pending(ws: Workspace | None = None) -> None:
+    """Import a pending legacy timer file, taking the lock only when there is one."""
+    resolved = _ws(ws)
+    if not resolved.legacy_timer_path().exists():
+        return
+    if getattr(_TIME_LOCK_STATE, "held", False):
+        migrate_legacy_timers(resolved)
+        return
+    with time_mutation_lock(resolved):
+        pass  # Entering the lock imports the file.
+
+
+
+def read_time_timer_cards(ws: Workspace | None = None) -> list[tuple[store.Card, dict[str, object]]]:
+    """Every card with a running timer, read under the mutation lock."""
     resolved = _ws(ws)
     if not getattr(_TIME_LOCK_STATE, "held", False):
         with time_mutation_lock(resolved):
-            return read_time_timers(resolved)
-    path = time_timer_path(resolved)
+            return read_time_timer_cards(resolved)
+    return store.running_timer_cards(resolved)
+
+
+
+def read_time_timers(ws: Workspace | None = None) -> dict[str, dict[str, object]]:
+    """Running timers by task id, read from the cards under the mutation lock."""
+    return {store.card_task_id(card): timer for card, timer in read_time_timer_cards(ws)}
+
+
+
+def _legacy_timer_problem(task_id: object, timer: object) -> str | None:
+    """Why a legacy timer entry cannot be imported, or None."""
+    if not isinstance(task_id, str) or not task_id.strip() or not isinstance(timer, dict):
+        return "malformed entry"
+    # Older entries had no owner; the import fills it in.
+    candidate = {"timer": {"by": "unknown", **timer}}
+    errors = card_format.validate_timer(candidate)
+    return "; ".join(errors) if errors else None
+
+
+
+def migrate_legacy_timers(ws: Workspace | None = None) -> None:
+    """Import ``.mt/time-running`` onto its cards once, then rename it ``time-running.migrated``.
+
+    Entries whose card is gone (or that cannot be imported) are reported on
+    stderr and stay in the renamed file. Safe to repeat: a card that already
+    holds a timer is left alone.
+    """
+    _require_mutation_lock()
+    resolved = _ws(ws)
+    path = resolved.legacy_timer_path()
     try:
-        timers = _read_time_timers(resolved)
-    except (ValueError, UnicodeError):
-        recovery = resolved.root / ".mt" / "recovery" / f"time-running-{uuid.uuid4().hex}.json"
-        recovery.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(path, recovery)
-        print(f"warning: malformed running timer state moved to {recovery}; continuing without timers", file=sys.stderr)
-        return {}
-    migrated = False
-    for task_id, timer in timers.items():
-        if "by" not in timer:
-            task = task_by_id(task_id, ws=resolved)
-            timer["by"] = (task.frontmatter.get("claimed_by") if task else None) or current_username(ws=resolved)
-            migrated = True
-    if migrated:
-        write_time_timers(timers, ws=resolved)
-    return timers
-
-
-
-def _read_time_timers(ws: Workspace | None = None) -> dict[str, dict[str, object]]:
-    path = time_timer_path(ws)
-    try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except FileNotFoundError:
-        return {}
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise ValueError(f"running timer state is malformed: {path}") from error
-    if not isinstance(value, dict):
-        raise ValueError(f"running timer state is malformed: {path}")
-    timers: dict[str, dict[str, object]] = {}
-    for task_id, timer in value.items():
-        if not isinstance(timer, dict):
-            raise ValueError(f"running timer state is malformed: {path}")
-        session_id = timer.get("session_id")
-        start = timer.get("start")
-        start_epoch = timer.get("start_epoch")
-        if (
-            not isinstance(task_id, str)
-            or not task_id.strip()
-            or not isinstance(session_id, str)
-            or not re.fullmatch(r"[0-9a-f]{32}", session_id)
-            or not isinstance(start, str)
-            or not is_timestamp(start)
-            or not isinstance(start_epoch, int)
-            or isinstance(start_epoch, bool)
-        ):
-            raise ValueError(f"running timer state is malformed: {path}")
-        owner = timer.get("by")
-        if "by" in timer and (not isinstance(owner, str) or not owner.strip()
-                              or any(char in owner for char in "\r\n\x00")):
-            raise ValueError(f"running timer state is malformed: {path}")
-        timers[task_id] = timer
-    return timers
-
-
-
-def write_time_timers(timers: dict[str, dict[str, object]], ws: Workspace | None = None) -> None:
-    path = time_timer_path(ws)
-    if not timers:
-        path.unlink(missing_ok=True)
         return
-    atomic_write(path, (json.dumps(timers, indent=2) + "\n").encode("utf-8"))
-
-
-
-def clear_time_timer(task_id: str, session_id: str, ws: Workspace | None = None) -> bool:
-    timers = read_time_timers(ws)
-    timer = timers.get(task_id)
-    if timer is None or timer.get("session_id") != session_id:
-        return False
-    del timers[task_id]
-    write_time_timers(timers, ws=ws)
-    return True
+    except OSError as error:
+        print(f"warning: cannot read {path}: {error}; running timers were not imported", file=sys.stderr)
+        return
+    try:
+        legacy = json.loads(raw.decode("utf-8"))
+        if not isinstance(legacy, dict):
+            raise ValueError("not a mapping")
+    except ValueError as error:  # Includes bad UTF-8 and bad JSON.
+        print(f"warning: {path} is malformed ({error}); kept as {path.name}.migrated", file=sys.stderr)
+        legacy = {}
+    base = active_root(resolved)
+    for task_id, timer in legacy.items():
+        problem = _legacy_timer_problem(task_id, timer)
+        task = task_by_id(task_id, ws=resolved) if problem is None else None
+        if problem is None and task is None:
+            problem = "its task no longer exists"
+        if problem is None and task.frontmatter.get("timer") is not None:
+            if task.frontmatter["timer"].get("session_id") != timer.get("session_id"):
+                problem = "its task already has a different running timer"
+            else:
+                continue
+        if problem is None:
+            imported = {"session_id": timer["session_id"], "start": timer["start"],
+                        "start_epoch": timer["start_epoch"],
+                        "by": timer.get("by") or task.frontmatter.get("claimed_by") or current_username(ws=resolved)}
+            relative = str(task.path.relative_to(base))
+            try:
+                # Render from the snapshot and guard the write with the same bytes.
+                properties, body = card_format.parse_document(task.raw)
+                properties["timer"] = imported
+                updated = card_format.render_document(properties, body)
+                apply_item_transaction({relative: updated.encode("utf-8")},
+                                       expected={relative: task.raw.encode("utf-8")},
+                                       source_root=base, ws=resolved)
+            except (OSError, ValueError) as error:
+                problem = f"could not write the timer to its card: {error}"
+        if problem is not None:
+            print(f"warning: running timer for {task_id} was not imported ({problem}); "
+                  f"it is kept in {path.name}.migrated", file=sys.stderr)
+    target = path.with_name(path.name + ".migrated")
+    if target.exists():
+        target = path.with_name(f"{path.name}.migrated.{uuid.uuid4().hex[:8]}")
+    os.replace(path, target)
 
 
 

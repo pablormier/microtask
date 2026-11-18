@@ -109,6 +109,14 @@ class WebDashboardTests(unittest.TestCase):
     def detail_json(self) -> str:
         return self.output.with_suffix('.details.json').read_text()
 
+    def backdate_timer(self, task_id: str, seconds: int = 2) -> None:
+        """Move a running timer's start earlier by editing its card, as a pull could."""
+        import card_format
+        path = self.root / "cards" / f"{task_id}.md"
+        properties, body = card_format.parse_document(path.read_text(encoding="utf-8"))
+        properties["timer"]["start_epoch"] -= seconds
+        path.write_text(card_format.render_document(properties, body), encoding="utf-8")
+
     def get_card(self, url: str, summary: dict) -> dict:
         return self.get_json(url + "api/item?" + urlencode({"id": summary["id"]}))["item"]
 
@@ -1331,10 +1339,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             )
             self.assertEqual(status, 200, started_payload)
             self.assertIn(active["id"], started_payload["meta"]["time_running"])
-            timer_file = self.root / ".mt" / "time-running"
-            timers_data = json.loads(timer_file.read_text(encoding="utf-8"))
-            timers_data[active["id"]]["start_epoch"] -= 2
-            timer_file.write_text(json.dumps(timers_data), encoding="utf-8")
+            self.backdate_timer(active["id"])
             status, second_started = self.post_json(
                 url + "api/time-start", token, {"ref": inbox["ref"]}
             )
@@ -1362,10 +1367,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
 
             status, _ = self.post_json(url + "api/time-start", token, {"ref": doing["ref"]})
             self.assertEqual(status, 200)
-            timer_file = self.root / ".mt" / "time-running"
-            timers_data = json.loads(timer_file.read_text(encoding="utf-8"))
-            timers_data[doing["id"]]["start_epoch"] -= 2
-            timer_file.write_text(json.dumps(timers_data), encoding="utf-8")
+            self.backdate_timer(doing["id"])
             status, both_ends = self.post_json(
                 url + "api/time-stop", token, {"ref": doing["ref"], "at": "10:00", "duration": "1s"}
             )

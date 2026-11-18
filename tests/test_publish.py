@@ -198,8 +198,6 @@ class SyncTests(unittest.TestCase):
             ("focus", task.stem, "--by", "agent:test"), ("focus", "--clear"),
             ("edit", task.stem, "--set", f"priority={current_priority}", "--by", "agent:test"),
             ("move", task.stem, "doing", "--by", "agent:test"),
-            ("time", "start", task.stem, "--by", "agent:test"),
-            ("time", "cancel", task.stem, "--by", "agent:test"),
         ):
             result = self.run_mt(*args)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -211,8 +209,13 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(sessions.returncode, 0, sessions.stderr)
         session_id = sessions.stdout.split()[0]
         self.assert_published_mutation("time", "remove", session_id)
-        self.assertEqual(self.run_mt("time", "start", task.stem, "--by", "agent:test").returncode, 0)
+        # A running timer is part of the card, so starting, cancelling and stopping all publish.
+        self.assert_published_mutation("time", "start", task.stem, "--by", "agent:test")
+        self.assertIn("timer:", self.git(self.root, "show", f"origin/main:cards/{task.name}").stdout)
+        self.assert_published_mutation("time", "cancel", task.stem, "--by", "agent:test")
+        self.assert_published_mutation("time", "start", task.stem, "--by", "agent:test")
         self.assert_published_mutation("time", "stop", task.stem, "--by", "agent:test")
+        self.assertNotIn("timer:", self.git(self.root, "show", f"origin/main:cards/{task.name}").stdout)
         self.assertIn("time_entries:", self.git(self.root, "show", f"origin/main:cards/{task.name}").stdout)
         self.assert_published_mutation("move", task.stem, "waiting", "--by", "agent:test")
         self.assert_published_mutation("delete", task.stem)

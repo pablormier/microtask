@@ -62,7 +62,7 @@ def command_time_status(_args: argparse.Namespace, ws: Workspace | None = None) 
     for task_id, timer in sorted(timers.items()):
         task = task_by_id(task_id, ws=resolved)
         label = f"[@{task.short_ref}] {task.title}" if task else f"missing task {task_id}"
-        already_saved = timer_session_saved(task_id, timer, ws=resolved)
+        already_saved = timer_session_saved(task, timer)
         elapsed = 0 if already_saved else max(0, int(clock_time.time()) - int(timer["start_epoch"]))
         print(f"Timer: {label}")
         print(f"  owner:   {timer['by']}")

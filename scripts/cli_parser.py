@@ -283,10 +283,10 @@ def _register_time_parsers(sub: argparse._SubParsersAction) -> None:
         description="Timers belong to a username (--by, MT_USERNAME, default_username, or system username). "
         "Start claims the task in doing and saves/switches your other timers unless --parallel is given. "
         "Leaving doing, completing, hiding, archiving, or taking over saves the running session. "
-        "Stop/cancel without a task selects your only timer. Status lists all owners and missing tasks; "
-        "cancel TASK_ID clears an orphan. Malformed local state is moved to .mt/recovery/ with a warning. "
+        "Stop/cancel without a task selects your only timer; with several, name one. Status lists every "
+        "running timer. A running timer is the timer property of its card and syncs with it. "
         "rules.timer_warn_hours (default 8) warns without capping time. Timestamps are naive local time; "
-        "elapsed_seconds is authoritative and reports sum it. Running timers stay local to this checkout.",
+        "elapsed_seconds is authoritative and reports sum it.",
     )
     time_sub = time_command.add_subparsers(dest="time_command", required=True)
     time_start = time_sub.add_parser("start", help="claim an open task in doing; save and switch your current timer")
