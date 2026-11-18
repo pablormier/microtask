@@ -52,7 +52,9 @@ mt sync
 This commits changes to cards, drafts, and `mt-policy.yaml`, then fetches,
 merges, and pushes to `origin`. Set `rules.auto_sync: true` in `mt-policy.yaml`
 to sync after every card change. Everything works locally without Git; sync is
-optional. To connect a repository later:
+optional. If a sync fails, including one run in the background, `mt info`
+shows the time and the error under "LAST SYNC FAILED" until the next sync
+succeeds. To connect a repository later:
 
 ```sh
 mt run git remote add origin git@github.com:YOU/tasks.git
@@ -87,5 +89,8 @@ needs a clean working tree (draft changes are set aside and restored) and does
 not push. Run `mt sync` afterwards to share it with your other machines.
 
 Any tracked file outside those workspace paths belongs to the app and is
-replaced on update, so keep your own working files in `.mt/`.
+replaced on update, so keep your own working files in `.mt/`. The one
+exception is `deploy/`, the [hosting kit](hosting.md): `mt update` never adds,
+changes or removes it. A workspace created before the kit existed gets a copy
+with its first update to this version and keeps it as is. You can delete it.
 
