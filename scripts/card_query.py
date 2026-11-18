@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import os
 import re
 from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, time
@@ -288,14 +287,14 @@ def _env_scope(args: argparse.Namespace, env: Mapping[str, str]) -> dict[str, tu
     return applied
 
 
-def env_scope(args: argparse.Namespace, env: Mapping[str, str] = os.environ) -> list[str]:
+def env_scope(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
     """What MT_PROJECT / MT_TOPIC add to this command's query, for the caller's "Scope:" line."""
     if not getattr(args, "query_args", False):
         return []
     return [f"{field} {value} ({variable})" for field, (value, variable) in _env_scope(args, env).items()]
 
 
-def query_from_args(args: argparse.Namespace, *, env: Mapping[str, str] = os.environ,
+def query_from_args(args: argparse.Namespace, *, env: Mapping[str, str],
                     today: date | None = None) -> Query:
     """Build a query from parsed arguments; MT_PROJECT / MT_TOPIC fill in a missing project or topic."""
     raw: dict = dict(args.query_defaults)

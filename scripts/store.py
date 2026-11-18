@@ -785,7 +785,7 @@ def command_query(args: argparse.Namespace, ws: Workspace | None = None) -> card
     """The validated query a command's selection flags describe, or None after printing the error."""
     resolved = _ws(ws)
     try:
-        query = card_query.query_from_args(args)
+        query = card_query.query_from_args(args, env=resolved.environ)
         card_query.validate(
             query,
             statuses=statuses(resolved),

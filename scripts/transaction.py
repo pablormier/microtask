@@ -6,6 +6,7 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 import fcntl
 from functools import wraps
+import inspect
 import io
 import json
 import os
@@ -80,9 +81,12 @@ def sync_serialization_lock(ws: Workspace | None = None):
 
 
 def serialized_time_mutation(function):
+    signature = inspect.signature(function)
+
     @wraps(function)
     def locked(*args, **kwargs):
-        ws = _ws(kwargs.get("ws"))
+        # The workspace may be passed by position or by name.
+        ws = _ws(signature.bind_partial(*args, **kwargs).arguments.get("ws"))
         _TIME_LOCK_STATE.sync_requested = False
         with time_mutation_lock(ws):
             result = function(*args, **kwargs)

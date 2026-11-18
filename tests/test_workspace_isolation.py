@@ -21,7 +21,9 @@ sys.path.insert(0, str(SOURCE_ROOT / "tools"))
 sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 
 import card_format  # noqa: E402
+import card_query  # noqa: E402
 import cli_cards  # noqa: E402
+import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
 import support  # noqa: E402
@@ -93,13 +95,27 @@ class WorkspaceIsolationTests(unittest.TestCase):
         except urllib.error.HTTPError as error:
             return error.code, json.loads(error.read())
 
+    def test_query_scope_comes_from_the_workspace_environment(self) -> None:
+        # MT_PROJECT selects a subset of the cards; it must come from the selected workspace's
+        # environment, not the process's.
+        selected = Workspace.at(self.roots["a"], app_root=SOURCE_ROOT, environ={"MT_PROJECT": "alpha"})
+        parser = argparse.ArgumentParser()
+        card_query.add_query_arguments(parser)
+        args = parser.parse_args([])
+        with mock.patch.dict(os.environ, {"MT_PROJECT": "beta"}):
+            self.assertEqual(store.command_query(args, selected).project, ("alpha",))
+            self.assertEqual(taskweb.board_filters(selected, args).get("project"), ["alpha"])
+            self.assertEqual(card_query.env_scope(argparse.Namespace(query_args=True, project=None, topic=None),
+                                                  selected.environ), ["project alpha (MT_PROJECT)"])
+
     def test_operations_on_the_selected_workspace_ignore_the_environment(self) -> None:
-        # Converting a note uses A's default status, not B's.
+        # Converting a note uses A's default status, not B's. The workspace is passed by position,
+        # which the mutation decorator must honour as well as the keyword form.
         args = argparse.Namespace(
             query=["Alpha note"], destination="task", status=None, task_type=None, next_action=None,
             match_mode="exact", as_json=False)
         with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(cli_cards.command_convert(args, ws=self.a), 0)
+            self.assertEqual(cli_cards.command_convert(args, self.a), 0)
         self.assertEqual(card_format.parse_document(self.card_text("Alpha note"))[0]["status"], "inbox")
 
         base = self.start_server()
@@ -115,10 +131,12 @@ class WorkspaceIsolationTests(unittest.TestCase):
         status, moved = self.call(base, "/api/move", {"ref": ref, "status": "someday"})
         self.assertEqual(status, 200, moved)
         self.assertEqual(card_format.parse_document(self.card_text("Alpha task"))[0]["status"], "someday")
-        status, saved = self.call(base, "/api/draft-save", {"kind": "note", "title": "Alpha draft", "body": "text",
+        status, saved = self.call(base, "/api/draft-save", {"kind": "note", "title": "Alpha draft",
+                                                   "body": "Alpha draft body",
                                                    "capture_id": str(uuid.uuid4()), "created": "2026-06-15T09:00:00"})
         self.assertEqual(status, 200, saved)
-        self.assertTrue(any((self.roots["a"] / "drafts").glob("*")) or any(self.roots["a"].rglob("*draft*")))
+        draft = draft_store.read(self.roots["a"], saved["saved_draft"]["id"])
+        self.assertEqual((draft["title"], draft["body"].strip()), ("Alpha draft", "Alpha draft body"))
 
         # Stopping a timer validates the card against A (B has no `urgent` priority).
         clock = support.FakeClock()

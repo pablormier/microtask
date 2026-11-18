@@ -168,7 +168,7 @@ def main() -> int:
         return 2
     root_parser = parser()
     args = root_parser.parse_args(arguments)
-    scope = apply_capture_scope(args, ws=ws) if args.command in {"add", "note"} else card_query.env_scope(args)
+    scope = apply_capture_scope(args, ws=ws) if args.command in {"add", "note"} else card_query.env_scope(args, ws.environ)
     if args.command == "run":
         if args.argv and args.argv[0] == "--":
             args.argv = args.argv[1:]

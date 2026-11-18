@@ -298,7 +298,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
 
 def board_filters(ws: Workspace, args: argparse.Namespace) -> dict:
     """The board filters given on the command line (--project, --topic, ...), in canonical form."""
-    query = card_query.query_from_args(args)
+    query = card_query.query_from_args(args, env=ws.environ)
     card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
     return card_query.query_to_mapping(query)
 
