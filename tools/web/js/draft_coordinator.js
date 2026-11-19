@@ -159,7 +159,11 @@ function createDraftCoordinator() {
     draftDisplayTitle(draft) {
       if (!draft) return "Untitled draft";
       if (String(draft.title || "").trim()) return String(draft.title).trim();
-      const firstLine = String(draft.body || "").split(/\r?\n/).find(line => line.trim());
+      // Like the title a saved card gets: images read as their alt text and links as their label.
+      const firstLine = String(draft.body || "")
+        .replace(/!\[([^\]\r\n]*)\]\([^)\r\n]*\)/g, "$1")
+        .replace(/\[([^\]\r\n]+)\]\([^)\r\n]*\)/g, "$1")
+        .split(/\r?\n/).find(line => line.trim());
       return firstLine ? firstLine.trim() : "Untitled draft";
     },
 

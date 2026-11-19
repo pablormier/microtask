@@ -325,9 +325,19 @@ def card_capture_fields(card: Card) -> dict[str, object]:
     }
 
 
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]\r\n]*)\]\((?:<[^>\r\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]\r\n]+)\]\((?:<[^>\r\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+
+
+def plain_title_text(text: str) -> str:
+    """Body text as a title reads it: images become their alt text and links their label."""
+    text = _MARKDOWN_IMAGE_RE.sub(lambda match: match.group(1), text)
+    return _MARKDOWN_LINK_RE.sub(lambda match: match.group(1), text)
+
+
 def capture_title(text: str) -> str:
     """Keep generated titles short and mark omitted text without summarizing it."""
-    title = re.sub(r"\s+", " ", text).strip()
+    title = re.sub(r"\s+", " ", plain_title_text(text)).strip()
     if len(title) <= 80:
         return title
     prefix = title[:79]
@@ -343,9 +353,9 @@ def title_from_note_body(text: str) -> str:
         value = line.strip()
         if not value or (is_meeting and value in meeting_headings):
             continue
-        value = re.sub(r"^#{1,6}\s+", "", value)
+        value = capture_title(re.sub(r"^#{1,6}\s+", "", value))
         if value:
-            return capture_title(value)
+            return value
     return "Meeting notes" if is_meeting else "Untitled note"
 
 

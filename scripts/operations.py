@@ -317,7 +317,8 @@ def capture_card(
     """Save one quick capture with a retry-safe capture ID when one is supplied."""
     resolved_title = title.strip() if isinstance(title, str) else ""
     if not resolved_title and text.strip():
-        resolved_title = title_from_note_body(text) if kind == "note" else capture_title(text)
+        # A body with only an image or link has no words for a title.
+        resolved_title = title_from_note_body(text) if kind == "note" else (capture_title(text) or "Untitled task")
     if not resolved_title:
         raise CardInputError(f"{kind} requires non-empty text or a title")
     normalized_capture_id = None

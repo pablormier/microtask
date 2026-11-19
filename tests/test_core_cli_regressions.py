@@ -1002,6 +1002,30 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(tasklib.capture_title(text), title)
 
+    def test_generated_titles_read_images_and_links_as_their_text(self) -> None:
+        cases = (
+            ("Pasted image check ![](../attachments/05d17c5a5f8a.png)", "Pasted image check"),
+            ("See ![chart](../attachments/a.svg) and [the handout](../attachments/b.pdf)", "See chart and the handout"),
+            ("Read [docs](https://example.com/a_(b)) today", "Read docs today"),
+            ("![](../attachments/only.png)", ""),
+            ("Keep `[x](y)` and plain [brackets]", "Keep `x` and plain [brackets]"),
+        )
+        for text, title in cases:
+            with self.subTest(text=text):
+                self.assertEqual(tasklib.capture_title(text), title)
+        import card_render
+        self.assertEqual(
+            card_render.title_from_note_body("![](../attachments/only.png)\n\nSecond line"), "Second line"
+        )
+
+    def test_a_body_with_only_an_image_saves_with_a_fallback_title(self) -> None:
+        for command, title in (("add", "Untitled task"), ("note", "Untitled note")):
+            with self.subTest(command=command):
+                result = self.run_mt(command, "--file", "-", input_text="![](../attachments/only.png)\n")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                saved = Path(result.stdout.strip().splitlines()[-1]).read_text(encoding="utf-8")
+                self.assertEqual(tasklib.card_format.parse_document(saved)[0]["title"], title)
+
     def test_long_capture_titles_are_bounded_without_changing_body_or_explicit_title(self) -> None:
         source = "  Follow up with Christina about the metabolic analysis and discuss the next experimental steps.\nKeep this detail too.  \n"
         explicit_title = "A deliberately long explicit title " + "detail " * 15
