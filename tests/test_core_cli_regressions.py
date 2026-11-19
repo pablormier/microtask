@@ -25,6 +25,7 @@ import operations
 import store
 import support
 import transaction
+from workspace import Workspace
 
 
 class DeterministicCLIRegressionTests(unittest.TestCase):
@@ -458,20 +459,12 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                 self.assertEqual(json.loads(dates.stdout)[-1]["title"], "None")
 
     def test_list_has_no_implicit_caps_and_all_selects_complete_inventory(self) -> None:
+        ws = Workspace(self.root)
         for index in range(15):
-            title = f"Enumerate note {index:02d}"
-            created = self.run_mt("note", title, "--priority", "high")
-            self.assertEqual(created.returncode, 0, created.stderr)
-            self.assertEqual(self.run_mt("validate").returncode, 0)
-        hidden_edit = self.run_mt("edit", "Enumerate note 12", "--set", "hidden=true")
-        self.assertEqual(hidden_edit.returncode, 0, hidden_edit.stderr)
-        self.assertEqual(self.run_mt("validate").returncode, 0)
-        archived_edit = self.run_mt("edit", "Enumerate note 13", "--set", "archived=true")
-        self.assertEqual(archived_edit.returncode, 0, archived_edit.stderr)
-        self.assertEqual(self.run_mt("validate").returncode, 0)
-        both_edit = self.run_mt("edit", "Enumerate note 14", "--set", "archived=true")
-        self.assertEqual(both_edit.returncode, 0, both_edit.stderr)
-        self.assertEqual(self.run_mt("edit", "Enumerate note 14", "--set", "hidden=true").returncode, 0)
+            operations.op_create(
+                ws, "note", f"Enumerate note {index:02d}", priority="high",
+                hidden=index in (12, 14), archived=index in (13, 14), sync=False,
+            )
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
         default = self.run_mt("list", "--kind", "note", "--json")
@@ -1201,15 +1194,13 @@ class BulkEditTests(unittest.TestCase):
         self.assertEqual(task.read_bytes(), before)
 
     def test_bulk_edit_many_notes_including_hidden_and_archived_to_unassigned_then_reports_noop(self) -> None:
-        titles = [f"Bulk null note {index:02d}" for index in range(12)]
-        for title in titles:
-            created = self.run_mt("note", title, "--priority", "high")
-            self.assertEqual(created.returncode, 0, created.stderr)
-            self.assertEqual(self.run_mt("validate").returncode, 0)
-        for title, field in ((titles[10], "hidden"), (titles[11], "archived")):
-            edited = self.run_mt("edit", title, "--set", f"{field}=true")
-            self.assertEqual(edited.returncode, 0, edited.stderr)
-            self.assertEqual(self.run_mt("validate").returncode, 0)
+        ws = Workspace(self.root)
+        for index in range(12):
+            operations.op_create(
+                ws, "note", f"Bulk null note {index:02d}", priority="high",
+                hidden=index == 10, archived=index == 11, sync=False,
+            )
+        self.assertEqual(self.run_mt("validate").returncode, 0)
 
         plan = self.preview("--kind", "note", "--include-hidden", "--include-archived", "--set", "priority=none")
         self.assertEqual((plan["selected"], plan["changed"], plan["unchanged"]), (12, 12, 0))
