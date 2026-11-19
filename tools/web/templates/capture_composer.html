@@ -99,11 +99,9 @@
                 </div>
               </div>
               <div class="mt-zen-workspace" :class="{ 'is-zen': captureComposer.zen, 'is-split': captureComposer.zen && captureComposer.zenView === 'split', 'is-preview': captureComposer.zen && captureComposer.zenView === 'preview' }">
-                <div class="mt-zen-editor-pane mt-editor-surface-host" x-show="!captureComposer.zen || captureComposer.zenView !== 'preview'"
-                     x-effect="captureComposer.syncSurface(captureContext(), $el)">
+                <div class="mt-zen-editor-pane mt-editor-surface-host" x-show="!captureComposer.zen || captureComposer.zenView !== 'preview'">
                   <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.body"
                             :class="{ 'is-drag-over': attachmentDragTarget === 'composer' }"
-                            x-show="!captureComposer.isCustomMounted()"
                             @input="captureComposer.persist(captureContext()); captureComposer.schedulePreview(); captureComposer.updateMention(captureContext(), $el)"
                             @paste="handleAttachmentPaste('composer', $event, $el)"
                             @dragover="handleAttachmentDragOver('composer', $event)"

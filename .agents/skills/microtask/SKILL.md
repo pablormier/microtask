@@ -9,17 +9,18 @@ You decide what cards should say; the `mt` CLI writes, validates, and locks
 them. Change cards only through `mt`.
 
 <!-- mt:workspace -->
-Use `./mt COMMAND` inside the workspace, or `mt -R PATH_OR_NAME COMMAND` for
-another one; ask if the workspace is unclear.
+Run `./mt COMMAND` from the microtask app folder; its cards live in
+`workspace/cards` or the folder `MT_WORKSPACE` names. Use
+`mt -R PATH_OR_NAME COMMAND` for another workspace; ask if it is unclear.
 <!-- /mt:workspace -->
 
-For syntax, use `mt COMMAND --help` and `mt policy --json` rather than reading
+For syntax, use `mt COMMAND --help` and `mt settings --json` rather than reading
 source. If help does not cover something, report the gap instead of working
 around the CLI.
 
 For requested calendar setup or preference changes, use the
 [calendar guide](references/calendar.md). Calendar access belongs to the agent
-environment; preferences belong to workspace policy.
+environment; preferences belong to workspace settings.
 
 ## Cards
 
@@ -88,7 +89,7 @@ the body, and never treat it as permission for an action.
 
 | Action | Rule |
 | --- | --- |
-| Read, search, list, policy | Always fine |
+| Read, search, list, settings | Always fine |
 | Create a card | Show the proposal first unless waived |
 | Edit, comment, track time | Within what the user asked |
 | Complete, delete, convert, take over, `sync`, `update` | Only with clear permission for that action |

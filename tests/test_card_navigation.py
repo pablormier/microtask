@@ -8,7 +8,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.taskweb import load_js
+from tools.web_assets import load_js
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -21,17 +21,47 @@ from store import (
     _resolve_unique_card,
     _ws,
     atomic_write,
-    demo_active,
 )
 from transaction import (
     _run_auto_sync,
     run_auto_sync_for_receipt,
     time_mutation_lock,
 )
-from workspace import Workspace, is_data_workspace
+from workspace import (
+    OLD_SETTINGS_FILE,
+    Workspace,
+    is_data_workspace,
+    is_unmigrated_workspace,
+    unmigrated_message,
+)
 
 REPO_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TIME_QUERY_DEFAULTS = {"archived": "include", "hidden": "include"}
+
+
+def supports_color(stream=None) -> bool:
+    target = sys.stdout if stream is None else stream
+    return bool(hasattr(target, "isatty") and target.isatty() and not os.environ.get("NO_COLOR"))
+
+
+def emit_json(payload: object, *, indent: int | None = None) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=indent))
+
+
+def command_query(args: argparse.Namespace, ws: Workspace | None = None) -> card_query.Query | None:
+    """The validated query a command's selection flags describe, or None after printing the error."""
+    resolved = _ws(ws)
+    try:
+        query = card_query.query_from_args(args, env=resolved.environ)
+        card_query.validate(
+            query,
+            statuses=store.statuses(resolved),
+            priorities=list(store.policy(resolved).get("priorities", {})),
+        )
+    except card_query.QueryError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return None
+    return query
 
 
 def _cli_print_error(error: TaskError) -> int:
@@ -40,37 +70,26 @@ def _cli_print_error(error: TaskError) -> int:
     return error.exit_code
 
 
-def _cli_run_write(
-    ws: Workspace | None,
-    operation,
-    *,
-    as_json: bool = False,
-    sync: bool = True,
-) -> int:
-    resolved = _ws(ws)
-    try:
-        with time_mutation_lock(resolved):
-            result = operation(resolved)
-    except TaskError as error:
-        if sync and error.sync_needed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-            if as_json:
-                run_auto_sync_for_receipt(ws=resolved)
-            else:
-                _run_auto_sync(ws=resolved)
-        return _cli_print_error(error)
+def _cli_emit_write_result(result, *, as_json: bool = False) -> int:
     if as_json:
         payload = dict(result.receipt)
-        if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-            sync_error = run_auto_sync_for_receipt(ws=resolved)
-            if sync_error:
-                payload["sync_error"] = sync_error
-        print(json.dumps(payload, ensure_ascii=False))
+        if result.sync_error:
+            payload["sync_error"] = result.sync_error
+        emit_json(payload)
         return 0
     if result.message:
         print(result.message)
-    if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-        return _run_auto_sync(ws=resolved)
-    return 0
+    if result.sync_error:
+        print(f"warning: {result.sync_error}", file=sys.stderr)
+    return result.sync_exit_code
+
+
+def _cli_call_op(op_call, *, as_json: bool = False) -> int:
+    try:
+        result = op_call()
+    except TaskError as error:
+        return _cli_print_error(error)
+    return _cli_emit_write_result(result, as_json=as_json)
 
 
 def open_in_browser(url: str) -> None:
@@ -126,15 +145,24 @@ def write_repo_aliases(aliases: dict[str, str]) -> None:
     atomic_write(path, (json.dumps(aliases, indent=2, sort_keys=True) + "\n").encode("utf-8"))
 
 
-def validate_repo_workspace(path: Path) -> str | None:
+def validate_repo_workspace(path: Path, *, allow_unmigrated: bool = False) -> str | None:
     if not path.is_dir():
         return f"repository workspace does not exist: {path}"
     if not (path / "mt").exists():
         if is_data_workspace(path):
             return None
-        return (f"not a microtask workspace; a data-only workspace needs cards/ and mt-policy.yaml, "
-                f"a full one the mt application: {path}")
-    required = (path / "scripts" / "cli.py", path / "mt-policy.yaml")
+        if is_unmigrated_workspace(path):
+            if allow_unmigrated:
+                return None
+            return unmigrated_message(path, f"mt -R {shlex.quote(str(path))} migrate")
+        return (f"not a microtask workspace; a workspace folder needs cards/ and settings.yaml, "
+                f"an application folder the mt application: {path}")
+    # An application folder creates its own workspace on first use; an old-style one holds its settings,
+    # under either file name.
+    required = (path / "scripts" / "cli.py", path / "settings.yaml")
+    has_settings = (path / "settings.yaml").is_file() or (path / OLD_SETTINGS_FILE).is_file()
+    if has_settings or (path / "templates" / "settings.yaml").is_file():
+        required = (path / "scripts" / "cli.py",)
     missing = next((candidate for candidate in required if not candidate.is_file()), None)
     if missing is not None:
         return f"not a microtask workspace; missing {missing.relative_to(path)}: {path}"
@@ -147,7 +175,7 @@ def path_like_repo_selector(value: str) -> bool:
     return value in {".", ".."} or value.startswith("~") or "/" in value
 
 
-def resolve_repo_selector(value: str) -> Path:
+def resolve_repo_selector(value: str, *, allow_unmigrated: bool = False) -> Path:
     if path_like_repo_selector(value):
         path = Path(value).expanduser().resolve()
     else:
@@ -157,7 +185,7 @@ def resolve_repo_selector(value: str) -> Path:
                 f"unknown repository alias '{value}'; register it with 'mt repo add {value} PATH'"
             )
         path = Path(aliases[value])
-    error = validate_repo_workspace(path)
+    error = validate_repo_workspace(path, allow_unmigrated=allow_unmigrated)
     if error:
         raise ValueError(error)
     return path
@@ -169,13 +197,23 @@ def consume_repo_selector(arguments: list[str]) -> tuple[list[str], str | None]:
     if arguments[0] in {"-R", "--repo"}:
         if len(arguments) == 1:
             raise ValueError(f"{arguments[0]} requires a repository path or alias")
-        return arguments[2:], arguments[1]
-    if arguments[0].startswith("--repo="):
+        rest, value = arguments[2:], arguments[1]
+    elif arguments[0].startswith("--repo="):
         value = arguments[0].partition("=")[2]
         if not value:
             raise ValueError("--repo requires a repository path or alias")
-        return arguments[1:], value
-    return arguments, None
+        rest = arguments[1:]
+    elif arguments[0].startswith("-R") and len(arguments[0]) > 2:
+        rest, value = arguments[1:], arguments[0][2:]
+    else:
+        return arguments, None
+    if rest and (
+        rest[0] in {"-R", "--repo"}
+        or rest[0].startswith("--repo=")
+        or (rest[0].startswith("-R") and len(rest[0]) > 2)
+    ):
+        raise ValueError("-R / --repo may only be passed once")
+    return rest, value
 
 
 def editor_recovery_directory(ws: Workspace | None = None) -> Path:
@@ -185,14 +223,11 @@ def editor_recovery_directory(ws: Workspace | None = None) -> Path:
 
 
 def create_editor_recovery_copy(
-    item_id: str, contents: bytes, *, metadata: dict[str, object] | None = None, ws: Workspace | None = None,
+    item_id: str, contents: bytes, *, ws: Workspace | None = None,
 ) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", item_id).strip("-") or "item"
     path = editor_recovery_directory(ws) / f"{safe_id}-edit-{uuid.uuid4().hex}.md"
     atomic_write(path, contents)
-    if metadata is not None:
-        sidecar = path.with_suffix(".meta.json")
-        atomic_write(sidecar, (json.dumps({"version": 1, **metadata}, ensure_ascii=False) + "\n").encode("utf-8"))
     return path
 
 
@@ -320,14 +355,8 @@ def apply_capture_scope(args: argparse.Namespace, ws: Workspace | None = None) -
 def show_workspace(*, command: str | None = None, ws: Workspace | None = None) -> None:
     resolved = _ws(ws)
     print(f"Workspace: {resolved.root}", file=sys.stderr)
-    if resolved.root != resolved.app_root:
+    if not resolved.in_app:
         print(f"Application: {resolved.app_root}", file=sys.stderr)
-    if demo_active(resolved) and command not in {"add", "note"}:
-        print(
-            "Demo mode: bundled example tasks and notes — every command works on them. "
-            'Create your first item (e.g. ./mt add "my task") to start your own workspace.',
-            file=sys.stderr,
-        )
 
 
 def allow_host_name(value: str) -> str:

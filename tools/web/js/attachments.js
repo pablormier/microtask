@@ -45,18 +45,19 @@ async function uploadAttachmentFile(apiToken, file, options = {}) {
   if (file && file.name) {
     headers["X-Filename"] = encodeURIComponent(file.name);
   }
-  if (options && options.scope) {
-    headers["X-Attachment-Scope"] = String(options.scope);
-  }
   const response = await fetch("/api/attachments", {
     method: "POST",
     headers,
     body: file,
   });
   let payload = {};
-  try {
-    payload = await response.json();
-  } catch (_) {}
+  if (typeof readJsonResponse === "function") {
+    payload = await readJsonResponse(response);
+  } else {
+    try {
+      payload = await response.json();
+    } catch (_) {}
+  }
   if (!response.ok || !payload.attachment) {
     throw new Error(payload.error || ("Attachment upload failed (" + response.status + ")"));
   }
@@ -65,7 +66,7 @@ async function uploadAttachmentFile(apiToken, file, options = {}) {
 
 let _mtAttachmentUploadSeq = 0;
 
-async function uploadAndInsertAttachments({ files, textarea, getText, setText, apiToken, scope, notify, nextTick }) {
+async function uploadAndInsertAttachments({ files, textarea, getText, setText, apiToken, notify, nextTick }) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return [];
   const entries = list.map(file => {
@@ -89,7 +90,7 @@ async function uploadAndInsertAttachments({ files, textarea, getText, setText, a
   const uploaded = [];
   for (const { file, placeholder } of entries) {
     try {
-      const attachment = await uploadAttachmentFile(apiToken, file, { scope });
+      const attachment = await uploadAttachmentFile(apiToken, file);
       const current = String(getText() || "");
       if (current.includes(placeholder)) {
         setText(current.replace(placeholder, () => attachment.markdown));

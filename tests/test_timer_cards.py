@@ -31,6 +31,7 @@ import store  # noqa: E402
 import support  # noqa: E402
 import taskweb  # noqa: E402
 import transaction  # noqa: E402
+import workspace as workspace_module  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 SESSION = "0123456789abcdef0123456789abcdef"
@@ -44,8 +45,8 @@ class TimerCardTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "data"
         (self.root / "cards").mkdir(parents=True)
-        policy = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy.replace("demo_workspace: true", "demo_workspace: false"), encoding="utf-8")
         self.ws = Workspace.at(self.root, app_root=SOURCE_ROOT,
                                environ={**os.environ, "MT_USERNAME": "tester"})
@@ -64,7 +65,7 @@ class TimerCardTests(unittest.TestCase):
         return f"@{store.Card.read(path).short_ref}"
 
     def timers(self) -> dict[str, dict]:
-        return store.running_timers(self.ws)
+        return transaction.read_time_timers(self.ws)
 
     def put_timer(self, path: Path, by: str = "tester", session_id: str = SESSION,
                   start_epoch: int | None = None) -> dict:
@@ -298,17 +299,6 @@ class TimerCardTests(unittest.TestCase):
         self.assertEqual([entry["session_id"] for entry in self.entries(task)], [SESSION])
         self.assertNotIn("timer", store.Card.read(task).frontmatter)
 
-    def test_a_workspace_with_a_pending_timer_file_stays_out_of_demo_mode(self) -> None:
-        app = self.root.parent / "app"
-        (app / "examples").mkdir(parents=True)
-        (app / "mt-policy.yaml").write_text((SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8"),
-                                            encoding="utf-8")
-        ws = Workspace.at(app, app_root=app)
-        self.assertTrue(ws.pin_demo())
-        (app / ".mt").mkdir()
-        (app / ".mt" / "time-running").write_text("{}", encoding="utf-8")
-        self.assertFalse(Workspace.at(app, app_root=app).pin_demo())
-
     # Concurrency and atomicity
 
     def test_simultaneous_starts_by_one_person_leave_one_running_timer(self) -> None:
@@ -412,17 +402,14 @@ class TimerCardTests(unittest.TestCase):
         self.assertIn("was not imported", err.getvalue())
         self.assertEqual(json.loads((self.root / ".mt" / "time-running.migrated").read_text(encoding="utf-8")), legacy)
 
-    def test_a_demo_workspaces_old_timer_file_is_imported_onto_the_demo_card(self) -> None:
+    def test_a_seeded_demo_workspaces_old_timer_file_is_imported_onto_the_demo_card(self) -> None:
         app = self.root.parent / "app"
-        shutil.copytree(SOURCE_ROOT / "examples", app / "examples")
-        (app / "mt-policy.yaml").write_text((SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8"),
-                                            encoding="utf-8")
-        ws = Workspace.at(app, app_root=app, environ={**os.environ, "MT_USERNAME": "tester"})
-        self.assertTrue(ws.pin_demo())
-        ws.maybe_seed_demo()
+        ws = workspace_module.seed_demo_workspace(app, app_root=SOURCE_ROOT)
+        ws = Workspace.at(app, app_root=SOURCE_ROOT, environ={**os.environ, "MT_USERNAME": "tester"})
         card = next(card for card in store.discover("task", ws=ws) if card.frontmatter.get("status") != "done")
         epoch = int(datetime(2026, 6, 15, 9, 0, 0).timestamp())
-        state = app / ".mt" / "demo" / "time-running"
+        state = app / ".mt" / "time-running"
+        state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(json.dumps({store.card_task_id(card): {
             "session_id": SESSION, "start": store.local_stamp(epoch), "start_epoch": epoch, "by": "tester"}}),
             encoding="utf-8")
@@ -434,7 +421,7 @@ class TimerCardTests(unittest.TestCase):
     # The dashboard and timers
 
     def test_a_partly_applied_switch_from_the_dashboard_still_requests_a_sync(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         old, new = self.add_task("Old synced timer"), self.add_task("New synced timer")
         operations.op_time_start(self.ws, self.ref(old), sync=False)
         base = self.start_server()

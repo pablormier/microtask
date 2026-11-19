@@ -1,47 +1,60 @@
 # Install, sync, and updates
 
-A microtask workspace is a Git repository with two remotes:
+The app and your data are separate folders:
 
 ```
-  your private repo (origin)  <── mt sync ──>  your workspace  <── mt update ──  microtask (upstream)
-  cards, drafts, settings                      app + your data                    app files only
+  your private repo (origin)  <── mt sync ──>  workspace/  (cards, drafts, attachments, settings)
+  microtask releases          ── mt update ──>  the app folder (code only)
 ```
 
-`mt sync` moves your data to and from **origin**. `mt update` pulls new
-versions of the app from **upstream** without touching your data.
+`mt sync` moves your data to and from your private repository. `mt update`
+replaces the app files with a newer release and leaves your data alone.
 
-## First install
+## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash -s -- ~/todo git@github.com:YOU/tasks.git
+curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash
 ```
 
-- Both arguments are optional. The folder defaults to `~/todo`; without a
-  repository URL, the installer asks for one when run in a terminal, and you
-  can skip it.
-- If the repository is **empty**, a new workspace is pushed to it. If it
-  **already holds your workspace**, it is cloned instead.
-- The installer puts `mt` on your PATH (`~/.zshrc`, `~/.bash_profile` on macOS
-  bash, or `~/.bashrc` on Linux) and says if Git still needs your name and
-  email.
-- Without Git, it downloads a source archive and prints the steps to add Git
-  later.
+The installer asks four questions. Enter accepts the default shown:
 
-## Another machine
+```
+Install microtask in [~/microtask]:
+Workspace folder [~/microtask/workspace]:
+Private git repo to sync cards (optional, Enter to skip):
+Add mt to ~/.zshrc? [Y/n]:
+```
+
+- It needs Python 3, and Git only if you give a repository. Without a
+  terminal it uses the defaults.
+- If the repository is empty, your new workspace is pushed to it. If it
+  already holds your workspace, it is cloned into the workspace folder.
+- A workspace folder outside the app folder is recorded as `MT_WORKSPACE` in
+  your shell config.
+- The shell config is `~/.zshrc` for zsh, `~/.bash_profile` for bash on macOS,
+  and `~/.bashrc` for bash on Linux. For other shells the installer prints the
+  lines to add. Running the installer again adds nothing twice.
+- If another `mt` is already on your PATH, the installer says which one new
+  terminals will run. Check with `command -v mt` or `mt info`.
+
+`install.sh --help` lists the options for scripts.
+
+### From a clone
 
 ```sh
-gh repo clone YOU/tasks ~/todo      # or: git clone URL ~/todo
-~/todo/install.sh
+git clone https://github.com/pablormier/microtask.git && cd microtask && ./mt init
 ```
 
-Inside an existing workspace, `install.sh` only sets up the machine: it adds
-the `upstream` remote, puts `mt` on PATH, and checks your Git identity. Running
-it again changes nothing that is already set up. If your shell config already puts
-another workspace's `mt` on PATH, the installer lists it and says which one new
-terminals will run: the last PATH line wins. `mt` always works on the folder it
-lives in, so check with `command -v mt` or `mt info`. Repository aliases
-(`mt repo add`) and `mt-policy.local.yaml` are per machine, so recreate them if
-you use them.
+`./mt init` creates `workspace/` next to the app with `cards/`, `drafts/`,
+`settings.yaml` and a `.gitignore`. The clone ignores `workspace/`, so your
+cards stay out of the app's history. Run `./install.sh --here` to put this
+`mt` on your PATH.
+
+### Another machine
+
+Run the installer and give it the same private repository. `settings.local.yaml`,
+`.mt/` and repository aliases (`mt repo add`) belong to one machine, so set
+them up again if you use them.
 
 ## Sync
 
@@ -49,48 +62,104 @@ you use them.
 mt sync
 ```
 
-This commits changes to cards, drafts, and `mt-policy.yaml`, then fetches,
-merges, and pushes to `origin`. Set `rules.auto_sync: true` in `mt-policy.yaml`
-to sync after every card change. Everything works locally without Git; sync is
-optional. If a sync fails, including one run in the background, `mt info`
-shows the time and the error under "LAST SYNC FAILED" until the next sync
-succeeds. To connect a repository later:
+This commits changes to cards, drafts, attachments and `settings.yaml`, then
+fetches, merges and pushes to `origin`. With `rules.auto_sync: true` in
+`settings.yaml`, every change syncs on its own, including changes made in the
+dashboard. Sync is optional: everything works without Git.
+
+If a sync fails, `mt info` shows the time and the error under "LAST SYNC
+FAILED" until the next sync succeeds.
+
+To connect a repository later:
 
 ```sh
+mt run git init                                    # only if the workspace is not a Git repository yet
 mt run git remote add origin git@github.com:YOU/tasks.git
 ```
 
-Your cards are personal, so origin must be a private repository. Do not fork
-microtask for this: GitHub keeps forks of public repositories public. Create a
-new empty private repository instead.
-
-`mt sync` and the installer check origin before pushing:
-
-- If origin is the microtask app repository (the `upstream` remote or
-  `github.com/pablormier/microtask`), they always refuse.
-- If origin is on GitHub and the [GitHub CLI](https://cli.github.com) (`gh`) is
-  installed and signed in, they ask GitHub for its visibility and refuse a
-  public repository. Without `gh` this check is skipped, so confirm the
-  visibility yourself. To publish cards on purpose, set
-  `rules.allow_public_origin: true` in `mt-policy.yaml`.
+Use a new, empty private repository. Do not fork microtask for this, because
+GitHub keeps forks of public repositories public. `mt sync` and the installer
+refuse to push to the microtask app repository. If the [GitHub
+CLI](https://cli.github.com) (`gh`) is installed and signed in, they also
+refuse a public repository; without `gh`, check the visibility yourself. To
+publish cards on purpose, set `rules.allow_public_origin: true`.
 
 ## Update
 
 ```sh
-mt update --check     # preview changed app files
-mt update             # install them
+mt update --check     # current, next and latest version, and what would change
+mt update             # install the next release
 ```
 
-The update replaces app files with those from `upstream/main` (including
-deletions) and keeps `cards/`, `drafts/`, `.mt/`, and both policy files. It
-checks that the new version starts and the workspace validates before
-committing locally; if a check fails, it restores the previous version. It
-needs a clean working tree (draft changes are set aside and restored) and does
-not push. Run `mt sync` afterwards to share it with your other machines.
+`mt update` downloads a release from GitHub, replaces the app files, and runs
+`mt validate` with the new version. Your workspace is untouched, wherever it
+is. A file or folder you added at the top of the app folder yourself, such as
+`.env`, stays. Files you add inside a folder that comes with the release, such
+as `docs/`, are replaced with it. `deploy/` is never changed.
 
-Any tracked file outside those workspace paths belongs to the app and is
-replaced on update, so keep your own working files in `.mt/`. The one
-exception is `deploy/`, the [hosting kit](hosting.md): `mt update` never adds,
-changes or removes it. A workspace created before the kit existed gets a copy
-with its first update to this version and keeps it as is. You can delete it.
+Before 1.0, a minor version (0.1 to 0.2) can change how data is stored, and the
+code that converts old data is removed again in the following minor version.
+So `mt update` goes one minor version at a time:
 
+- If your minor version has a newer patch, it installs that.
+- Otherwise it installs the newest patch of the next minor version and tells
+  you to run `mt update` again.
+- If the new version asks you to run `mt migrate`, do that before updating
+  again.
+
+The installer always installs the latest release, because a new workspace has
+nothing to convert. To install a specific release, set
+`MT_RELEASE_TAG=vX.Y.Z`. If GitHub refuses because of too many requests, wait
+a while and try again.
+
+In a Git clone of the app, use `git pull`; `mt update` refuses to run there.
+
+## Moving an old install
+
+Before 0.2.0, the app and your cards shared one folder, usually a Git clone
+whose `origin` was your private repository. On such an install, `mt update`
+still brings in 0.2.0 the old way. Then move your data out of the app:
+
+```sh
+mt migrate --check     # show what would move and what the commit contains
+mt migrate
+```
+
+`mt migrate`:
+
+- moves `.git`, `cards/`, `drafts/`, `attachments/`, `.mt/` and the settings
+  files into `workspace/`,
+- renames `mt-policy.yaml` to `settings.yaml` (and `mt-policy.local.yaml` to
+  `settings.local.yaml`),
+- removes a remote named `upstream` that points at the microtask app
+  repository,
+- makes one commit in `workspace/` that removes the app files from your
+  repository. Nothing is pushed.
+
+Stop `mt web` before migrating, because a running dashboard keeps the old
+paths. `mt migrate` refuses when `workspace/` already exists or the Git tree
+has uncommitted changes outside `drafts/`.
+
+### Your other machines
+
+Once the migration commit is pushed, an old install that pulls it loses its
+app files, and 0.1 versions cannot read `settings.yaml`. So before any other
+machine syncs, update it to 0.2.0 and run `mt migrate` there, or reinstall it
+with the installer and the same repository.
+
+If a machine already pulled the commit, its old folder now holds only your
+cards and settings. Run the installer and enter that folder at the "Workspace
+folder" prompt (or pass `--workspace FOLDER`).
+
+### Workspace folders without the app
+
+A workspace folder made by `mt init DIRECTORY --data`, or a server workspace in
+`/srv/mt/NAME`, only needs the settings file renamed. Select it with `-R`:
+
+```sh
+mt -R ~/work/pkg-tasks migrate --check
+mt -R ~/work/pkg-tasks migrate
+```
+
+This renames the settings files and, in a Git repository, commits only the
+rename. Nothing is pushed.

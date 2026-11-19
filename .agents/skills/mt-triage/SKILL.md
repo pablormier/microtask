@@ -36,7 +36,7 @@ written from the full capture.
 - Clear work: `active`. If something essential is missing, keep it in `inbox`
   and name the question.
 - Blocked on someone else: `waiting`, naming who or what.
-- A maybe-later idea: `someday` if the policy has it; otherwise leave it in
+- A maybe-later idea: `someday` if the settings have it; otherwise leave it in
   `inbox` and mention that the status can be added.
 - Reference material: a note.
 - A note that is really one action: convert it to a task. For imported issues

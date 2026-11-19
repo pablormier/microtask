@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ class EditTests(unittest.TestCase):
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(
             ".git", ".mt", ".DS_Store"
         ))
+        legacy_workspace(self.root)
         self.env = {**os.environ, "MT_USERNAME": "edit-test", "MT_AUTO_SYNC": "false"}
 
     def tearDown(self) -> None:

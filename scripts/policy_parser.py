@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Parse the small YAML subset used by mt-policy.yaml."""
+"""Parse the small YAML subset used by settings.yaml."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -18,7 +18,7 @@ _STATUS_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
 def validate_status_policy(cfg: dict) -> None:
-    """Validate the status portion of a parsed microtask policy.
+    """Validate the status portion of a parsed microtask settings.
 
     Status IDs are stable lowercase slugs used in task metadata and CLI
     commands. Display labels are presentation text and may be changed freely.
@@ -26,26 +26,26 @@ def validate_status_policy(cfg: dict) -> None:
     errors: list[str] = []
     statuses = cfg.get("statuses") if isinstance(cfg, dict) else None
     if not isinstance(statuses, dict):
-        errors.append("policy statuses must be a mapping of status IDs to display labels")
+        errors.append("settings statuses must be a mapping of status IDs to display labels")
         statuses = {}
 
     for required in CORE_STATUSES:
         if required not in statuses:
-            errors.append(f"policy statuses must include required status '{required}'")
+            errors.append(f"settings statuses must include required status '{required}'")
 
     for status_id, label in statuses.items():
         if not isinstance(status_id, str) or not _STATUS_ID.fullmatch(status_id):
-            errors.append(f"policy status ID must be a lowercase slug: {status_id!r}")
+            errors.append(f"settings status ID must be a lowercase slug: {status_id!r}")
         elif status_id == "notes":
-            errors.append("policy status ID 'notes' is reserved")
+            errors.append("settings status ID 'notes' is reserved")
         if not isinstance(label, str) or not label.strip():
-            errors.append(f"policy status '{status_id}' must have a non-empty display label")
+            errors.append(f"settings status '{status_id}' must have a non-empty display label")
 
     default_status = cfg.get("default_status") if isinstance(cfg, dict) else None
     if not isinstance(default_status, str) or default_status not in statuses:
-        errors.append("policy default_status must name a configured status ID")
+        errors.append("settings default_status must name a configured status ID")
     elif default_status == "done":
-        errors.append("policy default_status must not be 'done'")
+        errors.append("settings default_status must not be 'done'")
 
     if errors:
         raise ValueError("\n".join(errors))
@@ -55,7 +55,7 @@ class _PolicyLoader(yaml.SafeLoader):
     pass
 
 
-# Keep numbers and dates as strings (matching mt-policy.yaml's string rule values).
+# Keep numbers and dates as strings (matching settings.yaml's string rule values).
 _PolicyLoader.yaml_implicit_resolvers = {
     initial: [
         (tag, regexp)
@@ -72,7 +72,7 @@ def _construct_policy_mapping(loader: _PolicyLoader, node: yaml.MappingNode, dee
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
         if key in mapping:
-            raise ValueError(f"duplicate policy status ID '{key}'" if isinstance(key, str) else f"duplicate policy key {key!r}")
+            raise ValueError(f"duplicate settings key '{key}'" if isinstance(key, str) else f"duplicate settings key {key!r}")
         mapping[key] = loader.construct_object(value_node, deep=deep)
     return mapping
 
@@ -88,20 +88,33 @@ _PolicyLoader.add_constructor("tag:yaml.org,2002:null", _construct_policy_null)
 
 
 def parse_policy_yaml(content: str) -> dict:
-    """Parse mt-policy.yaml using vendored PyYAML with string-preserved numbers/dates."""
+    """Parse settings.yaml using vendored PyYAML with string-preserved numbers/dates."""
     try:
         parsed = yaml.load(content, Loader=_PolicyLoader)
     except yaml.YAMLError as error:
-        raise ValueError(f"invalid policy YAML: {error}") from error
+        raise ValueError(f"invalid settings YAML: {error}") from error
     if parsed is None:
         return {}
     if not isinstance(parsed, dict):
-        raise ValueError("policy YAML must be a mapping")
+        raise ValueError("settings YAML must be a mapping")
     return parsed
 
+def settings_paths(root: Path) -> tuple[Path, Path]:
+    """The shared and local settings files of the workspace at root.
+
+    An old-style install (cards next to the application code) keeps its pre-0.2.0 names,
+    mt-policy.yaml and mt-policy.local.yaml, until 'mt migrate' renames them. It must keep
+    working until then: the old Git-based 'mt update' validates the new code in place.
+    """
+    root = Path(root)
+    if (not (root / "settings.yaml").is_file() and (root / "mt-policy.yaml").is_file()
+            and (root / "mt").is_file() and (root / "scripts" / "cli.py").is_file()):
+        return root / "mt-policy.yaml", root / "mt-policy.local.yaml"
+    return root / "settings.yaml", root / "settings.local.yaml"
+
+
 def load_policy(root: Path) -> dict:
-    policy_path = root / "mt-policy.yaml"
-    local_policy_path = root / "mt-policy.local.yaml"
+    policy_path, local_policy_path = settings_paths(root)
     policy = parse_policy_yaml(policy_path.read_text(encoding="utf-8"))
     validate_status_policy(policy)
     if local_policy_path.exists():
@@ -113,8 +126,8 @@ def load_policy(root: Path) -> dict:
             if extra_ids:
                 status_id = extra_ids[0]
                 raise ValueError(
-                    f"local policy cannot add status ID '{status_id}'; "
-                    "define it in mt-policy.yaml so status definitions sync with cards"
+                    f"local settings cannot add status ID '{status_id}'; "
+                    "define it in settings.yaml so status definitions sync with cards"
                 )
         policy = merge_policy(policy, override)
         validate_status_policy(policy)
@@ -123,27 +136,33 @@ def load_policy(root: Path) -> dict:
         not isinstance(username, str) or not username.strip()
         or any(char in username for char in "\r\n\x00")
     ):
-        raise ValueError("policy default_username must be a non-empty, single-line name or null")
-    warn_hours = policy.get("rules", {}).get("timer_warn_hours", 8)
+        raise ValueError("settings default_username must be a non-empty, single-line name or null")
+    rules = policy.get("rules")
+    if rules is None:
+        rules = {}
+        policy["rules"] = rules
+    elif not isinstance(rules, dict):
+        raise ValueError("settings rules must be a mapping")
+    warn_hours = rules.get("timer_warn_hours", 8)
     try:
         valid_warn_hours = not isinstance(warn_hours, bool) and 0 < float(warn_hours) < float("inf")
     except (TypeError, ValueError):
         valid_warn_hours = False
     if not valid_warn_hours:
-        raise ValueError("policy rules.timer_warn_hours must be a positive number")
-    policy.setdefault("rules", {}).setdefault("timer_warn_hours", 8)
-    max_attachment_mb = policy["rules"].get("max_attachment_mb", 10)
+        raise ValueError("settings rules.timer_warn_hours must be a positive number")
+    rules.setdefault("timer_warn_hours", 8)
+    max_attachment_mb = rules.get("max_attachment_mb", 10)
     try:
         valid_max_attachment = not isinstance(max_attachment_mb, bool) and 0 < float(max_attachment_mb) < float("inf")
     except (TypeError, ValueError):
         valid_max_attachment = False
     if not valid_max_attachment:
-        raise ValueError("policy rules.max_attachment_mb must be a positive number")
-    policy["rules"].setdefault("max_attachment_mb", 10)
-    done_window = policy["rules"].get("done_window", "2w")
+        raise ValueError("settings rules.max_attachment_mb must be a positive number")
+    rules.setdefault("max_attachment_mb", 10)
+    done_window = rules.get("done_window", "2w")
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
-        raise ValueError("policy rules.done_window must be an age like 2w, 30d, or 1m")
-    policy["rules"].setdefault("done_window", "2w")
+        raise ValueError("settings rules.done_window must be an age like 2w, 30d, or 1m")
+    rules.setdefault("done_window", "2w")
     if "calendar" in policy:
         normalized_calendar = normalize_calendar_policy(policy["calendar"])
         if normalized_calendar is None:
@@ -169,10 +188,10 @@ def _normalize_calendar_entries(entries: object, section: str) -> list[dict]:
     if entries is None:
         return []
     if not isinstance(entries, list):
-        raise ValueError(f"policy calendar.{section} must be a list")
+        raise ValueError(f"settings calendar.{section} must be a list")
     normalized = []
     for index, item in enumerate(entries):
-        field = f"policy calendar.{section}[{index}]"
+        field = f"settings calendar.{section}[{index}]"
         if isinstance(item, str):
             normalized.append({"id": _single_line_text(item, field)})
             continue
@@ -190,17 +209,17 @@ def _normalize_calendar_entries(entries: object, section: str) -> list[dict]:
 
 
 def normalize_calendar_policy(calendar: object) -> dict | None:
-    """Validate and normalize optional calendar allowlist settings from policy."""
+    """Validate and normalize optional calendar allowlist settings from settings."""
     if calendar is None:
         return None
     if not isinstance(calendar, dict):
-        raise ValueError("policy calendar must be a mapping")
+        raise ValueError("settings calendar must be a mapping")
     extra_keys = set(calendar) - {"include", "guidance"}
     if extra_keys:
-        raise ValueError(f"policy calendar has unsupported key(s): {', '.join(sorted(map(str, extra_keys)))}")
+        raise ValueError(f"settings calendar has unsupported key(s): {', '.join(sorted(map(str, extra_keys)))}")
     guidance = calendar.get("guidance", "")
     if not isinstance(guidance, str) or "\x00" in guidance:
-        raise ValueError("policy calendar.guidance must be text without NUL characters")
+        raise ValueError("settings calendar.guidance must be text without NUL characters")
     return {
         "include": _normalize_calendar_entries(calendar.get("include"), "include"),
         "guidance": guidance,

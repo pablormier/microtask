@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ class ClaimTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
+        legacy_workspace(self.root)
         self.env = {**os.environ, "MT_USERNAME": "test-user"}
 
     def tearDown(self) -> None:
@@ -73,7 +75,7 @@ class ClaimTests(unittest.TestCase):
         result = self.run_mt("move", default.stem, "doing", env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(tasklib.Card.read(default).frontmatter["claimed_by"], getpass.getuser())
-        (self.root / "mt-policy.local.yaml").write_text('default_username: "personal-user"\n')
+        (self.root / "settings.local.yaml").write_text('default_username: "personal-user"\n')
         configured = self.ready("Configured username")
         result = self.run_mt("move", configured.stem, "doing", env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -89,12 +91,12 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(tasklib.Card.read(inherited).frontmatter["claimed_by"], "test-user")
 
     def test_configured_username_applies_to_timer_and_release_without_changing_old_claims(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text('default_username: "personal-user"\n')
+        (self.root / "settings.local.yaml").write_text('default_username: "personal-user"\n')
         env = self.env.copy()
         env.pop("MT_USERNAME")
         path = self.ready()
         self.assertEqual(self.run_mt("move", path.stem, "doing", env=env).returncode, 0)
-        (self.root / "mt-policy.local.yaml").write_text('default_username: "different-user"\n')
+        (self.root / "settings.local.yaml").write_text('default_username: "different-user"\n')
         before = path.read_bytes()
         rejected = self.run_mt("time", "start", path.stem, env=env)
         self.assertNotEqual(rejected.returncode, 0)
@@ -103,7 +105,7 @@ class ClaimTests(unittest.TestCase):
         started = self.run_mt("time", "start", path.stem, "--by", "personal-user", env=env)
         self.assertEqual(started.returncode, 0, started.stderr)
         self.assertEqual(self.run_mt("time", "cancel", path.stem, "--by", "personal-user", env=env).returncode, 0)
-        (self.root / "mt-policy.local.yaml").write_text('default_username: "personal-user"\n')
+        (self.root / "settings.local.yaml").write_text('default_username: "personal-user"\n')
         released = self.run_mt("move", path.stem, "active", env=env)
         self.assertEqual(released.returncode, 0, released.stderr)
         self.assertNotIn("claimed_by", tasklib.Card.read(path).frontmatter)

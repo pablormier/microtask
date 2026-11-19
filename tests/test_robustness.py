@@ -42,8 +42,8 @@ class RobustnessTests(unittest.TestCase):
         self.base = Path(temporary.name)
         self.root = self.base / "data"
         (self.root / "cards").mkdir(parents=True)
-        policy = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy.replace("demo_workspace: true", "demo_workspace: false").replace("auto_sync: true", "auto_sync: false"),
             encoding="utf-8")
         (self.root / ".gitignore").write_text(".mt/\n", encoding="utf-8")  # As `mt` creates for data workspaces.
@@ -291,7 +291,7 @@ raise SystemExit(taskweb.serve_dashboard(taskweb.Workspace.resolve(), "127.0.0.1
         self.assertEqual(after["id"], before["id"])
 
         status, _ = web_actions.handle_card_edit(
-            self.ws, {"ref": ref}, {"expected_hash": hashlib.sha256(card.path.read_bytes()).hexdigest(), "body": "Again\n"}, "t")
+            self.ws, {"ref": ref}, {"expected_hash": hashlib.sha256(card.path.read_bytes()).hexdigest(), "body": "Again\n"})
         self.assertEqual(status, 200)
         after = card_format.parse_document(card.path.read_text(encoding="utf-8"))[0]
         self.assertEqual(after["timer"], before["timer"])

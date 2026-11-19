@@ -9,9 +9,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from support import legacy_workspace
+
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
-IGNORED = shutil.ignore_patterns(".git", ".mt", ".DS_Store", "cards", "drafts")
+IGNORED = shutil.ignore_patterns(".git", ".mt", ".DS_Store", "cards", "drafts", "workspace")
 
 
 def tree(root: Path, folders: tuple[str, ...] = ("cards", "drafts", ".mt")) -> dict[str, bytes]:
@@ -28,12 +30,11 @@ class DataWorkspaceTests(unittest.TestCase):
         # the demo; it must neither show it to nor take writes from the workspace.
         self.app = self.home / "app"
         shutil.copytree(SOURCE_ROOT, self.app, ignore=IGNORED)
-        (self.app / "cards").mkdir()
         self.data = self.home / "project tasks"
         (self.data / "cards").mkdir(parents=True)
-        policy = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
+        policy = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
         self.assertIn("default_priority: none", policy)
-        (self.data / "mt-policy.yaml").write_text(
+        (self.data / "settings.yaml").write_text(
             policy.replace("default_priority: none", "default_priority: low"), encoding="utf-8")
         self.env = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / "config"),
                     "MT_USERNAME": "tester", "MT_WORKSPACE": str(self.data)}
@@ -77,22 +78,20 @@ class DataWorkspaceTests(unittest.TestCase):
         self.assertTrue(any((self.data / "drafts").glob("*.md")))
         self.assertEqual(tree(self.app), app_before, "the application folder changed")
         self.assertFalse((self.app / ".mt").exists())
+        self.assertFalse((self.app / "workspace").exists(), "a workspace was created beside the application")
 
     def test_handing_off_to_another_application_drops_the_workspace(self) -> None:
         other = self.home / "other"
         shutil.copytree(SOURCE_ROOT, other, ignore=IGNORED)
-        (other / "cards").mkdir()
-        policy = other / "mt-policy.yaml"
-        policy.write_text(policy.read_text(encoding="utf-8").replace("demo_workspace: true", "demo_workspace: false"),
-                          encoding="utf-8")
+        self.mt("-R", str(other), "init")
         self.mt("-R", str(other), "add", "Other task")
-        self.assertEqual(len(list((other / "cards").glob("*.md"))), 1)
+        self.assertEqual(len(list((other / "workspace" / "cards").glob("*.md"))), 1)
         self.assertEqual(tree(self.data), {})
 
     def test_invalid_workspace_is_refused_before_any_write(self) -> None:
         full = self.home / "full"
         (full / "cards").mkdir(parents=True)
-        shutil.copy2(self.data / "mt-policy.yaml", full / "mt-policy.yaml")
+        shutil.copy2(self.data / "settings.yaml", full / "settings.yaml")
         (full / "mt").write_text("#!/bin/sh\n", encoding="utf-8")
         for value in ("relative/path", str(self.home / "missing"), str(self.home), str(full)):
             with self.subTest(value=value):
@@ -100,6 +99,7 @@ class DataWorkspaceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("MT_WORKSPACE", result.stderr)
         self.assertEqual(tree(self.app), {})
+        self.assertFalse((self.app / "workspace").exists())
 
     def test_repo_selects_a_data_workspace_by_path_or_alias(self) -> None:
         plain = {key: value for key, value in self.env.items() if key != "MT_WORKSPACE"}
@@ -119,15 +119,16 @@ class DataWorkspaceTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("not a microtask workspace", result.stderr)
 
-    def test_update_refuses_to_run_for_a_data_workspace(self) -> None:
+    def test_update_runs_for_the_application_and_leaves_the_workspace_alone(self) -> None:
+        (self.app / "VERSION").write_text("v1\n", encoding="utf-8")
         plain = {key: value for key, value in self.env.items() if key != "MT_WORKSPACE"}
+        before = tree(self.data)
         for arguments, env in ((("update", "--check"), self.env),
                                (("-R", str(self.data), "update", "--check"), plain)):
             with self.subTest(arguments=arguments):
-                result = self.mt(*arguments, env=env, ok=False)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(str(self.app), result.stderr)
-                self.assertIn("without -R", result.stderr)
+                result = self.mt(*arguments, env={**env, "MT_RELEASE_TAG": "v1"})
+                self.assertIn("Already up to date", result.stdout)
+        self.assertEqual(tree(self.data), before)
 
 
 class DataWorkspaceInitTests(unittest.TestCase):
@@ -136,8 +137,8 @@ class DataWorkspaceInitTests(unittest.TestCase):
         self.home = Path(self.temporary.name).resolve()
         self.app = self.home / "app"
         shutil.copytree(SOURCE_ROOT, self.app, ignore=IGNORED)
-        (self.app / "cards").mkdir()
-        policy = self.app / "mt-policy.yaml"
+        legacy_workspace(self.app)
+        policy = self.app / "settings.yaml"
         policy.write_text(policy.read_text(encoding="utf-8").replace("default_priority: none", "default_priority: low"),
                           encoding="utf-8")
         self.env = {key: value for key, value in os.environ.items()
@@ -170,8 +171,8 @@ class DataWorkspaceInitTests(unittest.TestCase):
         self.assertIn(str(data), created.stdout)
 
         self.assertFalse((data / "mt").exists())
-        self.assertEqual((data / "mt-policy.yaml").read_text(encoding="utf-8"),
-                         (self.app / "mt-policy.yaml").read_text(encoding="utf-8"))
+        self.assertEqual((data / "settings.yaml").read_text(encoding="utf-8"),
+                         (self.app / "settings.yaml").read_text(encoding="utf-8"))
         self.assertIn(".mt/", (data / ".gitignore").read_text(encoding="utf-8"))
         self.assertEqual(self.git(data, "status", "--porcelain", "--untracked-files=all"), "")
         self.assertEqual(self.git(data, "remote", "get-url", "origin").strip(), str(origin))
@@ -179,12 +180,21 @@ class DataWorkspaceInitTests(unittest.TestCase):
         self.mt("-R", str(data), "add", "Project task")
         self.mt("-R", str(data), "sync")
         pushed = self.git(origin, "ls-tree", "-r", "--name-only", "main")
-        self.assertIn("mt-policy.yaml", pushed)
+        self.assertIn("settings.yaml", pushed)
         self.assertEqual(sum(name.startswith("cards/") and name.endswith(".md") for name in pushed.splitlines()), 1)
-        self.assertEqual(tree(self.app), {})
+        self.assertEqual(tree(self.app), {"cards/.gitkeep": b""})
 
         again = self.mt("init", str(data), "--data")
         self.assertIn("already", again.stdout)
+
+    def test_init_data_does_not_create_a_workspace_in_the_application(self) -> None:
+        shutil.rmtree(self.app / "cards")
+        (self.app / "settings.yaml").unlink()
+        data = self.home / "tasks"
+        self.mt("init", str(data), "--data")
+        self.assertFalse((self.app / "workspace").exists())
+        self.assertEqual((data / "settings.yaml").read_text(encoding="utf-8"),
+                         (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"))
 
     def test_init_data_refuses_other_paths_and_options(self) -> None:
         existing = self.home / "existing"

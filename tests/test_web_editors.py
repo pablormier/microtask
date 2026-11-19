@@ -110,51 +110,6 @@ assert.equal(editor.open,false);
 assert.equal(editor.saving,false);
 """)
 
-    def test_editor_surface_delegates_to_custom_engine_when_present(self) -> None:
-        self.run_node(r"""
-let value='initial';
-const surfaceDefault=createEditorSurface({getValue:()=>value});
-assert.equal(surfaceDefault.hasCustomEngine(),false);
-assert.equal(surfaceDefault.mount({}),false);
-
-const events=[];
-global.window={
-  MTZenEditorEngine:{
-    mount(hostEl,opts){
-      events.push(['mount',opts.value,opts.placeholder,opts.disabled]);
-      return {
-        setValue(next){ events.push(['setValue',next]); },
-        setDisabled(flag){ events.push(['setDisabled',flag]); },
-        focus(){ events.push(['focus']); },
-        destroy(){ events.push(['destroy']); },
-      };
-    }
-  }
-};
-try {
-  const surface=createEditorSurface({
-    getValue:()=>value,
-    getPlaceholder:()=> 'Write...',
-    isDisabled:()=>false,
-  });
-  assert.equal(surface.hasCustomEngine(),true);
-  assert.equal(surface.mount({id:'host'}),true);
-  surface.setValue('updated');
-  surface.setDisabled(true);
-  assert.equal(surface.focus(),true);
-  surface.destroy();
-  assert.deepEqual(events,[
-    ['mount','initial','Write...',false],
-    ['setValue','updated'],
-    ['setDisabled',true],
-    ['focus'],
-    ['destroy'],
-  ]);
-} finally {
-  delete global.window;
-}
-""")
-
     def test_zen_mode_lifecycle_and_escape_hierarchy(self) -> None:
         self.run_node(r"""
 const store={
@@ -197,56 +152,11 @@ content.toggleZen(contentCtx);
 assert.equal(content.zen,true);
 content.setZenView(contentCtx,'split');
 assert.equal(content.zenView,'split');
-content.syncSurface(contentCtx,{id:'content-host'});
 assert.equal(content.handleEscape(contentCtx),true);
 assert.equal(content.zen,false);
 content.close(contentCtx);
 assert.equal(content.zen,false);
 assert.equal(content.open,false);
-""")
-
-    def test_custom_engine_mounts_only_in_zen_and_falls_back_on_null(self) -> None:
-        self.run_node(r"""
-const store={isEmpty:()=>false,forgetEmpty:()=>{},saveLocal:()=>true,upsert:()=>{}};
-const ctx={interactive:true,workspaceKey:'ws',busy:false,store,
-  taskDefaults:{status:'inbox',priority:'none',type:'task'},taskStatuses:['inbox'],
-  taskPriorityPolicy:{none:'None'},taskTypePolicy:{task:'Task'},
-  taskOptionsFromDraft:d=>d.taskOptions||{},metadataSnapshot:()=>'',captureDraftFields:()=>({}),
-  getDrafts:()=>[],scheduleDraftSave:()=>{},focusInput:()=>{},nextTick:fn=>fn(),setMode:()=>{},
-};
-let mountResult={setValue:()=>{},setDisabled:()=>{},focus:()=>{},destroy:()=>{}};
-let mounts=0,destroys=0;
-global.window={
-  MTZenEditorEngine:{
-    mount(){
-      mounts++;
-      return mountResult && {...mountResult, destroy(){ destroys++; }};
-    }
-  }
-};
-try {
-  const composer=createCaptureComposer();
-  composer.beginNew(ctx,null,'note');
-  const host={id:'host'};
-  composer.syncSurface(ctx,host);
-  assert.equal(mounts,0);
-  assert.equal(composer.isCustomMounted(),false);
-  composer.toggleZen(ctx,true);
-  composer.syncSurface(ctx,host);
-  assert.equal(mounts,1);
-  assert.equal(composer.isCustomMounted(),true);
-  composer.toggleZen(ctx,false);
-  composer.syncSurface(ctx,host);
-  assert.equal(destroys,1);
-  assert.equal(composer.isCustomMounted(),false);
-
-  mountResult=null;
-  composer.toggleZen(ctx,true);
-  composer.syncSurface(ctx,host);
-  assert.equal(composer.isCustomMounted(),false);
-} finally {
-  delete global.window;
-}
 """)
 
     def test_mention_autocomplete_matches_refs_and_keywords_and_inserts(self) -> None:

@@ -8,7 +8,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.taskweb import load_js
+from tools.web_assets import load_js
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -650,12 +650,12 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
     topic: "custom topic", tags: ["code", "custom-tag"], due: "2026-12-31T09:45:00", due_kind: "target",
   };
   app.captureComposer.persist(app.captureContext());
-  await app.saveWorkspaceDraft(app.captureComposer.draft);
+  await app.getDraftStore().save(app.captureComposer.draft);
   const first = requests[0];
   app.captureComposer.setKind(app.captureContext(), "note");
-  await app.saveWorkspaceDraft(app.captureComposer.draft);
+  await app.getDraftStore().save(app.captureComposer.draft);
   app.captureComposer.setKind(app.captureContext(), "task");
-  await app.saveWorkspaceDraft(app.captureComposer.draft);
+  await app.getDraftStore().save(app.captureComposer.draft);
   const last = requests[2];
   console.log(JSON.stringify({
     emptyStayedEphemeral,
@@ -732,8 +732,6 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   existing.value.project = "changed project";
   const copied = existing.copy();
   existing.value.tags = ["a,b", "quoted\"tag", "added"];
-  existing.tagsText = '"a,b", "quoted""tag", added';
-  existing.syncTags();
   const parsedEditedTags = existing.copy().tags;
   existing.dateValue = "";
   existing.syncDue();
@@ -803,7 +801,7 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
   editor.setPickerQuery("tags", "Code, new-tag, partial");
   return console.log(JSON.stringify({
     topicRows, filtered, created, descendants, segment, reused, invalid, indented, afterLeave, cleared, projectRows, tagRows,
-    tags: editor.value.tags, query: editor.picker.query, tagsText: editor.tagsText,
+    tags: editor.value.tags, query: editor.picker.query,
     duplicate: (editor.addTag("BUG"), editor.value.tags.length),
     emitted: changes.length > 0,
   }));
@@ -825,7 +823,6 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertEqual(result["tagRows"], ["option:code"])
         self.assertEqual(result["tags"], ["bug", "code", "new-tag"])
         self.assertEqual(result["query"], "partial")
-        self.assertEqual(result["tagsText"], "bug, code, new-tag")
         self.assertEqual(result["duplicate"], 3)
         self.assertTrue(result["emitted"])
 
@@ -1008,6 +1005,7 @@ global.document = {
   createElement() {
     const el = Object.create(global.Element.prototype);
     el.innerHTML = "";
+    el.querySelectorAll = () => [];
     return el;
   }
 };
@@ -1066,7 +1064,8 @@ global.document = {
     let _html = "";
     return {
       get innerHTML() { return _html; },
-      set innerHTML(val) { _html = val; }
+      set innerHTML(val) { _html = val; },
+      querySelectorAll() { return []; }
     };
   }
 };
@@ -1112,14 +1111,14 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
     def test_reference_spans_cover_ordinary_body_and_ignore_fenced_examples(self) -> None:
         import tools.taskweb as taskweb
         def note(item_id, title, body):
-            raw=taskweb.operations.render_new_card('note',item_id,title,body_text=body,ws=taskweb.Workspace.at(ROOT))
+            raw=taskweb.operations.render_new_card('note',item_id,title,body_text=body,ws=taskweb.Workspace.at(ROOT / "templates"))
             frontmatter, markdown=taskweb.store.parse_frontmatter(raw)
             return taskweb.store.Card(Path('/tmp/'+item_id+'.md'),raw,frontmatter,markdown,taskweb.store.parse_yaml(frontmatter))
         target=note('target','Target','Source.')
         ref='@'+target.short_ref
         body=f'## Notes\n\nLiteral reference {ref}\n\n```microtask-capture\nExample {ref}\n```'
         item=note('testnote1','Review',body)
-        detail=taskweb.task_to_dict(item,taskweb.store.ReferenceIndex([item,target]),ws=taskweb.Workspace.at(ROOT))
+        detail=taskweb.task_to_dict(item,taskweb.store.ReferenceIndex([item,target]),ws=taskweb.Workspace.at(ROOT / "templates"))
         self.assertEqual(detail['body'],body)
         spans=detail['reference_spans']['body']
         self.assertEqual(len(spans),1)
@@ -1525,7 +1524,7 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
   app.captureComposer.persist(app.captureContext());
   app.captureComposer.draft.taskOptions.priority = "high";
   app.captureComposer.persist(app.captureContext());
-  await app.saveWorkspaceDraft(app.captureComposer.draft);
+  await app.getDraftStore().save(app.captureComposer.draft);
   console.log(JSON.stringify({ priority: payloads[0].priority, shared: app.captureComposer.draft === app.drafts[0] }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """)

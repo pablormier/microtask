@@ -7,6 +7,7 @@ import importlib.util
 import os
 import re
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -34,6 +35,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
+        legacy_workspace(self.root)
         self.env = os.environ.copy()
 
     def tearDown(self) -> None:
@@ -48,7 +50,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(next(item for item in listed if item["title"] == "Untriaged add")["next_action"], "")
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
-        (self.root / "mt-policy.local.yaml").write_text("default_priority: medium\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("default_priority: medium\n", encoding="utf-8")
         for command in ("add", "note"):
             result = self.run_mt(command, "Override " + command)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -92,7 +94,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         accepted_path = Path(accepted.stdout.strip())
         self.assertEqual(len(list(card_files(self.root, "task"))), 1)
         self.assertEqual(self.run_mt("validate").returncode, 0)
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
+        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
         self.env["MT_USERNAME"] = "agent:environment"
         first = self.run_mt("add", "First doing", "--status", "doing")
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -108,7 +110,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
     def test_default_doing_add_claims_without_placeholder_action(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'default_status: doing\ndefault_username: "agent:policy"\n')
         self.env.pop("MT_USERNAME", None)
         result = self.run_mt("add", "Read the document")
@@ -118,7 +120,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(task.next_action, "")
 
     def test_note_capture_uses_legacy_policy_default_without_unassigned_class(self) -> None:
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         policy_path.write_text(policy_path.read_text().replace(
             '  none: "Unassigned; awaiting triage or reference material"\n', ''
         ).replace("default_priority: none", "default_priority: high"), encoding="utf-8")
@@ -299,7 +301,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
 
     def test_auto_sync_without_git_keeps_local_success_and_json_valid(self) -> None:
         self.hide_git()
-        policy = self.root / "mt-policy.local.yaml"
+        policy = self.root / "settings.local.yaml"
         policy.write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         created = self.run_mt("add", "Auto-sync stays local")
         self.assertEqual(created.returncode, 0, created.stderr)
@@ -315,7 +317,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertIn("Git sync is unavailable", receipt["sync_error"])
 
     def test_auto_sync_without_initialized_repo_keeps_local_success(self) -> None:
-        policy = self.root / "mt-policy.local.yaml"
+        policy = self.root / "settings.local.yaml"
         policy.write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
 
         created = self.run_mt("add", "Uninitialized Git workspace")
@@ -381,14 +383,14 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(titles("--status", "done"), {"Old done", "Recent done"})
         self.assertEqual(titles("--all"), {"Old done", "Recent done"})
         self.assertEqual(titles("--completed-since", "1y"), {"Old done", "Recent done"})
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  done_window: 2m\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  done_window: 2m\n", encoding="utf-8")
         self.assertEqual(titles(), {"Old done", "Recent done"})
 
     def test_done_window_defaults_to_two_weeks_and_rejects_bad_values(self) -> None:
-        policy = json.loads(self.run_mt("policy", "--json").stdout)
+        policy = json.loads(self.run_mt("settings", "--json").stdout)
         self.assertEqual(policy["rules"]["done_window"], "2w")
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  done_window: soon\n", encoding="utf-8")
-        result = self.run_mt("policy", "--json")
+        (self.root / "settings.local.yaml").write_text("rules:\n  done_window: soon\n", encoding="utf-8")
+        result = self.run_mt("settings", "--json")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rules.done_window must be an age", result.stderr)
 
@@ -624,14 +626,14 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(empty.stdout, "[]\n")
 
     def test_local_policy_defaults_and_nested_overrides_apply_to_add(self) -> None:
-        shared_policy = self.root / "mt-policy.yaml"
+        shared_policy = self.root / "settings.yaml"
         shared_policy.write_text(
             shared_policy.read_text(encoding="utf-8").replace(
                 '  someday: "Someday" # optional; remove if unused\n', '  someday: "Later" # optional\n'
             ),
             encoding="utf-8",
         )
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n  someday: "Maybe later"\ndefault_status: someday\ndefault_priority: high\ndefault_type: reminder\nrules:\n  max_doing_tasks: 2\n',
             encoding="utf-8")
         created = self.run_mt("add", "Review this later")
@@ -649,12 +651,12 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(policy["rules"]["max_doing_tasks"], "2")
 
     def test_policy_json_hides_unknown_legacy_settings(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "ai:\n  model: local-model\nai_workflow_models:\n  update: local-update\n"
             "ai_workflow_reasoning_efforts:\n  update: high\nai_aliases:\n  - old alias\n"
             "rules:\n  auto_create_profiles: false\n  triage_batch_size: 2\n",
             encoding="utf-8")
-        result = self.run_mt("policy", "--json")
+        result = self.run_mt("settings", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
         policy = json.loads(result.stdout)
         self.assertNotIn("ai", policy)
@@ -665,10 +667,10 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertNotIn("triage_batch_size", policy["rules"])
 
     def test_policy_json_exposes_and_validates_calendar_settings(self) -> None:
-        baseline = json.loads(self.run_mt("policy", "--json").stdout)
+        baseline = json.loads(self.run_mt("settings", "--json").stdout)
         self.assertNotIn("calendar", baseline)
 
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "calendar:\n"
             "  include:\n"
             "    - me@example.com\n"
@@ -680,7 +682,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             "    Holidays do not necessarily mean time off.\n",
             encoding="utf-8",
         )
-        result = self.run_mt("policy", "--json")
+        result = self.run_mt("settings", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
         policy = json.loads(result.stdout)
         self.assertEqual(
@@ -709,16 +711,16 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         )
         for yaml_text, diagnostic in invalid_settings:
             with self.subTest(yaml=yaml_text):
-                (self.root / "mt-policy.local.yaml").write_text(yaml_text, encoding="utf-8")
-                for command in (("policy", "--json"), ("validate",)):
+                (self.root / "settings.local.yaml").write_text(yaml_text, encoding="utf-8")
+                for command in (("settings", "--json"), ("validate",)):
                     invalid = self.run_mt(*command)
                     self.assertNotEqual(invalid.returncode, 0)
                     self.assertIn(diagnostic, invalid.stderr)
 
     def test_calendar_local_overrides_replace_lists_and_can_disable_inherited_calendars(self) -> None:
-        shared = self.root / "mt-policy.yaml"
+        shared = self.root / "settings.yaml"
         shared.write_text(shared.read_text() + "\ncalendar:\n  include: [shared]\n  guidance: Shared guidance\n")
-        local = self.root / "mt-policy.local.yaml"
+        local = self.root / "settings.local.yaml"
         for yaml_text, expected in (
             ("calendar:\n  include: [local]\n", {"include": [{"id": "local"}], "guidance": "Shared guidance"}),
             ("calendar:\n  include: []\n", {"include": [], "guidance": "Shared guidance"}),
@@ -728,7 +730,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         ):
             with self.subTest(yaml=yaml_text):
                 local.write_text("default_priority: high\n" + yaml_text)
-                result = self.run_mt("policy", "--json")
+                result = self.run_mt("settings", "--json")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 policy = json.loads(result.stdout)
                 self.assertEqual(policy.get("calendar"), expected)
@@ -736,7 +738,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                 self.assertEqual(self.run_mt("validate").returncode, 0)
         shared.write_text(shared.read_text().split("\ncalendar:")[0])
         local.write_text("calendar: {}\n")
-        self.assertEqual(json.loads(self.run_mt("policy", "--json").stdout)["calendar"],
+        self.assertEqual(json.loads(self.run_mt("settings", "--json").stdout)["calendar"],
                          {"include": [], "guidance": ""})
 
     def test_failed_live_validation_rolls_back_item_transaction(self) -> None:
@@ -750,7 +752,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                     {relative: changed},
                     expected={relative: before},
                     source_root=self.root,
-                    ws=tasklib.Workspace.at(self.root, demo=False),
+                    ws=tasklib.Workspace.at(self.root),
                 )
         self.assertEqual(path.read_bytes(), before)
 
@@ -1000,6 +1002,30 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(tasklib.capture_title(text), title)
 
+    def test_generated_titles_read_images_and_links_as_their_text(self) -> None:
+        cases = (
+            ("Pasted image check ![](../attachments/05d17c5a5f8a.png)", "Pasted image check"),
+            ("See ![chart](../attachments/a.svg) and [the handout](../attachments/b.pdf)", "See chart and the handout"),
+            ("Read [docs](https://example.com/a_(b)) today", "Read docs today"),
+            ("![](../attachments/only.png)", ""),
+            ("Keep `[x](y)` and plain [brackets]", "Keep `x` and plain [brackets]"),
+        )
+        for text, title in cases:
+            with self.subTest(text=text):
+                self.assertEqual(tasklib.capture_title(text), title)
+        import card_render
+        self.assertEqual(
+            card_render.title_from_note_body("![](../attachments/only.png)\n\nSecond line"), "Second line"
+        )
+
+    def test_a_body_with_only_an_image_saves_with_a_fallback_title(self) -> None:
+        for command, title in (("add", "Untitled task"), ("note", "Untitled note")):
+            with self.subTest(command=command):
+                result = self.run_mt(command, "--file", "-", input_text="![](../attachments/only.png)\n")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                saved = Path(result.stdout.strip().splitlines()[-1]).read_text(encoding="utf-8")
+                self.assertEqual(tasklib.card_format.parse_document(saved)[0]["title"], title)
+
     def test_long_capture_titles_are_bounded_without_changing_body_or_explicit_title(self) -> None:
         source = "  Follow up with Christina about the metabolic analysis and discuss the next experimental steps.\nKeep this detail too.  \n"
         explicit_title = "A deliberately long explicit title " + "detail " * 15
@@ -1081,6 +1107,7 @@ class BulkEditTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
+        legacy_workspace(self.root)
         self.env = os.environ.copy()
 
     def tearDown(self) -> None:
@@ -1269,9 +1296,10 @@ class BulkEditTests(unittest.TestCase):
         plan_path = self.save_plan(plan)
         before = {first: first.read_bytes(), second: second.read_bytes()}
         arguments = argparse.Namespace(apply_plan=str(plan_path), as_json=False)
+        import cli_cards
         with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
-            result = tasklib._command_bulk_edit_apply(
-                arguments, ws=tasklib.Workspace.at(self.root, demo=False)
+            result = cli_cards._command_bulk_edit_apply(
+                arguments, ws=tasklib.Workspace.at(self.root)
             )
         self.assertEqual(result, 1)
         self.assertEqual({path: path.read_bytes() for path in before}, before)

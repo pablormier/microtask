@@ -64,14 +64,6 @@ function createCaptureComposer() {
         "T" + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
     },
 
-    dateLabel() {
-      const created = this.draft && this.draft.created;
-      if (!created) return "just now";
-      const date = new Date(created);
-      if (Number.isNaN(date.getTime())) return created;
-      return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-    },
-
     newTaskOptions(ctx) {
       // A board filtered to one project or topic files new cards there too.
       const scope = ctx.scopeDefaults || {};
@@ -140,7 +132,6 @@ function createCaptureComposer() {
       this.zenView = "write";
       this.zenMetaOpen = false;
       this.previewHtml = "";
-      if (this.surface) this.surface.setValue("");
       this.message = "";
       this.messageError = false;
       if (ctx.clearStatus) ctx.clearStatus();
@@ -222,7 +213,6 @@ function createCaptureComposer() {
         this.draft.body += separator + headings;
       }
       this.persist(ctx);
-      if (this.surface) this.surface.setValue(this.draft.body);
       this.schedulePreview();
       this.message = "Meeting headings added. Existing text was kept.";
       this.messageError = false;

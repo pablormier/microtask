@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools import taskweb
-from tools.taskweb import load_js
+from tools.web_assets import load_js
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from web_fixture import dashboard_collections, render_dashboard
 from card_files import card_files  # noqa: E402
@@ -38,7 +38,7 @@ class WebDashboardTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(SOURCE_ROOT / "mt", self.root / "mt")
-        shutil.copy2(SOURCE_ROOT / "mt-policy.yaml", self.root / "mt-policy.yaml")
+        shutil.copy2(SOURCE_ROOT / "templates" / "settings.yaml", self.root / "settings.yaml")
         shutil.copytree(SOURCE_ROOT / "scripts", self.root / "scripts")
         shutil.copytree(SOURCE_ROOT / "tools", self.root / "tools")
         (self.root / "cards").mkdir()
@@ -366,14 +366,14 @@ print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'exp
         self.assertEqual(sorted(data_statuses, key=statuses.index), data_statuses)
 
     def test_custom_status_and_labels_are_presentation_metadata(self) -> None:
-        shared_policy = self.root / "mt-policy.yaml"
+        shared_policy = self.root / "settings.yaml"
         shared_policy.write_text(
             shared_policy.read_text(encoding="utf-8").replace(
                 '  done: "Done"\n', '  done: "Done"\n  review: "Review"\n', 1
             ),
             encoding="utf-8",
         )
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             """statuses:
   inbox: Captured
   active: Ready
@@ -561,7 +561,7 @@ view_labels:
 
         self.assertEqual(self.render_dashboard().returncode, 0)
         self.assertNotIn(':class="[cardClass(', self.output.read_text())
-        spec = importlib.util.spec_from_file_location("taskweb_excerpt_test", SOURCE_ROOT / "tools/taskweb.py")
+        spec = importlib.util.spec_from_file_location("taskweb_excerpt_test", SOURCE_ROOT / "tools/web_payloads.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cases = {
@@ -586,14 +586,12 @@ view_labels:
             'global.document={getElementById:id=>({textContent:JSON.stringify(id==="mt-meta"?{}:[])})};\n'
             f'eval({json.dumps(load_js(SOURCE_ROOT / "tools/web"))} + `\n'
             'const app=taskBoard();\n'
-            'for(const [source,expected] of Object.entries(cases)) assert.equal(app.cleanExcerpt(source),expected);\n'
             'const done={kind:"task",status:"done",completed:"2026-01-05T17:30:00",updated:"2026-01-06"};\n'
             'assert.equal(app.cardClass(done)["is-done"],true); assert.equal(app.cardDate(done),done.completed);\n'
             'const archived={kind:"task",status:"active",archived:true,updated:"2026-01-06"};\n'
             'app.mode="archive"; assert.equal(app.cardDate(archived),archived.updated);\n'
             'app.mode="tasks"; assert.equal(app.cardDate(archived),"");\n'
-            'assert.equal(app.dateLabel("2026-01-05"),app.deadlineDateLabel({due:"2026-01-05"}));\n'
-            'assert.equal(app.dateLabel("invalid"),"invalid");\n'
+            'assert.equal(app.deadlineDateLabel({due:"2026-01-05"}),"Jan 5, 2026");\n'
             '`);'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
@@ -716,7 +714,7 @@ view_labels:
         self.assertLess(card.index('class="mt-card-footer"'), card.index('class="mt-ref mt-card-ref"'))
 
     def test_deadlines_view_hides_year_progress_bar_via_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  show_year_progress: false\n",
             encoding="utf-8",
         )
@@ -730,7 +728,7 @@ view_labels:
         self.assertTrue(meta["show_deadline_progress"])
 
     def test_deadlines_view_hides_entry_progress_bars_via_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  show_deadline_progress: false\n",
             encoding="utf-8",
         )
@@ -743,7 +741,7 @@ view_labels:
         self.assertIn("this.showDeadlineProgress = meta.show_deadline_progress !== false", rendered)
 
     def test_deadline_progress_anchor_from_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  deadline_progress_start: created\n",
             encoding="utf-8",
         )
@@ -935,7 +933,7 @@ view_labels:
         self.assertNotEqual(payload["included"]["focus"], self.tasks[1].stem)
         self.assertEqual(payload["followups"], [])
         self.assertEqual(payload["request"]["path"], "/api/hidden")
-        self.assertIs(payload["request"]["payload"]["hidden"], False)
+        self.assertIs(payload["request"]["payload"]["value"], False)
         self.assertIs(payload["reset"], False)
 
     def test_running_timer_list_badge_and_menu_labels(self) -> None:
@@ -1143,24 +1141,29 @@ view_labels:
         self.assertEqual(taskweb.dashboard_url("127.0.0.1", 8123), "http://127.0.0.1:8123/")
 
     def test_mt_web_passes_each_repeated_filter_to_the_dashboard(self) -> None:
-        tasklib = taskweb.cli
+        if str(SOURCE_ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
+        import cli as tasklib
         args = taskweb.parse_args(["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
         with mock.patch.object(tasklib.os, "execve") as run, mock.patch.object(tasklib.os, "chdir"):
             tasklib.command_web(args, ws=taskweb.Workspace.at(self.root))
         command = run.call_args.args[1]
-        self.assertEqual(command[command.index("--project"):],
-                         ["--project", "a", "--project", "b", "--tag", "x", "--updated-since", "2026-01-31"])
+        self.assertEqual(command[command.index("--project=a"):],
+                         ["--project=a", "--project=b", "--tag=x", "--updated-since=2026-01-31"])
         with mock.patch.dict(os.environ, {"MT_PROJECT": "env-project"}), \
                 mock.patch.object(tasklib.os, "execve") as run, mock.patch.object(tasklib.os, "chdir"):
             tasklib.command_web(taskweb.parse_args([]), ws=taskweb.Workspace.at(self.root))
-        self.assertEqual(run.call_args.args[1][-2:], ["--project", "env-project"])
+        self.assertEqual(run.call_args.args[1][-1:], ["--project=env-project"])
 
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
         for path in [*self.tasks, self.note]:
             path.unlink()
-        shutil.copytree(SOURCE_ROOT / "examples", self.root / "examples")
+        if str(SOURCE_ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
+        import workspace as workspace_module
+        workspace_module.seed_demo_workspace(self.root, app_root=SOURCE_ROOT)
 
-        process, url = self.start_interactive_web()
+        process, url = self.start_interactive_web("--demo")
         try:
             payload = self.get_json(url + "api/items")
             card = self.get_card(url, next(item for item in payload["tasks"] if item["title"] == "Fix per-target metric aggregation"))
@@ -1484,28 +1487,33 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             self.assertEqual(status, 400)
             self.assertEqual(invalid_payload["error"], "only open tasks can move")
 
-            note_ref = next(item for item in done_payload["tasks"] if item["title"] == "Reference note")["ref"]
+            note_item = next(item for item in done_payload["tasks"] if item["title"] == "Reference note")
+            note_ref = note_item["ref"]
+            for removed_route in ("api/priority", "api/due-set", "api/due-clear"):
+                removed_status, _ = self.post_json(url + removed_route, token, {"ref": note_ref})
+                self.assertEqual(removed_status, 404)
+
             status, priority_payload = self.post_json(
-                url + "api/priority", token, {"ref": note_ref, "priority": "high"}
+                url + "api/card-metadata",
+                token,
+                {"ref": note_ref, "expected_hash": note_item["content_hash"], "patch": {"priority": "high"}},
             )
             self.assertEqual(status, 200, priority_payload)
             prioritized_note = self.get_card(url, next(item for item in priority_payload["tasks"] if item["title"] == "Reference note"))
             self.assertEqual(prioritized_note["priority"], "high")
 
             status, invalid_priority = self.post_json(
-                url + "api/priority", token, {"ref": note_ref, "priority": "nonsense"}
+                url + "api/card-metadata",
+                token,
+                {"ref": note_ref, "expected_hash": prioritized_note["content_hash"], "patch": {"priority": "nonsense"}},
             )
             self.assertEqual(status, 400)
-            self.assertEqual(invalid_priority["error"], "invalid priority")
 
-            status, unchanged_priority = self.post_json(
-                url + "api/priority", token, {"ref": note_ref, "priority": "high"}
-            )
-            self.assertEqual(status, 400)
-            self.assertEqual(unchanged_priority["error"], "priority unchanged")
-
+            active_item = next(item for item in priority_payload["tasks"] if item["id"] == active["id"])
             status, due_set_payload = self.post_json(
-                url + "api/due-set", token, {"ref": active["ref"], "due": "2026-10-31", "due_kind": "target"}
+                url + "api/card-metadata",
+                token,
+                {"ref": active["ref"], "expected_hash": active_item["content_hash"], "patch": {"due": "2026-10-31", "due_kind": "target"}},
             )
             self.assertEqual(status, 200, due_set_payload)
             due_set = self.get_card(url, next(item for item in due_set_payload["tasks"] if item["id"] == active["id"]))
@@ -1513,37 +1521,35 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             self.assertEqual(due_set["due_kind"], "target")
 
             status, due_time_payload = self.post_json(
-                url + "api/due-set",
+                url + "api/card-metadata",
                 token,
-                {"ref": active["ref"], "due": "2026-10-31", "due_time": "14:30", "due_kind": "deadline"},
+                {"ref": active["ref"], "expected_hash": due_set["content_hash"], "patch": {"due": "2026-10-31T14:30:00", "due_kind": "deadline"}},
             )
             self.assertEqual(status, 200, due_time_payload)
             due_time_set = self.get_card(url, next(item for item in due_time_payload["tasks"] if item["id"] == active["id"]))
             self.assertEqual(due_time_set["due"], "2026-10-31T14:30:00")
             self.assertEqual(due_time_set["due_kind"], "deadline")
 
-            status, invalid_time = self.post_json(
-                url + "api/due-set",
-                token,
-                {"ref": active["ref"], "due": "2026-10-31", "due_time": "25:99", "due_kind": "deadline"},
-            )
-            self.assertEqual(status, 400)
-            self.assertEqual(invalid_time["error"], "due_time must be an HH:MM time")
-
             status, invalid_due = self.post_json(
-                url + "api/due-set", token, {"ref": active["ref"], "due": "not-a-date", "due_kind": "deadline"}
+                url + "api/card-metadata",
+                token,
+                {"ref": active["ref"], "expected_hash": due_time_set["content_hash"], "patch": {"due": "not-a-date", "due_kind": "deadline"}},
             )
             self.assertEqual(status, 400)
-            self.assertEqual(invalid_due["error"], "due must be a YYYY-MM-DD date")
 
             status, invalid_kind = self.post_json(
-                url + "api/due-set", token, {"ref": active["ref"], "due": "2026-10-31", "due_kind": "nonsense"}
+                url + "api/card-metadata",
+                token,
+                {"ref": active["ref"], "expected_hash": due_time_set["content_hash"], "patch": {"due": "2026-10-31", "due_kind": "nonsense"}},
             )
             self.assertEqual(status, 400)
-            self.assertEqual(invalid_kind["error"], "invalid due kind")
 
-            due_task = self.get_card(url, next(item for item in done_payload["tasks"] if item["title"] == "Build the thing"))
-            status, cleared_payload = self.post_json(url + "api/due-clear", token, {"ref": due_task["ref"]})
+            due_task = self.get_card(url, next(item for item in due_time_payload["tasks"] if item["title"] == "Build the thing"))
+            status, cleared_payload = self.post_json(
+                url + "api/card-metadata",
+                token,
+                {"ref": due_task["ref"], "expected_hash": due_task["content_hash"], "patch": {"due": None, "due_kind": None}},
+            )
             self.assertEqual(status, 200, cleared_payload)
             cleared = self.get_card(url, next(item for item in cleared_payload["tasks"] if item["id"] == due_task["id"]))
             self.assertIsNone(cleared["due"])
@@ -1552,10 +1558,6 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             properties = taskweb.card_format.parse_document(task_text)[0]
             self.assertIsNone(properties.get("due"))
             self.assertIsNone(properties.get("due_kind"))
-
-            status, already_cleared = self.post_json(url + "api/due-clear", token, {"ref": due_task["ref"]})
-            self.assertEqual(status, 400)
-            self.assertEqual(already_cleared["error"], "item has no due date")
         finally:
             self.stop_interactive_web(process)
 
@@ -1865,8 +1867,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         rendered = self.output.read_text(encoding="utf-8")
         data = json.loads(self.payload_json("tasks"))
         for item in data:
-            self.assertTrue(item["base_uri"].startswith("file://"))
-            self.assertTrue(item["base_uri"].endswith("/"))
+            self.assertNotIn("base_uri", item)
         self.assertIn("const renderer = new marked.Renderer()", rendered)
         self.assertIn("renderer.link = function", rendered)
         self.assertIn("renderer.image = function", rendered)
@@ -2016,7 +2017,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
 
         remote = Path(self.temporary.name) / "remote.git"
         shutil.copy2(SOURCE_ROOT / ".gitignore", self.root / ".gitignore")
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         for arguments in (("init", "-q", "-b", "main"), ("config", "user.name", "Web Test"),
                           ("config", "user.email", "web@example.invalid"), ("add", "."),
                           ("commit", "-qm", "Initial"), ("init", "-q", "--bare", "-b", "main", str(remote)),

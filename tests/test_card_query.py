@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -326,6 +327,7 @@ class WorkspaceTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
+        legacy_workspace(self.root)
 
     def mt(self, *args, env=None, check=True):
         result = subprocess.run([str(self.root / "mt"), *args], cwd=self.root, env=env, text=True,

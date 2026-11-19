@@ -161,19 +161,44 @@ function createMentionAutocomplete() {
         return;
       }
       const items = matchMentionCards(cards, trigger.query, 8);
-      if (!items.length) {
+      const queryText = trigger.query.trim();
+      const canRemoteSearch = typeof fetch === "function" && queryText.length > 0;
+      if (!items.length && !canRemoteSearch) {
         this.close();
         return;
       }
       const triggerChanged = !this.open || this.start !== trigger.start;
-      this.open = true;
+      this.open = items.length > 0;
       this.query = trigger.query;
       this.start = trigger.start;
       this.end = trigger.end;
       this.items = items;
       if (this.activeIndex >= items.length) this.activeIndex = 0;
-      if (triggerChanged || (!this.pos.top && !this.pos.left)) {
+      if (this.open && (triggerChanged || (!this.pos.top && !this.pos.left))) {
         this.pos = computeTextareaCaretPos(textarea, trigger.start);
+      }
+      if (canRemoteSearch) {
+        const seq = (this._searchSeq = (this._searchSeq || 0) + 1);
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(async () => {
+          try {
+            const response = await fetch("/api/search?q=" + encodeURIComponent(queryText) + "&limit=8", { cache: "no-store" });
+            if (!response.ok || seq !== this._searchSeq) return;
+            const payload = await response.json();
+            if (seq !== this._searchSeq || this.query !== trigger.query) return;
+            const remote = Array.isArray(payload.results) ? payload.results.slice(0, 8) : [];
+            if (!remote.length && !this.items.length) {
+              this.close();
+              return;
+            }
+            if (remote.length) {
+              this.items = remote;
+              this.open = true;
+              if (this.activeIndex >= remote.length) this.activeIndex = 0;
+              this.pos = computeTextareaCaretPos(textarea, trigger.start);
+            }
+          } catch (_) {}
+        }, 120);
       }
     },
 

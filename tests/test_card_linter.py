@@ -45,8 +45,8 @@ class CardLinterIntegrationTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         (self.root / "cards").mkdir()
-        policy_text = (ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy_text = (ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy_text.replace("demo_workspace: true", "demo_workspace: false"),
             encoding="utf-8",
         )
@@ -120,7 +120,7 @@ class CardLinterIntegrationTests(unittest.TestCase):
         self.assertIn("WARNING: topic 'Work' and 'work' differ only by letter case", changes.stderr)
 
     def test_lint_policy_off_suppresses_warnings(self) -> None:
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         policy_text = policy_path.read_text(encoding="utf-8")
         policy_path.write_text(
             policy_text
@@ -137,7 +137,7 @@ class CardLinterIntegrationTests(unittest.TestCase):
         self.assertNotIn("WARNING:", result.stderr)
 
     def test_invalid_lint_policy_is_rejected(self) -> None:
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         original = policy_path.read_text(encoding="utf-8")
 
         for bad_block in (

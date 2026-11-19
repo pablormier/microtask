@@ -21,7 +21,6 @@ import git_ops
 
 
 ROOT = Path(__file__).resolve().parent.parent
-ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
 
 
 def gh(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -123,7 +122,7 @@ def issue_timestamp(value: str) -> tuple[str, str]:
 
 
 def real_workspace_items(ws: workspace.Workspace) -> list[store.Card]:
-    return store.read_cards(store.real_cards_root(ws), ws=ws)
+    return store.read_cards(ws.cards_root(), ws=ws)
 
 
 def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.Card]]:
@@ -226,8 +225,6 @@ def capture_issues(
             transaction.apply_item_transaction(
                 changes, expected=expected, source_root=resolved_ws.root, ws=resolved_ws
             )
-            # The first real capture leaves demo mode, like mt add and mt note.
-            store.pin_demo_state(resolved_ws)
         existing_numbers = [issue[0] for issue in issues if issue[0] in index]
         return imported_ids, imported_numbers, existing_numbers, index
 
@@ -247,17 +244,14 @@ def main(argv: list[str] | None, resolved_ws: workspace.Workspace) -> int:
         captured_numbers = set(existing_numbers) | set(imported_numbers)
         # Every listed issue now has a durable local capture; sync it before closing any issue.
         sync_status = 0
-        if captured_numbers:
-            if store.policy(resolved_ws).get("rules", {}).get("auto_sync", False):
-                # Issue closure is external and requires an explicit successful
-                # sync, even when ordinary local mutations can stay Git-free.
-                if args.json:
-                    with redirect_stdout(sys.stderr):
-                        sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
-                else:
+        if captured_numbers and store.policy(resolved_ws).get("rules", {}).get("auto_sync", False):
+            # Issue closure is external and requires an explicit successful
+            # sync, even when ordinary local mutations can stay Git-free.
+            if args.json:
+                with redirect_stdout(sys.stderr):
                     sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
             else:
-                sync_status = transaction.auto_sync_after_mutation(changed=True, ws=resolved_ws)
+                sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
 
         receipt: dict[str, object] = {
             "repo": repo,

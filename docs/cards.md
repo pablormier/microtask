@@ -1,6 +1,6 @@
 # Card files
 
-Each task or note is one self-contained Markdown file in `cards/`. You can
+Each task or note is one self-contained Markdown file in the workspace's `cards/` folder. You can
 open, read, and edit it with any Markdown editor, and it stays readable
 without microtask.
 

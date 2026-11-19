@@ -20,8 +20,8 @@ class PolicyCacheTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         (self.root / "cards").mkdir()
-        self.policy_path = self.root / "mt-policy.yaml"
-        self.policy_path.write_text((SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+        self.policy_path = self.root / "settings.yaml"
+        self.policy_path.write_text((SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"), encoding="utf-8")
         self.ws = Workspace.at(self.root, app_root=SOURCE_ROOT)
         loads = mock.patch.object(policy_parser, "load_policy", wraps=policy_parser.load_policy)
         self.load_policy = loads.start()
@@ -41,7 +41,7 @@ class PolicyCacheTests(unittest.TestCase):
 
     def test_a_new_local_policy_file_is_picked_up(self) -> None:
         self.assertEqual(self.ws.for_operation().policy()["default_status"], "inbox")
-        (self.root / "mt-policy.local.yaml").write_text("default_status: waiting\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("default_status: waiting\n", encoding="utf-8")
         self.assertEqual(self.ws.for_operation().policy()["default_status"], "waiting")
 
     def test_separate_workspaces_do_not_share_a_cache(self) -> None:

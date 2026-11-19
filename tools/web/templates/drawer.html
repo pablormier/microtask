@@ -1,5 +1,5 @@
       <template x-if="selected">
-        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open) { clearSelection(); }">
+        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
@@ -12,7 +12,7 @@
                     <textarea class="mt-detail-title-input" rows="1" form="mt-properties-form" aria-label="Title" spellcheck="false"
                               x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving"
                               x-effect="propertyEditor.form.title; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
-                              x-init="let width = 0; new ResizeObserver(([entry]) => { if (entry.contentRect.width === width) return; width = entry.contentRect.width; $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; }).observe($el)"
+                              x-init="if ($el._mtResizeObserver) $el._mtResizeObserver.disconnect(); let width = 0; const ro = new ResizeObserver(([entry]) => { if (!$el.isConnected) { ro.disconnect(); return; } if (entry.contentRect.width === width) return; width = entry.contentRect.width; $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; }); $el._mtResizeObserver = ro; ro.observe($el)"
                               @keydown.enter.prevent="$el.form && $el.form.requestSubmit()"
                               @keydown.escape.stop="propertyEditor.form.title = selected?.title || ''; $el.blur()"></textarea>
                   </template>
@@ -121,11 +121,9 @@
                     </div>
                     <div class="mt-zen-workspace" :class="{ 'is-zen': contentEditor.zen, 'is-split': contentEditor.zen && contentEditor.zenView === 'split', 'is-preview': contentEditor.zen && contentEditor.zenView === 'preview' }">
                       <div class="mt-zen-editor-pane mt-editor-surface-host"
-                           x-show="contentEditor.zen ? contentEditor.zenView !== 'preview' : contentEditor.tab === 'write'"
-                           x-effect="contentEditor.syncSurface(contentContext(), $el)">
+                           x-show="contentEditor.zen ? contentEditor.zenView !== 'preview' : contentEditor.tab === 'write'">
                         <textarea class="mt-field mt-content-input" x-ref="detailContentInput"
                                   :class="{ 'is-drag-over': attachmentDragTarget === 'content' }"
-                                  x-show="!contentEditor.isCustomMounted()"
                                   x-model="contentEditor.text"
                                   @input="contentEditor.persist(contentContext()); contentEditor.schedulePreview(contentContext()); contentEditor.updateMention(contentContext(), $el)"
                                   @paste="handleAttachmentPaste('content', $event, $el)"
@@ -158,7 +156,6 @@
                     </div>
                     <p class="mt-composer-recovery-warning" role="status" x-show="contentEditor.error" x-text="contentEditor.error"></p>
                     <footer class="mt-content-footer">
-                      <span class="mt-composer-storage-status" role="status"></span>
                       <div class="mt-layout-group" role="group" aria-label="Content editor actions">
                         <button type="button" class="mt-button" x-show="contentEditor.conflict" @click="contentEditor.reloadKeepingText(contentContext())" :disabled="contentEditor.saving" title="Loads the latest card hash; saving will replace the card's current body with your text">Reload card, keep my text</button>
                         <button type="button" class="mt-button" @click="contentEditor.close(contentContext())" :disabled="contentEditor.saving">Cancel</button>

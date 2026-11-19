@@ -8,6 +8,7 @@ import textwrap
 import card_format
 import card_query
 from cli_admin import (
+    command_demo,
     command_import_github,
     command_info,
     command_init,
@@ -48,7 +49,6 @@ from cli_drafts import (
     command_draft_edit,
     command_draft_list,
     command_draft_read,
-    command_draft_recover,
     command_draft_save,
 )
 from cli_helpers import (
@@ -68,6 +68,7 @@ from cli_time import (
     command_time_start,
     command_time_status,
 )
+from migrate import command_migrate
 from transaction import command_sync
 
 
@@ -76,25 +77,27 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     info.set_defaults(func=command_info)
 
     init = sub.add_parser(
-        "init", help="create another workspace, e.g. for a project, without changing which mt you run",
-        description="Create a new workspace in DIRECTORY, for example one where a project's agents track their "
-                    "work. Your shell config and plain mt stay as they are. By default it runs this workspace's "
-                    "install.sh --no-path, which clones microtask from the internet (latest version, ready for "
-                    "mt update, and for mt sync when ORIGIN-URL is given). --local works offline: it copies "
-                    "this workspace's application files and settings, never its cards, drafts, or local state. "
-                    "A --local copy has no Git; to add sync and updates later, run git init there, commit, "
-                    "and run its ./install.sh --no-path. --data creates a data-only workspace instead: cards, "
-                    "your settings, and a Git repository (with ORIGIN-URL as origin), but no application; this "
-                    "mt runs it through -R, so one mt update covers it. An existing workspace is left "
+        "init", help="create this app's workspace, or another workspace in DIRECTORY",
+        description="Without DIRECTORY, create this application's own workspace/ folder, the one plain mt "
+                    "uses. "
+                    "With DIRECTORY, create a new workspace there, for example one where a project's agents track their "
+                    "work. Your shell config and plain mt stay as they are. By default it runs this "
+                    "application's install.sh --no-path, which downloads the latest release into DIRECTORY, "
+                    "with its workspace in DIRECTORY/workspace (cloned from ORIGIN-URL when that repository "
+                    "already holds one). --local works offline: it copies this application and your settings, "
+                    "never your cards, drafts, or local state. --data creates only a workspace folder: cards, "
+                    "your settings, and a Git repository (with ORIGIN-URL as origin), but no application; "
+                    "this mt runs it through -R, so one mt update covers it. An existing workspace is left "
                     "unchanged; any other existing path is refused.",
     )
-    init.add_argument("directory", metavar="DIRECTORY", help="folder to create")
+    init.add_argument("directory", nargs="?", metavar="DIRECTORY",
+                      help="folder to create; omit it to create this app's workspace/")
     init.add_argument("origin", nargs="?", metavar="ORIGIN-URL",
                       help="private repository for mt sync (not with --local)")
     init.add_argument("--local", action="store_true",
                       help="copy this workspace's application instead of downloading it; works offline")
     init.add_argument("--data", action="store_true",
-                      help="create a data-only workspace: cards and your settings, no application. This mt "
+                      help="create a workspace folder with cards and your settings, no application. This mt "
                            "runs it with -R; mt update here keeps it current. Works offline")
     init.set_defaults(func=command_init)
 
@@ -129,16 +132,16 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
                      help="executable followed by its arguments; use -- before COMMAND if needed")
     run.set_defaults(func=command_run)
 
-    policy_command = sub.add_parser("policy", help="show effective workspace policy",
-                                    description="Show effective workspace policy in a readable format, or use --json for automation.")
-    policy_command.add_argument("--json", dest="as_json", action="store_true", help="print effective policy as JSON")
-    policy_command.set_defaults(func=command_policy)
+    settings_command = sub.add_parser("settings", help="show effective workspace settings",
+                                      description="Show effective workspace settings in a readable format, or use --json for automation.")
+    settings_command.add_argument("--json", dest="as_json", action="store_true", help="print effective settings as JSON")
+    settings_command.set_defaults(func=command_policy)
 
     repo = sub.add_parser("repo", help="manage machine-local repository aliases")
     repo_sub = repo.add_subparsers(dest="repo_command", required=True)
     repo_add = repo_sub.add_parser("add", help="register a repository alias")
     repo_add.add_argument("name", help="alias name")
-    repo_add.add_argument("path", help="microtask workspace path: a full workspace or a data-only folder")
+    repo_add.add_argument("path", help="microtask workspace path: a workspace folder, or an app folder with its own workspace")
     repo_add.set_defaults(func=command_repo_add)
     repo_list = repo_sub.add_parser("list", help="list repository aliases")
     repo_list.set_defaults(func=command_repo_list)
@@ -146,17 +149,33 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     repo_remove.add_argument("name", help="alias name")
     repo_remove.set_defaults(func=command_repo_remove)
 
-    update = sub.add_parser("update", help="update application files from upstream/main")
-    update.add_argument("--check", action="store_true", help="preview application changes")
-    update.add_argument("--json", dest="as_json", action="store_true", help="print the --check preview as JSON")
-    update.add_argument("--force", action="store_true", help="compatibility option; application files always follow upstream")
+    update = sub.add_parser(
+        "update", help="update the application from the latest release",
+        description="Replace the application files with the latest release, leaving the workspace as it is. "
+                    "Needs no Git; a Git clone of the application is updated with git pull instead.")
+    update.add_argument("--check", action="store_true",
+                        help="show the current and latest versions and which top-level entries would change")
+    update.add_argument("--json", dest="as_json", action="store_true", help="print the --check report as JSON")
+    update.add_argument("--force", action="store_true", help="accepted for compatibility; does nothing")
     update.set_defaults(func=command_update)
+
+    migrate_command = sub.add_parser(
+        "migrate", help="move an old-style workspace into workspace/ and rename mt-policy.yaml to settings.yaml",
+        description="Move the Git history, cards, drafts, attachments, settings files and local state of an old-style workspace, "
+                    "where cards sit next to the app code, into workspace/, rename mt-policy.yaml to settings.yaml "
+                    "(and mt-policy.local.yaml to settings.local.yaml), and commit the removal of the application "
+                    "files there. For a workspace folder with no application, such as /srv/mt/NAME, select it with "
+                    "-R or MT_WORKSPACE: only the rename is committed. Nothing is pushed. "
+                    "Refuses when workspace/ exists, when the Git tree has uncommitted changes (drafts excepted), "
+                    "or when origin is the microtask application repository.")
+    migrate_command.add_argument("--check", action="store_true", help="show what would move and be committed; change nothing")
+    migrate_command.set_defaults(func=command_migrate)
 
     sync = sub.add_parser(
         "sync",
         help="sync task changes with origin",
         description=(
-            "Commit card, draft, and policy changes, merge origin, and push. Refuses when origin is the "
+            "Commit card, draft, and settings changes, merge origin, and push. Refuses when origin is the "
             "microtask application repository, or, when the GitHub CLI (gh) is available, a public "
             "GitHub repository unless rules.allow_public_origin is true."
         ),
@@ -176,6 +195,14 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     )
     add_web_arguments(web)
     web.set_defaults(func=command_web)
+
+    demo = sub.add_parser(
+        "demo", help="try microtask in a temporary demo workspace",
+        description="Create a temporary workspace seeded with bundled example cards and open the local "
+                    "web dashboard. All changes are deleted when you stop the server.",
+    )
+    add_web_arguments(demo)
+    demo.set_defaults(func=command_demo)
 
     imported = sub.add_parser("import-github", help="capture open labeled GitHub issues for later review")
     imported.add_argument("--repo", metavar="OWNER/REPO")
@@ -197,7 +224,7 @@ def _register_draft_parsers(sub: argparse._SubParsersAction) -> None:
     draft_create.add_argument("--created-at", help="local ISO timestamp for a new task or note draft")
     draft_create.add_argument("--file", metavar="PATH", help="initial Markdown body; - reads stdin")
     draft_create.add_argument("--json", dest="as_json", action="store_true", help="print the saved draft as JSON")
-    draft_create.set_defaults(func=command_draft_create, section_text="")
+    draft_create.set_defaults(func=command_draft_create, file_text="")
     draft_read = draft_sub.add_parser("read", help="print one draft body or its JSON record")
     draft_read.add_argument("draft_id")
     draft_read.add_argument("--json", dest="as_json", action="store_true", help="print metadata and body as JSON")
@@ -219,9 +246,6 @@ def _register_draft_parsers(sub: argparse._SubParsersAction) -> None:
     draft_save.add_argument("--expected-hash", required=True, help="content hash returned by draft read/list")
     draft_save.add_argument("--json", dest="as_json", action="store_true", help="print the card receipt as JSON")
     draft_save.set_defaults(func=command_draft_save)
-    draft_recover = draft_sub.add_parser("recover", help="import editor recovery copies from .mt/recovery/edit")
-    draft_recover.add_argument("--json", dest="as_json", action="store_true", help="print imported draft records as JSON")
-    draft_recover.set_defaults(func=command_draft_recover)
 
 
 def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
@@ -237,7 +261,7 @@ def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
 
     # `mt note` is `mt add --kind note`: one option set, registered once.
     add_description = (
-        "Save supplied text as the Markdown body using policy defaults. Optional processing instructions and "
+        "Save supplied text as the Markdown body using settings defaults. Optional processing instructions and "
         "task next action are saved as properties. With no main text or --file, redirected stdin supplies the "
         "body. Choose an open status with --status; Next action is optional. Doing tasks are claimed on creation."
     )
@@ -246,7 +270,7 @@ def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
         "supplies the body; on a terminal $VISUAL/$EDITOR opens for a human."
     )
     for name, description in (
-        ("add", "create a task or note using policy defaults or explicit metadata"),
+        ("add", "create a task or note using settings defaults or explicit metadata"),
         ("note", "create a note (alias of add --kind note; no text opens the editor)"),
     ):
         capture = sub.add_parser(
@@ -262,7 +286,7 @@ def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
             capture.add_argument("--kind", choices=("task", "note"),
                                  help="create a task (default) or note")
         add_card_metadata_arguments(capture, editing=False)
-        capture.add_argument("--status", help="task only: initial open status; defaults to workspace policy")
+        capture.add_argument("--status", help="task only: initial open status; defaults to workspace settings")
         capture.add_argument("--next-action", help="task only: optional first step or reminder of where to resume")
         capture.add_argument("--next-action-file", metavar="PATH", help="task only: read Next action from a UTF-8 file")
         capture.add_argument("--by", metavar="USERNAME",
@@ -378,7 +402,7 @@ def _register_topic_parsers(sub: argparse._SubParsersAction) -> None:
 
 
 def _add_query_output_arguments(parser: argparse.ArgumentParser, what: str) -> None:
-    parser.add_argument("--json", action="store_true", help=f"print matching {what} as a JSON array")
+    parser.add_argument("--json", dest="as_json", action="store_true", help=f"print matching {what} as a JSON array")
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--compact", action="store_true",
                         help="print minimal-field JSON records, one per line")
@@ -398,7 +422,7 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     focus.add_argument("--set", dest="set_query", help="task query to pin as manual focus")
     focus.add_argument("-n", "--next", action="store_true", help="cycle to the next ranked local focus task")
     focus.add_argument("--clear", action="store_true", help="clear the local focus selection")
-    focus.add_argument("--json", action="store_true", help="print selection, ordered candidates, and nearby deadline alerts as JSON")
+    focus.add_argument("--json", dest="as_json", action="store_true", help="print selection, ordered candidates, and nearby deadline alerts as JSON")
     focus.add_argument("--by", help="choose tasks available to this identity; does not claim work")
     focus.description = ("Show the task to focus on next among open tasks. Selection filters narrow the "
                          "candidates; --status further limits the open statuses. Setting or clearing the "
@@ -490,7 +514,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     edit.epilog = (
         "Values: boolean fields accept true or false; null clears a nullable field.\n"
         "due accepts YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS; set due_kind in the same\n"
-        "edit when adding or clearing due. Use 'mt policy --json' for configured\n"
+        "edit when adding or clearing due. Use 'mt settings --json' for configured\n"
         "priority, type, and due_kind values.\n\n"
         "Examples:\n"
         "  mt edit REF --set hidden=true --set priority=high\n"
@@ -552,6 +576,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
         "--apply", dest="apply_plan", metavar="PLAN.json",
         help="apply a saved JSON preview after verifying selection membership and every card hash; - reads stdin",
     )
+    bulk_edit.add_argument("--by", metavar="USERNAME", help="username of the claimant; needed for status changes or archiving claimed tasks")
     bulk_edit.add_argument(
         "--json", dest="as_json", action="store_true",
         help="emit the hash-guarded preview as JSON, or a saved receipt with --apply",
@@ -610,7 +635,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     convert.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")
     add_match_mode_arguments(convert)
     convert.add_argument("destination", choices=("task", "note"), help="conversion destination")
-    convert.add_argument("--status", help="status when converting a note to task; defaults to policy")
+    convert.add_argument("--status", help="status when converting a note to task; defaults to settings")
     convert.add_argument("--task-type", dest="task_type", help="task type when converting a note to task")
     convert.add_argument("--next-action", help="optional next action when converting a note to task")
     convert.add_argument("--json", dest="as_json", action="store_true", help="return the converted card receipt as JSON")
@@ -637,7 +662,7 @@ def parser() -> argparse.ArgumentParser:
         epilog="Capture with 'mt add <text>', 'mt note <text>', or guided 'mt capture'. "
                "Use 'mt <command> --help' for command-specific options and matching behavior. "
                "For metadata and body changes, see 'mt edit --help'; "
-               "for configured values and defaults, use 'mt policy --json'. "
+               "for configured values and defaults, use 'mt settings --json'. "
                "Set MT_PROJECT or MT_TOPIC to scope add, note, list, search, focus, bulk-edit, "
                "time list, time report, and web to one project or topic; an explicit --project or --topic wins.",
     )
@@ -646,8 +671,8 @@ def parser() -> argparse.ArgumentParser:
         "--repo",
         dest="workspace_repo",
         metavar="PATH_OR_NAME",
-        help="use another microtask workspace; must precede the command. A full workspace runs its "
-             "own mt; a data-only folder (cards/ and mt-policy.yaml, no mt) is run by this one",
+        help="use another microtask workspace; must precede the command. An app folder runs its "
+             "own mt and workspace; a workspace folder (cards/ and settings.yaml, no mt) is run by this one",
     )
     sub = root.add_subparsers(dest="command", required=True)
     _register_admin_parsers(sub)

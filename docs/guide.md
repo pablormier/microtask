@@ -16,7 +16,7 @@ How to work with microtask day to day. For every option of a command, run
 
 ## Cards: tasks and notes
 
-Everything you capture is a **card**: one Markdown file in `cards/`. A card is
+Everything you capture is a **card**: one Markdown file in the workspace's `cards/` folder. A card is
 either a task (something to do) or a note (something to keep). Both share the
 same format, described in [Card files](cards.md), and you can switch a card's
 kind at any time with `mt convert REF task|note`.
@@ -73,7 +73,7 @@ accept several values (`--status active --status doing`). The fields are
 `--kind`, `--status`, `--priority`, `--task-type`, `--project`, `--topic`, `--tag`,
 `--needs-review`, `--triage`, the date ranges `--created-*`, `--updated-*`,
 `--completed-*`, and `--due-*` (with `since` and `before`), `--due MODE`
-(`overdue`, `today`, `week`, `any`, `none`), `--archived`, and `--hidden`. `search`
+(`overdue`, `today`, `week`, `next` for overdue plus week, `any`, `none`), `--archived`, and `--hidden`. `search`
 also takes words, with `--and`, `--or`, or `--fuzzy`. Sorting,
 limits, and `--json` belong to `list` and `search`; `--full` prints whole cards
 as `mt read --json` does.
@@ -152,24 +152,20 @@ mt done @4e91a7c2 --note "Appointment booked"
 `mt web` opens a local dashboard in your browser until you press Ctrl+C. It
 shows a board you can group by status, priority, project, topic, tag, and more, plus Focus, Notes, Drafts,
 Archive, and Deadlines views. You can edit card content and properties, comment,
-and track time there. It edits the same files as the CLI, and nothing leaves
-your machine. `mt show REF` opens a read-only preview of a single card, as one
+and track time there. It edits the same files as the CLI and runs on your
+machine. `mt show REF` opens a read-only preview of a single card, as one
 self-contained HTML file that works offline. If you run `mt update` while a
 dashboard is open, the running server keeps using the code
 it started with and shows a notice on the board; restart `mt web` to pick up the
 updated version.
 
-On a fresh empty installation, the demo opens on a protein structure ML research
-board. Open **Audit the benchmark split** to try its checklist and follow a
-reference to the split protocol. In **Notes**, look for the AlphaFold paper
-summary and the causal inference course tracker. **Deadlines** shows a mix of
-hard deadlines, a reminder, and a target. The demo sets those dates relative to
-the day it first seeds the cards and keeps them on reopen.
-
-Changes you make in the demo stay until the bundled examples change, for example
-after `mt update`. The next command then rebuilds the demo from the new examples,
-which discards your demo edits. To start the demo over yourself, delete
-`.mt/demo`.
+Run `mt demo` to open a temporary demo workspace seeded with a protein
+structure ML research board. Open **Audit the benchmark split** to try its
+checklist and follow a reference to the split protocol. In **Notes**, look for
+the AlphaFold paper summary and the causal inference course tracker.
+**Deadlines** shows a mix of hard deadlines, a reminder, and a target, with dates
+shifted relative to today. All demo changes are local and deleted automatically
+when you stop `mt demo`.
 
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where
@@ -217,71 +213,76 @@ same files:
 ```sh
 mt draft list
 mt draft create note --title "Meeting follow-up" --file notes.md
-mt draft recover          # recover editor copies left behind by a crash
 ```
 
 Saving a draft checks its revision so another tab or the CLI never silently
 overwrites newer changes.
 
+## Attachments
+
+Images and other files you add to a card live in `attachments/`, next to
+`cards/` in the workspace. In the dashboard, paste an image, drop a file, or
+use the Attach button in the card editor, the capture composer, or the comment
+box. The file is copied into `attachments/` and a Markdown link is inserted at
+the cursor. From the CLI, `mt attach FILE` copies a file and prints the link;
+add `--card REF` to append the link to a card:
+
+```sh
+mt attach chart.png --card "Quarterly review"
+```
+
+Cards refer to attachments as `../attachments/NAME`, which also works in any
+Markdown viewer that opens the card file. Files larger than
+`rules.max_attachment_mb` (10 by default) are refused. `mt sync` commits
+attachments with the cards. `mt validate` reports broken attachment links
+(`lint.broken_attachment` in `settings.yaml` can turn that warning off).
+
 ## Workspaces
 
-A **workspace** is one folder (normally one Git repository) holding the app,
-your `cards/`, and settings. An installed `mt` always uses the workspace it
-lives in, regardless of your current directory. To work with another one:
+A **workspace** is the folder that holds your `cards/`, `drafts/`,
+`attachments/` and settings, usually as its own Git repository. Plain `mt`
+uses `workspace/` in the app folder, created by the installer or `./mt init`,
+from whatever folder you run it in.
+
+To keep a project's cards apart from yours, or to share them with other people,
+create a second workspace folder and give it a short name on this machine:
 
 ```sh
-mt repo add work "$HOME/work-tasks"   # short alias, stored on this machine
-mt -R work list                       # -R goes before the command
-```
-
-A project's cards can live in one of three places:
-
-- **Your workspace**, filed under the project with `--project myapp`. Nothing
-  to set up, and you see them next to your own cards.
-- **A data-only workspace**: its own cards, settings, and Git repository, run
-  by the `mt` you already have. Use it to keep a project's cards apart from
-  yours, or to share them with other people.
-- **A full workspace**: a second copy of microtask with its own cards. Use it
-  when the project needs its own microtask version.
-
-Create the second or third kind outside the project. Plain `mt` keeps running
-your personal workspace:
-
-```sh
-mt init ~/work/pkg-tasks --data                                   # data-only, offline, with Git
-mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # and shares it with mt sync
-mt init ~/work/pkg-tasks                                          # full copy, downloads microtask
-mt init ~/work/pkg-tasks --local                                  # full copy of your mt, offline
+mt init ~/work/pkg-tasks --data                                   # with Git, no remote
+mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # shared with mt sync
 mt repo add pkg ~/work/pkg-tasks
-mt -R pkg add "First task"
+mt -R pkg add "First task"                                        # -R goes before the command
 ```
 
-A data-only workspace is any folder with `cards/` and `mt-policy.yaml` and no
-`mt` of its own. Your own `mt update` keeps it current, since it has no
-application to update; `mt -R pkg update` is refused. Each machine that uses
-it needs `mt` and its own `mt repo add`. A full copy from the internet is
-ready for `mt update` itself;
-`--local` copies the app and your settings from the `mt` you run, never your
-cards, drafts, or local state, and has no Git until you add it.
+Your one `mt` runs every workspace folder, so `mt update` keeps them all
+current. Each machine that uses a folder needs `mt` and its own `mt repo add`.
+For cards that only need grouping, filing them in your own workspace with
+`--project NAME` is simpler.
 
-### A default data-only workspace
+`mt init DIRECTORY` without `--data` installs a separate copy of microtask with
+its own workspace, for a project that needs to stay on its own version.
+`--local` makes that copy from your installed `mt` without downloading
+anything. See `mt init --help`.
 
-If you use one data-only workspace most of the time, set `MT_WORKSPACE` in your
-shell config instead of typing `-R` on every command:
+### A default workspace folder
+
+If you use one workspace folder most of the time, set `MT_WORKSPACE` in your
+shell config instead of typing `-R` on every command. The installer does this
+when you choose a workspace outside the app folder:
 
 ```sh
-export MT_WORKSPACE="$HOME/Dropbox/todos"   # absolute path to a data-only workspace
+export MT_WORKSPACE="$HOME/Dropbox/todos"   # absolute path to a workspace folder
 mt list                                     # now lists that workspace
 ```
 
-The path must be absolute and must point at a data-only workspace; anything
-else is refused with an error. `-R` still wins, so `mt -R work list` works as
-before. Remove the line to go back to the workspace `mt` lives in.
+The path must be absolute and must point at a workspace folder that exists;
+anything else is refused with an error, and nothing is created. `-R` still
+wins, so `mt -R work list` works as before. Remove the line to go back to
+`workspace/` in the app folder.
 
-It applies to every `mt` you run, wherever you are. `./mt` inside a full
-workspace, and agents whose skills call plain `mt`, also use this workspace.
-`mt info` shows which workspace is active. With several workspaces in regular
-use, prefer `-R` and aliases.
+It applies to every `mt` you run, wherever you are, and to agents whose skills
+call plain `mt`. `mt info` shows which workspace is active. With several
+workspaces in regular use, prefer `-R` and aliases.
 
 ### Agents in another project
 
@@ -292,7 +293,7 @@ way as any other command:
 ```sh
 cd ~/code/myapp
 mt skills install --project myapp     # your workspace, limited to the project
-mt -R pkg skills install              # a data-only or full workspace
+mt -R pkg skills install              # another workspace
 ```
 
 This copies every skill into `.agents/skills/` and `.claude/skills/`, with each
@@ -306,10 +307,11 @@ are never changed.
 
 ## Settings
 
-Workspace settings live in `mt-policy.yaml` and are synced with your cards.
-Machine-specific overrides go in `mt-policy.local.yaml`, which is not synced.
-`mt policy` shows the effective values, including the defaults for new cards,
-the work-in-progress limit, and `rules.auto_sync`.
+Workspace settings live in `settings.yaml` and are synced with your cards.
+Overrides for one machine go in `settings.local.yaml`, which is not synced.
+`mt settings` shows the effective values, such as the defaults for new cards,
+the limit on tasks in progress, `rules.auto_sync`, and
+`rules.max_attachment_mb`.
 
 For optional calendar context in focus and weekly planning, see
 [Calendar setup](calendar.md). Your agent app supplies calendar access;

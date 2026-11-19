@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -49,7 +50,8 @@ class TriageCheckTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
-        policy = self.root / "mt-policy.yaml"
+        legacy_workspace(self.root)
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
         self.env = os.environ.copy()
 
@@ -68,7 +70,7 @@ class TriageCheckTests(unittest.TestCase):
 
     def policy_json(self) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(self.root / "mt"), "policy", "--json"],
+            [str(self.root / "mt"), "settings", "--json"],
             cwd=self.root,
             env=self.env,
             text=True,
@@ -156,7 +158,7 @@ class TriageCheckTests(unittest.TestCase):
         self.assertIn("unexpected file under drafts/: notes.txt", result.stderr)
 
     def policy(self) -> Path:
-        return self.root / "mt-policy.yaml"
+        return self.root / "settings.yaml"
 
     def test_valid_table_and_escaped_math_pipe_validate(self) -> None:
         self.write_task(
@@ -199,7 +201,7 @@ class TriageCheckTests(unittest.TestCase):
         result = self.validate()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("policy statuses must include required status 'waiting'", result.stderr)
+        self.assertIn("settings statuses must include required status 'waiting'", result.stderr)
 
     def test_someday_is_optional(self) -> None:
         self.policy().write_text(
@@ -242,17 +244,17 @@ class TriageCheckTests(unittest.TestCase):
         self.assertIn("unknown-status.md: invalid status 'review'", result.stderr)
 
     def test_status_labels_must_be_non_empty(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n  active: ""\n', encoding="utf-8"
         )
 
         result = self.validate()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("policy status 'active' must have a non-empty display label", result.stderr)
+        self.assertIn("settings status 'active' must have a non-empty display label", result.stderr)
 
     def test_quoted_policy_labels_preserve_boolean_text_and_hashes(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n'
             '  active: "true" # quoted boolean-like label\n'
             "  doing: 'Research #1' # trailing comment\n",
@@ -267,7 +269,7 @@ class TriageCheckTests(unittest.TestCase):
         self.assertEqual(statuses["doing"], "Research #1")
 
     def test_duplicate_status_ids_are_rejected(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n  review: "Review"\n  review: "Needs work"\n',
             encoding="utf-8",
         )
@@ -275,7 +277,7 @@ class TriageCheckTests(unittest.TestCase):
         result = self.policy_json()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("duplicate policy status ID 'review'", result.stderr)
+        self.assertIn("duplicate settings key 'review'", result.stderr)
 
     def test_status_ids_must_be_safe_slugs_and_notes_is_reserved(self) -> None:
         self.policy().write_text(
@@ -289,11 +291,11 @@ class TriageCheckTests(unittest.TestCase):
         result = self.validate()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("policy status ID must be a lowercase slug", result.stderr)
-        self.assertIn("policy status ID 'notes' is reserved", result.stderr)
+        self.assertIn("settings status ID must be a lowercase slug", result.stderr)
+        self.assertIn("settings status ID 'notes' is reserved", result.stderr)
 
     def test_local_policy_cannot_add_a_status_id(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n  review: "Review"\n', encoding="utf-8"
         )
 
@@ -301,7 +303,7 @@ class TriageCheckTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "local policy cannot add status ID 'review'; define it in mt-policy.yaml",
+            "local settings cannot add status ID 'review'; define it in settings.yaml",
             result.stderr,
         )
 
@@ -312,7 +314,7 @@ class TriageCheckTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             'statuses:\n  review: "Needs review"\n', encoding="utf-8"
         )
 
@@ -327,15 +329,15 @@ class TriageCheckTests(unittest.TestCase):
             ("done", "must not be 'done'"),
         ):
             with self.subTest(default_status=value):
-                (self.root / "mt-policy.local.yaml").write_text(
+                (self.root / "settings.local.yaml").write_text(
                     f"default_status: {value}\n", encoding="utf-8"
                 )
                 result = self.validate()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(f"policy default_status {message}", result.stderr)
+                self.assertIn(f"settings default_status {message}", result.stderr)
 
     def test_default_username_is_validated_and_exported(self) -> None:
-        local = self.root / "mt-policy.local.yaml"
+        local = self.root / "settings.local.yaml"
         for value, expected in (('"personal-user"', "personal-user"), ("null", None)):
             with self.subTest(value=value):
                 local.write_text(f"default_username: {value}\n", encoding="utf-8")
@@ -349,7 +351,7 @@ class TriageCheckTests(unittest.TestCase):
                 local.write_text(f"default_username: {value}\n", encoding="utf-8")
                 result = self.validate()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("policy default_username must be a non-empty, single-line name or null", result.stderr)
+                self.assertIn("settings default_username must be a non-empty, single-line name or null", result.stderr)
 
     def test_active_and_doing_allow_placeholder_or_missing_next_action(self) -> None:
         self.write_task("active-no-next", "## Notes\n\nAn active task.\n", status="active")

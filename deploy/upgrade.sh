@@ -13,10 +13,15 @@
 #   --no-systemctl    do not run as the mt user, restart services, or chown
 #   --dry-run         print what would happen and change nothing
 #   --rollback        make the previous version current again
+#   --allow-skip      allow skipping a minor version (see below)
 #
 # Run it as root. Versions live in /opt/microtask/TAG. 'current' and 'previous'
 # are symlinks in that folder. Every workspace in /srv/mt is checked with the new
 # version before 'current' moves. Old version folders stay until you remove them.
+#
+# Go up one minor version at a time (v0.1.x, then v0.2.x, then v0.3.x), because a
+# minor version can carry migrations that the next one removes. --allow-skip
+# overrides the check.
 set -euo pipefail
 
 root="${MT_DEPLOY_ROOT:-}"
@@ -25,6 +30,7 @@ service_user="${MT_SERVICE_USER:-mt}"
 no_systemctl=""
 dry_run=""
 rollback=""
+allow_skip=""
 
 usage() {
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
@@ -43,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --no-systemctl) no_systemctl=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     --rollback) rollback=1; shift ;;
+    --allow-skip) allow_skip=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) usage; die "unknown option $1" ;;
     *) positional+=("$1"); shift ;;
@@ -76,10 +83,11 @@ link_target() {
 # relative, so it does not depend on --root. os.replace works the same on Linux
 # and macOS, where 'mv -T' does not exist.
 set_link() {
-  local name="$1" target="$2"
-  rm -f "$apps/.$name.new"
-  ln -s "$target" "$apps/.$name.new"
-  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "$apps/.$name.new" "$apps/$name"
+  local name="$1" target="$2" tmp_link
+  tmp_link="$(mktemp "$apps/.$name.XXXXXX")"
+  rm -f "$tmp_link"
+  ln -s "$target" "$tmp_link"
+  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "$tmp_link" "$apps/$name"
 }
 
 workspace_names() {
@@ -93,14 +101,34 @@ workspace_names() {
 
 restart_services() {
   local name
+  local failed_services=()
   [[ -z "$no_systemctl" ]] || return 0
-  for name in $(workspace_names); do
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
     if systemctl is-enabled --quiet "mt-web@$name" 2>/dev/null; then
       echo "restarting mt-web@$name"
-      systemctl restart "mt-web@$name"
+      if ! systemctl restart "mt-web@$name"; then
+        failed_services+=("mt-web@$name")
+      fi
     fi
-  done
+  done < <(workspace_names)
+  if [[ ${#failed_services[@]} -gt 0 ]]; then
+    die "failed to restart service(s): ${failed_services[*]}"
+  fi
 }
+
+lock_dir=""
+tmp=""
+cleanup_upgrade() {
+  [[ -z "$tmp" ]] || rm -rf "$tmp"
+  [[ -z "$lock_dir" ]] || rmdir "$lock_dir" 2>/dev/null || true
+}
+if [[ -z "$dry_run" ]]; then
+  mkdir -p "$apps"
+  lock_dir="$apps/.upgrade.lock"
+  mkdir "$lock_dir" 2>/dev/null || die "another upgrade.sh run holds $lock_dir"
+  trap cleanup_upgrade EXIT
+fi
 
 current="$(link_target current)"
 previous="$(link_target previous)"
@@ -128,6 +156,36 @@ if [[ -d "$apps/$tag" ]]; then
   die "$apps/$tag already exists. Remove it first, or run --rollback if it is the previous version"
 fi
 
+# Do not skip a minor version: a release may carry migrations that the next minor removes.
+# The allowed target is a patch of the current minor or of the next minor that has releases,
+# read from the source's tags, as 'mt update' does.
+version_pattern='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+if [[ -z "$allow_skip" && "$current" =~ $version_pattern && "$tag" =~ $version_pattern ]]; then
+  tags="$(git ls-remote --tags --refs "$source_url" 2>/dev/null </dev/null | sed 's#.*refs/tags/##')" \
+    || die "could not list the release tags of $source_url to check the upgrade path; pass --allow-skip to skip the check"
+  verdict="$(printf '%s\n' "$tags" | python3 -c '
+import re, sys
+def minor(tag):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+def version(tag):
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
+current, target = minor(sys.argv[1]), minor(sys.argv[2])
+if version(sys.argv[2]) < version(sys.argv[1]):
+    print("downgrade")
+    sys.exit(0)
+later = sorted({m for m in map(minor, sys.stdin) if m and m > current})
+allowed = later[0] if later else current
+if target > allowed:
+    print("v%d.%d" % allowed)
+' "$current" "$tag")"
+  if [[ "$verdict" == "downgrade" ]]; then
+    die "$tag is older than $current; use --rollback to revert to the previous version, or pass --allow-skip to downgrade"
+  elif [[ -n "$verdict" ]]; then
+    die "$tag skips a minor version after $current; the next one is $verdict.x. Upgrade one minor version at a time, newest patch of each, or pass --allow-skip if you know what you are doing"
+  fi
+fi
+
 if [[ -n "$dry_run" ]]; then
   echo "would clone $tag from $source_url into $apps/$tag"
   echo "would check these workspaces with $tag: $(workspace_names | tr '\n' ' ')"
@@ -138,7 +196,6 @@ fi
 mkdir -p "$apps"
 chmod 755 "$apps"
 tmp="$(mktemp -d "$apps/.new-$tag.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
 
 echo "cloning $tag"
 clone_args=(--quiet --branch "$tag" -c advice.detachedHead=false)
@@ -147,6 +204,10 @@ git clone "${clone_args[@]}" "$source_url" "$tmp/app" 2>&1 </dev/null \
   || die "could not clone $tag from $source_url"
 [[ -x "$tmp/app/mt" ]] || die "$tag has no mt launcher"
 
+# Tell mt that this folder is a hosted version: it is updated with this script, and its
+# workspaces live in /srv/mt.
+echo "Installed by deploy/upgrade.sh" > "$tmp/app/.mt-hosted"
+
 # Compile now so the first start is fast and nothing writes into the folder later.
 python3 -m compileall -q "$tmp/app/scripts" "$tmp/app/tools" >/dev/null
 [[ -n "$no_systemctl" ]] || chown -R root:root "$tmp/app"
@@ -154,12 +215,13 @@ chmod -R go-w,a+rX "$tmp/app"
 
 mv "$tmp/app" "$apps/$tag"
 rmdir "$tmp"
-trap - EXIT
+tmp=""
 echo "installed $apps/$tag"
 
 # Check every workspace with the new version before switching.
 failed=()
-for name in $(workspace_names); do
+while IFS= read -r name; do
+  [[ -n "$name" ]] || continue
   ws="$workspaces/$name"
   if [[ -z "$no_systemctl" ]]; then
     if command -v runuser >/dev/null 2>&1; then
@@ -178,7 +240,7 @@ for name in $(workspace_names); do
     printf '%s\n' "$output" | sed 's/^/  /' >&2
     failed+=("$name")
   fi
-done
+done < <(workspace_names)
 if [[ ${#failed[@]} -gt 0 ]]; then
   echo "error: ${failed[*]} did not validate with $tag. 'current' is unchanged and nothing was restarted." >&2
   echo "The new version stays in $apps/$tag. Remove it by hand when you no longer need it." >&2

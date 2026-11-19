@@ -16,20 +16,20 @@ DEFAULT_LEVELS = {
 
 
 def normalize_lint_policy(raw: object) -> dict[str, str]:
-    """Validate and normalize the optional ``lint`` policy mapping."""
+    """Validate and normalize the optional ``lint`` settings mapping."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise ValueError("policy lint must be a mapping of rule names to 'off' or 'warn'")
+        raise ValueError("settings lint must be a mapping of rule names to 'off' or 'warn'")
     normalized: dict[str, str] = {}
     for rule, level in raw.items():
         if rule not in DEFAULT_LEVELS:
-            raise ValueError(f"unknown policy lint rule '{rule}'")
+            raise ValueError(f"unknown settings lint rule '{rule}'")
         if level is False:
             # YAML 1.1 parses unquoted 'off' as boolean False.
             level = "off"
         if not isinstance(level, str) or level not in VALID_LEVELS:
-            raise ValueError(f"policy lint.{rule} must be 'off' or 'warn'")
+            raise ValueError(f"settings lint.{rule} must be 'off' or 'warn'")
         normalized[str(rule)] = level
     return normalized
 
@@ -44,20 +44,9 @@ def rule_level(policy: dict, rule: str) -> str:
 
 def backticked_ref_messages(rel: Path | str, fm: dict[str, object], body: str) -> list[str]:
     """Report inline-backticked `` `@ref` `` mentions that will not render as links."""
-    texts: list[str] = [body]
-    for field in ("next_action", "processing_instructions"):
-        value = fm.get(field)
-        if isinstance(value, str) and value:
-            texts.append(value)
-    comments = fm.get("comments")
-    if isinstance(comments, list):
-        for comment in comments:
-            if isinstance(comment, dict) and isinstance(comment.get("text"), str):
-                texts.append(comment["text"])
-
     seen: set[str] = set()
     refs: list[str] = []
-    for text in texts:
+    for text in card_format.prose_fields(fm, body):
         for ref in card_references.backticked_references(text):
             if ref.casefold() not in seen:
                 seen.add(ref.casefold())
@@ -113,19 +102,9 @@ def broken_attachment_messages(
     """Report ../attachments/... links whose target file does not exist."""
     if attachments_root is None:
         return []
-    texts: list[str] = [body]
-    for field in ("next_action", "processing_instructions"):
-        value = fm.get(field)
-        if isinstance(value, str) and value:
-            texts.append(value)
-    comments = fm.get("comments")
-    if isinstance(comments, list):
-        for comment in comments:
-            if isinstance(comment, dict) and isinstance(comment.get("text"), str):
-                texts.append(comment["text"])
     missing: list[str] = []
     seen: set[str] = set()
-    for text in texts:
+    for text in card_format.prose_fields(fm, body):
         for target in attachments.extract_attachment_targets(text):
             if target in seen:
                 continue

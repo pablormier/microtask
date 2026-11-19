@@ -26,8 +26,12 @@ terminology, or exact documentation wording.
 the CLI and the dashboard, an interrupted switch, a pulled second timer, the upgrade
 from `.mt/time-running`, simultaneous starts and the single-write stop.
 
+`test_workspace_resolution.py` covers where cards live (`MT_WORKSPACE`, `workspace/`, an old-style root, first-run creation).
+`test_settings_rename.py` covers the `mt settings` command, detection of the old `mt-policy.yaml` name, and the rename done by `mt migrate`.
+`test_update.py`, `test_migrate.py` and `test_install.py` use local release tarballs and temporary homes, with no network.
+
 `test_deploy.py` runs `deploy/add-user.sh` and `deploy/upgrade.sh` in a temporary root
-with `--no-systemctl` and local release tags (skipped without bash). It checks the files
+with `--no-systemctl` and local release tags (skipped without bash). The scripts run a clone of this checkout with its uncommitted files laid over it. It checks the files
 they write, the version links, and that a read-only app runs a data-only workspace.
 
 `tests/support.py` provides shared CLI execution (`run_cli`) and a deterministic

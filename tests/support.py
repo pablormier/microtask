@@ -4,11 +4,33 @@ from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+import io
+import shutil
 import subprocess
+import tarfile
 from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def legacy_workspace(root: Path) -> Path:
+    """Turn a copy of the application into an old-style workspace: cards and settings beside the code.
+
+    A developer's own workspace/ and update leftovers are dropped from the copy, so the copy
+    is resolved as a legacy workspace.
+    """
+    root = Path(root)
+    for name in ("workspace", ".update-tmp", "VERSION"):
+        path = root / name
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+    (root / "cards").mkdir(exist_ok=True)
+    (root / "cards" / ".gitkeep").touch()
+    shutil.copy2(ROOT / "templates" / "settings.yaml", root / "settings.yaml")
+    return root
 
 
 def run_cli(
@@ -37,6 +59,39 @@ def run_cli(
         # Without input, `mt add` and `mt note` read a non-terminal stdin; never inherit one that may stay open.
         kwargs["stdin"] = subprocess.DEVNULL
     return subprocess.run([str(root / "mt"), *args], **kwargs)
+
+
+RELEASE_ENTRIES = ("mt", "install.sh", "README.md", "LICENSE", "AGENTS.md", "CLAUDE.md", "GEMINI.md",
+                   "CONTRIBUTING.md", ".gitignore", "scripts", "tools", "templates", "examples", ".agents", "deploy")
+
+
+def make_release(archive: Path, tag: str, *, extra: dict[str, bytes] | None = None,
+                 drop: tuple[str, ...] = (), raw_members: list[tuple[str, bytes, int]] | None = None) -> Path:
+    """Write a GitHub-style release tarball (one top-level folder) built from this checkout.
+
+    extra maps paths inside the release to contents; drop removes top-level entries;
+    raw_members adds members with exactly the given names, for unsafe-archive tests.
+    """
+    top = f"microtask-{tag.lstrip('v')}"
+    with tarfile.open(archive, "w:gz") as output:
+        for name in RELEASE_ENTRIES:
+            source = ROOT / name
+            if name in drop or not source.exists():
+                continue
+            output.add(source, arcname=f"{top}/{name}",
+                       filter=lambda info: None if "__pycache__" in info.name or info.name.endswith(".DS_Store")
+                       else info)
+        for name, contents in (extra or {}).items():
+            info = tarfile.TarInfo(f"{top}/{name}")
+            info.size = len(contents)
+            info.mode = 0o755 if name == "mt" else 0o644
+            output.addfile(info, io.BytesIO(contents))
+        for name, contents, mode in raw_members or []:
+            info = tarfile.TarInfo(name)
+            info.size = len(contents)
+            info.mode = mode
+            output.addfile(info, io.BytesIO(contents))
+    return archive
 
 
 class FakeClock:

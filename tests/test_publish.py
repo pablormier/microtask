@@ -5,6 +5,7 @@ import contextlib
 import io
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,7 @@ class SyncTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
+        legacy_workspace(self.root)
         self.git(self.origin.parent, "init", "--bare", str(self.origin))
         self.git(self.root, "init", "-b", "main")
         self.git(self.root, "config", "user.name", "Sync Test")
@@ -60,12 +62,12 @@ class SyncTests(unittest.TestCase):
         return support.run_cli(self.root, *args, env=env)
 
     def enable_auto_sync(self) -> None:
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(
             policy.read_text(encoding="utf-8").replace("auto_sync: false", "auto_sync: true"),
             encoding="utf-8",
         )
-        self.git(self.root, "add", "mt-policy.yaml")
+        self.git(self.root, "add", "settings.yaml")
         self.git(self.root, "commit", "-m", "Enable auto sync")
 
     def add_task(self, title: str = "Call dentist") -> Path:
@@ -89,6 +91,18 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(after, before)
         self.assertEqual(remote, before)
         self.assertTrue(task.is_file())
+
+    def test_auto_sync_prints_the_saved_card_before_the_sync_output(self) -> None:
+        self.enable_auto_sync()
+
+        result = self.run_mt("add", "Order this output")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        saved = next(index for index, line in enumerate(lines) if line.endswith("order-this-output.md"))
+        syncing = lines.index("Auto-syncing task changes...")
+        self.assertLess(saved, syncing)
+        self.assertEqual(sum(line.endswith("order-this-output.md") for line in lines), 1)
 
     def test_auto_sync_add_commits_and_pushes_created_task(self) -> None:
         self.enable_auto_sync()
@@ -263,7 +277,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(message, "Plan passport renewal")
 
     def test_sync_shares_custom_status_policy_with_flat_cards(self) -> None:
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("statuses:\n", "statuses:\n  review: Review\n", 1))
         task = self.add_task("Review the draft")
         self.assertEqual(self.run_mt("move", task.stem, "review").returncode, 0)
@@ -271,7 +285,7 @@ class SyncTests(unittest.TestCase):
         result = self.run_mt("sync")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.git(self.root, "status", "--porcelain").stdout, "")
-        self.assertIn("  review: Review", self.git(self.root, "show", "origin/main:mt-policy.yaml").stdout)
+        self.assertIn("  review: Review", self.git(self.root, "show", "origin/main:settings.yaml").stdout)
         self.assertIn("status: review", self.git(self.root, "show", f"origin/main:cards/{task.name}").stdout)
 
         other = Path(self.temporary.name) / "other"
@@ -357,6 +371,8 @@ class SyncTests(unittest.TestCase):
         task.write_text(
             """---
 id: 2026-01-01-010101-remote-task
+kind: task
+title: Remote task
 status: inbox
 priority: medium
 type: task
@@ -429,7 +445,7 @@ Review remote task.
             return original_git_text(*arguments, **kwargs)
 
         original_validator = transaction.run_validator
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with (
             patch.object(transaction, "git_text", gated_git_text),
             patch.object(transaction, "run_validator", original_validator),
@@ -478,7 +494,7 @@ Review remote task.
         original_validator = transaction.run_validator
         stdout = io.StringIO()
         stderr = io.StringIO()
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with (
             patch.object(transaction, "git_text", gated_git_text),
             patch.object(transaction, "run_validator", original_validator),

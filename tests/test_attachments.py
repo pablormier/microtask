@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 from pathlib import Path
 import shutil
@@ -24,7 +25,6 @@ import policy_parser  # noqa: E402
 import store  # noqa: E402
 import taskweb  # noqa: E402
 import transaction  # noqa: E402
-import update  # noqa: E402
 import validation  # noqa: E402
 from workspace import Workspace  # noqa: E402
 from support import run_cli  # noqa: E402
@@ -38,7 +38,7 @@ PNG_1X1 = base64.b64decode(
 
 def make_data_workspace(tmp_dir: Path) -> Workspace:
     (tmp_dir / "cards").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "mt-policy.yaml", tmp_dir / "mt-policy.yaml")
+    shutil.copy2(ROOT / "templates" / "settings.yaml", tmp_dir / "settings.yaml")
     (tmp_dir / ".gitignore").write_text(".mt/\n", encoding="utf-8")
     return Workspace.at(tmp_dir, app_root=ROOT)
 
@@ -84,8 +84,8 @@ class AttachmentCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ws = make_data_workspace(root)
-            policy_text = (root / "mt-policy.yaml").read_text(encoding="utf-8")
-            (root / "mt-policy.yaml").write_text(
+            policy_text = (root / "settings.yaml").read_text(encoding="utf-8")
+            (root / "settings.yaml").write_text(
                 policy_text.replace("max_attachment_mb: 10", "max_attachment_mb: 0.001"),
                 encoding="utf-8",
             )
@@ -134,8 +134,8 @@ class AttachmentCoreTests(unittest.TestCase):
             symlink_path.unlink()
 
             # Oversized attachment is rejected by validation.
-            (root / "mt-policy.yaml").write_text(
-                (root / "mt-policy.yaml").read_text(encoding="utf-8").replace(
+            (root / "settings.yaml").write_text(
+                (root / "settings.yaml").read_text(encoding="utf-8").replace(
                     "max_attachment_mb: 10", "max_attachment_mb: 0.001"
                 ),
                 encoding="utf-8",
@@ -182,7 +182,7 @@ class AttachmentCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_data_workspace(root)
-            policy_path = root / "mt-policy.yaml"
+            policy_path = root / "settings.yaml"
             text = policy_path.read_text(encoding="utf-8")
             self.assertIn("max_attachment_mb: 10", text)
             policy_path.write_text(text.replace("max_attachment_mb: 10", "max_attachment_mb: 0.000001"), encoding="utf-8")
@@ -227,10 +227,7 @@ class AttachmentCoreTests(unittest.TestCase):
         result = subprocess.run([node], input=source + "\n" + scenario, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_sync_and_update_preserve_attachments(self) -> None:
-        self.assertFalse(update.application_path("attachments/abc123.png"))
-        self.assertFalse(update.application_path("attachments/papers/spec.pdf"))
-
+    def test_sync_commits_attachments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ws = make_data_workspace(root)
@@ -246,52 +243,13 @@ class AttachmentCoreTests(unittest.TestCase):
             sub.mkdir(parents=True, exist_ok=True)
             (sub / "readme.md").write_text("# Attached markdown\n", encoding="utf-8")
 
-            rc, committed = transaction._sync_stage_and_commit_local(ws, None)
+            rc, committed = transaction._sync_stage_and_commit_local(ws, None, out=io.StringIO(), err=io.StringIO())
             self.assertIsNone(rc)
             self.assertTrue(committed)
             msg = subprocess.run(
                 ["git", "log", "-1", "--pretty=%s"], cwd=root, check=True, capture_output=True, text=True
             ).stdout.strip()
             self.assertEqual(msg, "Update 2 attachments")
-
-    def test_demo_to_real_transition_preserves_composer_attachment(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "cards").mkdir(parents=True, exist_ok=True)
-            (root / "examples" / "cards").mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ROOT / "mt-policy.yaml", root / "mt-policy.yaml")
-            ws = Workspace.at(root, app_root=root)
-            self.assertTrue(ws.demo_active())
-
-            # Demo card edit stays isolated under .mt/demo/attachments/.
-            demo_att = operations.op_store_attachment(
-                ws, PNG_1X1, filename="demo-shot.png", content_type="image/png", real=False, sync=False
-            )
-            self.assertTrue((ws.demo_root() / "attachments" / str(demo_att.receipt["filename"])).is_file())
-            self.assertFalse((root / "attachments" / str(demo_att.receipt["filename"])).exists())
-
-            # Capture composer upload goes to real attachments/ even while demo mode is active.
-            real_att = operations.op_store_attachment(
-                ws, PNG_1X1 + b"real", filename="first-card.png", content_type="image/png", real=True, sync=False
-            )
-            real_name = str(real_att.receipt["filename"])
-            self.assertTrue((root / "attachments" / real_name).is_file())
-            self.assertIsNotNone(attachments.resolve_attachment_path(ws.real_attachments_root(), real_name))
-
-            # Creating the first real card ends demo mode, and the attachment resolves in real attachments/.
-            with transaction.time_mutation_lock(ws):
-                operations.create_card(
-                    "task",
-                    f"First real card with {real_att.receipt['markdown']}",
-                    title="First real card",
-                    ws=ws,
-                )
-            ws_after = ws.for_operation()
-            self.assertFalse(ws_after.demo_active())
-            self.assertIsNotNone(attachments.resolve_attachment_path(ws_after.attachments_root(), real_name))
-            report = validation.audit_workspace(root, policy_parser.load_policy(root))
-            self.assertEqual(report.errors, [])
-            self.assertEqual(report.warnings, [])
 
     def test_content_disposition_ascii_and_unicode(self) -> None:
         ascii_header = attachments.content_disposition_attachment("report.zip")
@@ -412,7 +370,7 @@ class AttachmentWebServerTests(unittest.TestCase):
             self.assertIsNone(resp.headers.get("Content-Disposition"))
 
         # Traversal attempts return 404.
-        for bad_path in ("/attachments/../mt-policy.yaml", "/attachments/%2e%2e/mt-policy.yaml"):
+        for bad_path in ("/attachments/../settings.yaml", "/attachments/%2e%2e/settings.yaml"):
             with self.assertRaises(urllib.error.HTTPError) as bad_ctx:
                 urllib.request.urlopen(f"{self.base_url}{bad_path}", timeout=5)
             self.assertEqual(bad_ctx.exception.code, 404)

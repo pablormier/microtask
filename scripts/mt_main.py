@@ -7,8 +7,4 @@ import sys
 import cli
 
 if hasattr(cli, "main"):
-    try:
-        raise SystemExit(cli.main())
-    except (OSError, ValueError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        raise SystemExit(1)
+    raise SystemExit(cli.main())

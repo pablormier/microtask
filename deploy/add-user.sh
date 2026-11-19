@@ -79,6 +79,48 @@ if [[ -z "$no_systemctl" && -z "$dry_run" ]]; then
   id "$service_user" >/dev/null 2>&1 || die "service account $service_user does not exist"
 fi
 
+if [[ -z "$dry_run" ]]; then
+  mkdir -p "$env_dir"
+  lock_dir="$env_dir/.add-user.lock"
+  lock_tries=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    lock_tries=$((lock_tries + 1))
+    [[ $lock_tries -lt 50 ]] || die "another add-user.sh run holds $lock_dir"
+    sleep 0.1
+  done
+fi
+
+created=()
+added_email=""
+enabled_unit=""
+cleanup() {
+  local status=$?
+  if [[ $status -ne 0 ]]; then
+    if [[ -n "$enabled_unit" ]]; then
+      systemctl disable --now "$enabled_unit" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$added_email" && -f "$emails_file" ]]; then
+      python3 -c '
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+email = sys.argv[2]
+lines = [line for line in p.read_text(encoding="utf-8").splitlines() if line != email]
+p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+' "$emails_file" "$added_email" 2>/dev/null || true
+    fi
+    if [[ ${#created[@]} -gt 0 ]]; then
+      echo "error: setup failed; removing what this run created" >&2
+      for path in "${created[@]}"; do
+        rm -rf "$path"
+      done
+    fi
+  fi
+  if [[ -n "${lock_dir:-}" ]]; then
+    rmdir "$lock_dir" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
 # Lowest unused port from first_port up, judged by the existing env files.
 used_ports=" "
 if [[ -d "$env_dir" ]]; then
@@ -102,20 +144,8 @@ if [[ -n "$dry_run" ]]; then
   exit 0
 fi
 
-created=()
-cleanup() {
-  local status=$?
-  if [[ $status -ne 0 && ${#created[@]} -gt 0 ]]; then
-    echo "error: setup failed; removing what this run created" >&2
-    for path in "${created[@]}"; do
-      rm -rf "$path"
-    done
-  fi
-}
-trap cleanup EXIT
-
-# Create a data-only workspace: cards/, mt-policy.yaml and a Git repository, with
-# no app files. The shipped policy has auto_sync off and init adds no 'origin'
+# Create a workspace folder: cards/, settings.yaml and a Git repository, with
+# no app files. The shipped settings have auto_sync off and init adds no 'origin'
 # remote, so nothing in it syncs. The Git identity is set for this one commit
 # because root on a server often has none. Bytecode is not written, so nothing
 # lands in the read-only app folder.
@@ -126,6 +156,7 @@ init_log="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 \
   GIT_COMMITTER_NAME=microtask GIT_COMMITTER_EMAIL=microtask@localhost \
   "$app_dir/mt" init --data "$workspace" 2>&1 </dev/null)" \
   || { echo "$init_log" >&2; die "could not create the workspace"; }
+chmod 700 "$workspace"
 
 mkdir -p "$env_dir"
 created+=("$env_file")
@@ -147,6 +178,7 @@ mkdir -p "$(dirname "$emails_file")"
 touch "$emails_file"
 if ! grep -qxF "$email" "$emails_file"; then
   printf '%s\n' "$email" >> "$emails_file"
+  added_email="$email"
 fi
 
 if [[ -z "$no_systemctl" ]]; then
@@ -155,8 +187,12 @@ if [[ -z "$no_systemctl" ]]; then
     caddy validate --config /etc/caddy/Caddyfile >/dev/null
   fi
   systemctl enable --now "mt-web@$user"
+  enabled_unit="mt-web@$user"
   systemctl reload caddy
 fi
 
+if [[ -n "${lock_dir:-}" ]]; then
+  rmdir "$lock_dir" 2>/dev/null || true
+fi
 trap - EXIT
 echo "Added $user: https://$host (owner $email, local port $port)"

@@ -1,29 +1,64 @@
-"""Core workspace write and read operations for microtask."""
+"""Core write operations for microtask cards, timers, focus, and drafts."""
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
 import hashlib
-import json
-import os
 from pathlib import Path
 import re
 import shlex
-import sys
-import tempfile
 import time as clock_time
 import uuid
 
 import attachments
 import card_format
 import card_query
+import card_render
+from card_render import (  # noqa: F401 - re-exported for callers
+    _apply_body_edit,
+    _apply_bulk_metadata,
+    _build_edit_metadata,
+    _bulk_edit_assignments,
+    _bulk_plan_item,
+    _plan_query,
+    append_comments,
+    apply_body_replacements,
+    apply_exact_body_replacements,
+    blank_line_separator,
+    capture_title,
+    card_capture_fields,
+    check_claim,
+    clean_text_values,
+    parse_tag_json,
+    render_converted_note,
+    render_converted_task,
+    render_item_document,
+    render_new_card,
+    suggested_topics,
+    task_defaults,
+    title_from_note_body,
+    topic_query,
+    topic_rename_plan,
+    transition_claim,
+    unassigned_priority,
+    unique_item_timestamp,
+    validate_shared_metadata,
+    workspace_topic_counts,
+    workspace_topic_tree,
+)
 import drafts as draft_store
+import focus
+from focus import (  # noqa: F401 - re-exported for callers
+    focus_context,
+    focus_sort_key,
+    followup_sort_key,
+    has_deadline_due,
+    is_high_priority_task,
+    next_action_needs_restart_step,
+    ranked_focus_candidates,
+    task_display_sort_key,
+)
 import store
 from store import (
-    CLAIM_FIELDS,
-    FOCUS_REASONS,
-    VAGUE_RESTART_PATTERN,
     Card,
     CardInputError,
     ConflictError,
@@ -33,22 +68,15 @@ from store import (
     ValidationError,
     _resolve_unique_card,
     _ws,
-    abbreviate,
-    active_root,
     card_by_capture_id,
+    cards_root,
+    clear_focus_task_id,
     current_username,
-    demo_active,
-    demo_root,
     discover,
-    due_kind_error,
-    due_kind_value,
-    due_sort_value,
     format_duration,
     is_archived,
-    is_due_value,
     is_hidden,
     is_timestamp,
-    item_json_record,
     item_receipt,
     local_stamp,
     now_stamp,
@@ -57,22 +85,23 @@ from store import (
     parse_frontmatter,
     parse_time_argument,
     parse_yaml,
-    pin_demo_state,
-    read_focus_state,
-    real_cards_root,
     saved_receipt,
     select_cards,
     slugify,
-    task_by_id,
-    time_entry_from_timer,
-    time_session_for,
+    time_log_entries,
     timer_session_saved,
+    write_focus_state,
+    write_focus_task_id,
+)
+import timer_ops
+from timer_ops import (  # noqa: F401 - re-exported for callers
+    append_time_entry,
+    save_time_session,
+    settle_timer,
 )
 import transaction
 from transaction import (
-    MutationReceipt,
     _require_mutation_lock,
-    auto_sync_after_mutation,
     time_mutation_lock,
 )
 from workspace import Workspace
@@ -82,12 +111,12 @@ from workspace import Workspace
 class WriteResult:
     """Result of a workspace write operation."""
 
-    card: "Card | None"
+    card: Card | None
     receipt: dict[str, object]
     message: str = ""
     changed: bool = True
     sync_error: str | None = None
-
+    sync_exit_code: int = 0
 
 
 def _run_write_operation(
@@ -95,6 +124,7 @@ def _run_write_operation(
     operation,
     *,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Execute one write operation under time_mutation_lock, then run auto-sync if enabled."""
     resolved = _ws(ws)
@@ -103,550 +133,59 @@ def _run_write_operation(
             result = operation(resolved)
     except TaskError as error:
         if sync and error.sync_needed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-            transaction.run_auto_sync_for_receipt(ws=resolved)
+            if quiet_sync:
+                transaction.run_auto_sync_for_receipt(ws=resolved)
+            else:
+                transaction._run_auto_sync(ws=resolved)
         raise
     if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-        sync_error = transaction.run_auto_sync_for_receipt(ws=resolved)
-        if sync_error:
-            return replace(result, sync_error=sync_error)
+        if quiet_sync:
+            sync_error = transaction.run_auto_sync_for_receipt(ws=resolved)
+            if sync_error:
+                return replace(result, sync_error=sync_error)
+        else:
+            # The sync prints as it runs, so print the result first and do not repeat it.
+            if result.message:
+                print(result.message, flush=True)
+                result = replace(result, message="")
+            sync_code = transaction._run_auto_sync(ws=resolved)
+            if sync_code:
+                return replace(result, sync_exit_code=sync_code)
     return result
 
 
-
-def unique_item_timestamp(*, real: bool = False, ws: Workspace | None = None) -> str:
-    resolved = _ws(ws)
-    current = datetime.now().replace(microsecond=0)
-    while True:
-        timestamp = current.strftime("%Y-%m-%d-%H%M%S")
-        root = resolved.real_cards_root() if real else resolved.cards_root()
-        if not any(path.name.startswith(f"{timestamp}-") for path in root.glob("*.md")):
-            return timestamp
-        current += timedelta(seconds=1)
-
-
-
-def clean_text_values(values: list[str]) -> list[str]:
-    return [value.strip() for value in values if value.strip()]
-
-
-
-def append_comments(raw: str, comments: list[str], timestamp: str) -> str:
-    cleaned = clean_text_values(comments)
-    if not cleaned:
-        return raw
-    properties, body = card_format.parse_document(raw)
-    records = properties.setdefault("comments", [])
-    if not isinstance(records, list):
-        raise ValueError("comments must be a list")
-    records.extend({"at": timestamp, "text": comment} for comment in cleaned)
-    return card_format.render_document(properties, body)
-
-
-
-def append_time_entry(raw: str, entry: dict[str, object]) -> str:
-    properties, body = card_format.parse_document(raw)
-    if not isinstance(entry, dict) or set(entry) != {"session_id", "start", "end", "elapsed_seconds"}:
-        raise ValueError("time entry must contain session_id, start, end, and elapsed_seconds")
-    records = properties.setdefault("time_entries", [])
-    if not isinstance(records, list):
-        raise ValueError("time_entries must be a list")
-    records.append(dict(entry))
-    return card_format.render_document(properties, body)
-
-
-
-def blank_line_separator(body: str) -> str:
-    if not body:
-        return ""
-    if re.search(r"(?:\r?\n){2}$", body):
-        return ""
-    newline = "\r\n" if body.endswith("\r\n") else "\n" if body.endswith("\n") else (
-        "\r\n" if "\r\n" in body and "\n" not in body.replace("\r\n", "") else "\n"
-    )
-    return newline if body.endswith(("\n", "\r")) else newline * 2
-
-
-
-def append_completion_note(raw: str, notes: list[str], today: str) -> str:
-    cleaned = clean_text_values(notes)
-    if not cleaned:
-        return raw
-    properties, body = card_format.parse_document(raw)
-    comments = properties.setdefault("comments", [])
-    if not isinstance(comments, list):
-        raise ValueError("comments must be a list")
-    comments.extend({"at": today, "text": note} for note in cleaned)
-    return card_format.render_document(properties, body)
-
-
-
-def settle_timer(raw: str, end_epoch: int) -> tuple[str, dict | None]:
-    """Remove the card's running timer and record its session, in the one text.
-
-    Returns the new text and the timer that was settled, or ``raw`` unchanged
-    and None when no timer runs. A session the card already holds is not
-    recorded twice.
-    """
-    properties, body = card_format.parse_document(raw)
-    timer = card_format.timer_from(properties)
-    if timer is None:
-        return raw, None
-    del properties["timer"]
-    if not any(entry["session_id"] == timer["session_id"] for entry in card_format.time_entries_from(properties)):
-        records = properties.setdefault("time_entries", [])
-        if not isinstance(records, list):
-            raise ValueError("time_entries must be a list")
-        records.append(time_entry_from_timer(timer, end_epoch))
-    return card_format.render_document(properties, body), timer
-
-
-
-def finish_lifecycle_timer(
-    task: Card, raw: str, end_epoch: int, ws: Workspace | None = None,
-) -> tuple[str, dict | None]:
-    """Stage the session in the same card write as its lifecycle change."""
-    return settle_timer(raw, end_epoch)
-
-
-
-def save_time_session(
-    task: Card, timer: dict[str, object], end_epoch: int, ws: Workspace | None = None,
-) -> tuple[bool, str]:
-    """Append one session to a card without touching its timer; report validation failure."""
-    resolved = _ws(ws)
-    entry, already_saved = time_session_for(task, timer, end_epoch)
-    if already_saved:
-        return True, "already saved"
-    original = task.path.read_bytes()
-    updated = append_time_entry(task.raw, entry)
-    updated = card_format.replace_property(updated, "updated", now_stamp())
-    base = active_root(resolved)
-    relative = str(task.path.relative_to(base))
-    try:
-        transaction.apply_item_transaction({relative: updated.encode("utf-8")}, expected={relative: original}, source_root=base, ws=resolved)
-    except (OSError, ValueError):
-        return False, "time log failed validation"
-    return True, "saved"
-
-
-
-def focus_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, str]:
-    priority = str(task.frontmatter.get("priority") or "medium")
-    due = due_sort_value(task.frontmatter.get("due")) or "9999-12-31T23:59:59"
-    return rank.get(priority, len(rank)), due, task.path.name
-
-
-
-def is_high_priority_task(task: Card) -> bool:
-    priority = str(task.frontmatter.get("priority") or "medium")
-    return priority in {"urgent", "high"}
-
-
-
-def has_deadline_due(task: Card) -> bool:
-    return due_kind_value(task.frontmatter) == "deadline"
-
-
-
-def ranked_focus_candidates(tasks: list["Task"], rank: dict[str, int]) -> list[tuple["Task", str]]:
-    """Rank actionable tasks; deadline alerts cover blocked and deferred work."""
-    now = datetime.now()
-
-    def due(task: Card, mode: str) -> bool:
-        return has_deadline_due(task) and card_query.due_matches(task.frontmatter.get("due"), mode, now)
-
-    overdue, today, week = card_query.DUE_OVERDUE, card_query.DUE_TODAY, card_query.DUE_WEEK
-
-    def due_value(task: Card) -> str | None:
-        return due_sort_value(task.frontmatter.get("due")) or None
-
-    groups = (
-        ((task for task in tasks if due(task, today) and not due(task, overdue)), "due_today"),
-        ((task for task in tasks if due(task, overdue) and is_high_priority_task(task)), "high_overdue"),
-        ((task for task in tasks if task.frontmatter.get("status") == "doing"), "doing"),
-        ((task for task in tasks if due(task, week) and not due(task, today)), "due_soon"),
-        ((task for task in tasks if due(task, overdue) and not is_high_priority_task(task)), "deadline_review"),
-        ((task for task in tasks if task.frontmatter.get("status") == "active"), "active"),
-        ((task for task in tasks if task.frontmatter.get("status") == "inbox"), "inbox"),
-    )
-    ordered: list[tuple[Card, str]] = []
-    seen: set[str] = set()
-    for candidates, reason in groups:
-        def key(item: Card) -> tuple:
-            order = focus_sort_key(item, rank)
-            return (due_value(item) or "", *order) if reason in {"due_today", "due_soon"} else order
-
-        for task in sorted(candidates, key=key):
-            task_id = str(task.frontmatter.get("id") or task.path.stem)
-            if task_id in seen:
-                continue
-            seen.add(task_id)
-            ordered.append((task, reason))
-    return ordered
-
-
-
-def task_display_sort_key(task: "Card", rank: dict[str, int]) -> tuple[int, int, str, str]:
-    value, now = task.frontmatter.get("due"), datetime.now()
-    due_group = 0 if any(card_query.due_matches(value, mode, now) for mode in (
-        card_query.DUE_OVERDUE, card_query.DUE_TODAY)) else 1 if value else 2
-    priority, normalized_due, _ = focus_sort_key(task, rank)
-    return due_group, priority, normalized_due, str(task.path)
-
-
-
-def followup_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, int, str]:
-    due = due_sort_value(task.frontmatter.get("due"))
-    priority = str(task.frontmatter.get("priority") or "medium")
-    due_group = 0 if card_query.due_matches(task.frontmatter.get("due"), card_query.DUE_OVERDUE, datetime.now()) else 1 if due else 2
-    return due_group, due or "9999-12-31T23:59:59", rank.get(priority, len(rank)), task.path.name
-
-
-
-def focus_context(tasks: list["Task"], *, actor: str | None = None, ws: Workspace | None = None) -> dict:
-    """One read-only focus snapshot for the CLI, dashboard, and skills.
-
-    Callers select visibility and workspace filters before calling this function.
-    Saved selection never suppresses alerts or changes the candidate order.
-    """
-    resolved = _ws(ws)
-    actor = current_username(actor, ws=resolved)
-    rank = {name: index for index, name in enumerate(store.policy(resolved).get("priorities", {}))}
-    tasks = [task for task in tasks if task.frontmatter.get("status") != "done"]
-    available = [task for task in tasks
-                 if task.frontmatter.get("status") in {"active", "doing", "inbox"}
-                 and task.frontmatter.get("claimed_by") in {None, "", actor}]
-
-    def record(task: Card, reason_key: str) -> dict:
-        return {**item_json_record(task, ws=resolved), "reason_key": reason_key,
-                "reason": FOCUS_REASONS[reason_key]}
-
-    candidates = [record(task, reason) for task, reason in ranked_focus_candidates(available, rank)]
-    state = read_focus_state(resolved)
-    selected = next((item for item in candidates if state and item["id"] == state.task_id), None)
-    mode = state.mode if selected and state else "auto"
-    if selected:
-        selected = {**selected, "reason_key": mode, "reason": FOCUS_REASONS[mode]}
-    elif candidates:
-        selected = candidates[0]
-
-    now = datetime.now()
-    alerts = []
-    deadline_order = lambda item: (due_sort_value(item.frontmatter.get("due")) or "9999",
-                                   *focus_sort_key(item, rank))
-    for task in sorted(tasks, key=deadline_order):
-        value = task.frontmatter.get("due")
-        # Overdue or due within the week: the same cards as `--due next`.
-        if not has_deadline_due(task) or not any(card_query.due_matches(value, mode, now) for mode in (
-                card_query.DUE_OVERDUE, card_query.DUE_WEEK)):
-            continue
-        owner = task.frontmatter.get("claimed_by")
-        status = task.frontmatter.get("status")
-        if owner and owner != actor:
-            action = "coordinate"
-        elif status == "waiting":
-            action = "followup"
-        elif status not in {"active", "doing", "inbox"}:
-            action = "review"
-        else:
-            action = "work"
-        action_label = {"coordinate": "Check with the owner", "followup": "Follow up",
-                        "review": "Review the commitment", "work": "Allow time for this"}[action]
-        alerts.append({**item_json_record(task, ws=resolved), "action": action, "action_label": action_label})
-    return {"selected": selected, "mode": mode, "actor": actor,
-            "generated_at": now_stamp(), "candidates": candidates, "alerts": alerts,
-            "followup_ids": [str(task.frontmatter.get("id") or task.path.stem)
-                             for task in sorted(tasks, key=lambda item: followup_sort_key(item, rank))
-                             if task.frontmatter.get("status") == "waiting"]}
-
-
-
-def next_action_needs_restart_step(item: Card) -> bool:
-    value = str(item.next_action or "").strip().casefold()
-    return bool(value) and (value == "tbd" or re.search(VAGUE_RESTART_PATTERN, value) is not None)
-
-
-
-def render_item_document(
+def _commit_item_write(
+    resolved: Workspace,
+    item: Card,
+    updated: str,
     *,
-    item_mode: str,
-    item_id: str,
-    title: str,
-    priority: object,
-    project: object,
-    topic: object,
-    due: object,
-    due_kind: object,
-    created: object,
-    updated: object,
-    tags: object,
-    body_text: str,
-    archived: object = False,
-    hidden: object = False,
-    needs_review: object = False,
-    github_source: object = None,
-    github_source_hash: object = None,
-    capture_id: str | None = None,
-    status: object | None = None,
-    task_type: object | None = None,
-    next_action: str | None = None,
-    processing_instructions: str = "",
-) -> str:
-    if not isinstance(tags, list):
-        raise ValueError("tags must be a list")
-    properties: dict[str, object] = {
-        "id": item_id, "title": title.strip(), "kind": item_mode,
-        "priority": priority, "created": str(created), "updated": str(updated),
-    }
-    if capture_id:
-        properties["capture_id"] = capture_id
-    if github_source is not None:
-        properties["github_source"] = github_source
-    if github_source_hash is not None:
-        properties["github_source_hash"] = github_source_hash
-    for field, value in (("project", project), ("topic", topic), ("due", due), ("due_kind", due_kind)):
-        if value is not None:
-            properties[field] = value
-    for field, value in (("archived", archived), ("hidden", hidden), ("needs_review", needs_review)):
-        if value:
-            properties[field] = True
-    if tags:
-        properties["tags"] = tags
-    if item_mode == "task":
-        if status is None or task_type is None:
-            raise ValueError("task status and type are required")
-        properties.update(status=status, type=task_type)
-        if next_action:
-            properties["next_action"] = next_action
-    if processing_instructions:
-        properties["processing_instructions"] = processing_instructions
-    if item_mode == "note" and (status is not None or task_type is not None or next_action):
-        raise ValueError("task-only properties cannot be set on a note")
-    if github_source is not None or github_source_hash is not None:
-        if github_source is None or github_source_hash is None:
-            raise ValueError("github_source and github_source_hash must be set together")
-        properties["github_source"] = github_source
-        properties["github_source_hash"] = github_source_hash
-    if capture_id is not None:
-        properties["capture_id"] = capture_id
-    return card_format.render_document(properties, body_text, expected_kind=item_mode)
-
-
-
-def parse_tag_json(value: str) -> list[str]:
+    expected: bytes | None = None,
+    failure_prefix: str,
+    summary: str,
+    receipt_fn=None,
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    base = resolved.root
+    relative = str(item.path.relative_to(base))
     try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise ValueError("tags must be a JSON string array") from error
-    if not isinstance(parsed, list) or any(
-        not isinstance(tag, str) or not tag.strip() or any(c in tag for c in "\r\n\x00")
-        for tag in parsed
-    ):
-        raise ValueError("tags must be a JSON array of non-empty single-line strings")
-    return list(dict.fromkeys(tag.strip() for tag in parsed))
-
-
-
-def check_claim(task: Card, username: str, *, takeover: bool = False) -> None:
-    owner = task.frontmatter.get("claimed_by")
-    if owner and owner != username and not takeover:
-        raise ValueError(
-            f"task is claimed by '{owner}'. If you are {owner}, add --by {shlex.quote(owner)} "
-            f"(or set MT_USERNAME={shlex.quote(owner)}). Taking over someone else's claim needs the user's "
-            f"permission: mt move @{task.short_ref} doing --by {shlex.quote(username)} --takeover."
+        transaction.apply_item_transaction(
+            {relative: updated.encode("utf-8")},
+            expected={relative: expected if expected is not None else item.raw.encode("utf-8")},
+            source_root=base,
+            ws=resolved,
         )
-
-
-
-def transition_claim(task: Card, raw: str, destination: str, username: str, timestamp: str) -> str:
-    owner = task.frontmatter.get("claimed_by")
-    properties, body = card_format.parse_document(raw, expected_kind="task")
-    if destination == "doing":
-        if owner == username:
-            return raw
-        properties["claimed_by"] = username
-        properties["claimed_at"] = timestamp
-        comment = f"{username} took over the claim from {owner}." if owner else f"{username} claimed this task."
-    elif owner:
-        for field in CLAIM_FIELDS:
-            properties.pop(field, None)
-        comment = f"{username} moved this task to {destination}; released the claim held by {owner}."
-    else:
-        return raw
-    raw = card_format.render_document(properties, body, expected_kind="task")
-    return append_comments(raw, [comment], timestamp)
-
-
-
-def task_defaults(cfg: dict) -> tuple[str, str, str]:
-    values: list[str] = []
-    for field, allowed_field, singular in (
-        ("default_status", "statuses", "status"),
-        ("default_priority", "priorities", "priority"),
-        ("default_type", "types", "type"),
-    ):
-        value = cfg.get(field)
-        allowed = cfg.get(allowed_field)
-        if not isinstance(value, str) or not isinstance(allowed, dict) or value not in allowed:
-            raise ValueError(f"policy {field} must name a configured {singular}")
-        values.append(value)
-    return values[0], values[1], values[2]
-
-
-
-def unassigned_priority(cfg: dict) -> str:
-    """Use the unassigned class when supported, for explicit unassigned flows."""
-    return "none" if "none" in cfg.get("priorities", {}) else task_defaults(cfg)[1]
-
-
-
-def default_priority(cfg: dict) -> str:
-    """Return the shared policy default used when creating either card kind."""
-    return task_defaults(cfg)[1]
-
-
-
-def validate_shared_metadata(
-    cfg: dict,
-    *,
-    priority: object = None,
-    default_priority: bool = True,
-    project: object = None,
-    topic: object = None,
-    due: object = None,
-    due_kind: object = None,
-    tags: object = None,
-) -> dict[str, object]:
-    """Normalize and validate shared metadata at every card-write boundary."""
-    selected_priority = task_defaults(cfg)[1] if priority is None and default_priority else priority
-    if selected_priority is not None and (
-        not isinstance(selected_priority, str) or selected_priority not in cfg.get("priorities", {})
-    ):
-        raise ValueError("priority must be an allowed effective policy value")
-    normalized: dict[str, object] = {"priority": selected_priority}
-    if project is not None and (not isinstance(project, str) or not project.strip()
-                                or any(char in project for char in "\r\n\x00")):
-        raise ValueError("project must be non-empty single-line text")
-    normalized["project"] = project.strip() if isinstance(project, str) else None
-    if topic is not None:
-        topic_problem = "must be text" if not isinstance(topic, str) else card_format.topic_path_error(topic)
-        if topic_problem:
-            raise ValueError(f"topic {topic_problem}")
-        normalized["topic"] = card_format.normalize_topic(topic)
-    else:
-        normalized["topic"] = None
-    if due is not None and (not isinstance(due, str) or not is_due_value(due)):
-        raise ValueError("due must be a valid date or local timestamp")
-    if due is not None and due_kind_error(due_kind, due, cfg):
-        raise ValueError(due_kind_error(due_kind, due, cfg) or "invalid due kind")
-    if due is None and due_kind is not None:
-        raise ValueError("due_kind requires due")
-    normalized.update(due=due, due_kind=due_kind)
-    if tags is None:
-        tags = []
-    if not isinstance(tags, list) or any(
-        not isinstance(tag, str) or not tag.strip() or any(char in tag for char in "\r\n\x00")
-        for tag in tags
-    ):
-        raise ValueError("tags must be non-empty single-line strings")
-    normalized["tags"] = list(dict.fromkeys(tag.strip() for tag in tags))
-    return normalized
-
-
-
-def render_new_card(
-    kind: str,
-    card_id: str,
-    title: str,
-    *,
-    body_text: str | None = None,
-    status: str | None = None,
-    task_type: str | None = None,
-    next_action: str = "",
-    processing_instructions_text: str = "",
-    priority: str | None = None,
-    project: str | None = None,
-    topic: str | None = None,
-    due: str | None = None,
-    due_kind: str | None = None,
-    tags: list[str] | None = None,
-    created_at: str | None = None,
-    capture_id: str | None = None,
-    archived: bool = False,
-    hidden: bool = False,
-    needs_review: bool = False,
-    ws: Workspace,
-) -> str:
-    """Render a new card; tasks fill status and type from policy defaults."""
-    cfg = store.policy(ws)
-    default_status, default_priority, default_type = task_defaults(cfg)
-    if kind == "task":
-        status, task_type = status or default_status, task_type or default_type
-    stamp = now_stamp()
-    return render_item_document(
-        item_mode=kind, item_id=card_id, title=title, priority=priority or default_priority,
-        project=project, topic=topic, due=due, due_kind=due_kind, created=created_at or stamp, updated=stamp,
-        tags=tags or [], body_text=title if body_text is None else body_text, status=status,
-        task_type=task_type, next_action=next_action,
-        processing_instructions=processing_instructions_text,
-        archived=archived, hidden=hidden, needs_review=needs_review,
-        capture_id=capture_id,
+    except (OSError, ValueError) as error:
+        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
+            raise ConflictError(f"{failure_prefix}: {error}") from error
+        raise ValidationError(f"{failure_prefix}: {error}") from error
+    saved = Card.read(item.path)
+    receipt = receipt_fn(saved, updated=True) if receipt_fn is not None else saved_receipt(saved, updated=True, ws=resolved)
+    return WriteResult(
+        card=saved,
+        receipt=receipt,
+        message=summary,
+        changed=True,
     )
-
-
-
-def render_converted_note(task: Card, today: str) -> str:
-    properties = {key: value for key, value in task.frontmatter.items()
-                  if key != "kind" and key not in card_format.TASK_ONLY_FIELDS}
-    properties.update(kind="note", title=task.title, updated=today)
-    comments = list(properties.get("comments", []))
-    properties["comments"] = comments
-    action = task.frontmatter.get("next_action")
-    history = (f"Converted from task on {today}.\n\nStatus: {task.frontmatter.get('status')}\n"
-               f"Type: {task.frontmatter.get('type')}\nNext action:\n{action if isinstance(action, str) and action else '(none)'}")
-    comments.append({"at": today, "text": history})
-    return card_format.render_document(properties, task.body, expected_kind="note")
-
-
-
-def render_converted_task(note: Card, today: str, *, status_override: str | None = None,
-                          type_override: str | None = None,
-                          next_action_override: str | None = None, ws: Workspace) -> str:
-    cfg = store.policy(ws)
-    default_status, _priority, default_type = task_defaults(cfg)
-    status = status_override or default_status
-    task_type = type_override or default_type
-    allowed_open = open_statuses(ws)
-    if status not in allowed_open:
-        raise ValueError(f"task status must be one of: {', '.join(allowed_open)}")
-    if task_type not in cfg.get("types", {}):
-        raise ValueError("task type must be an allowed effective policy value")
-    properties = {key: value for key, value in note.frontmatter.items()
-                  if key not in {"kind", "status", "type", "next_action"}}
-    properties.update(kind="task", title=note.title, status=status, type=task_type, updated=today)
-    if next_action_override:
-        properties["next_action"] = next_action_override
-    else:
-        properties.pop("next_action", None)
-    return card_format.render_document(properties, note.body, expected_kind="task")
-
-
-
-def card_capture_fields(card: Card) -> dict[str, object]:
-    """Properties a capture retry must match to be treated as the same card."""
-    fm = card.frontmatter
-    return {
-        "kind": card.kind, "title": card.title, "created": str(fm.get("created") or ""),
-        "status": fm.get("status") if card.is_task else None,
-        "type": fm.get("type") if card.is_task else None,
-        "next_action": card.next_action or None,
-        "processing_instructions": fm.get("processing_instructions") or None,
-        "priority": fm.get("priority"), "project": fm.get("project"), "topic": fm.get("topic"),
-        "due": fm.get("due"), "due_kind": due_kind_value(fm), "tags": fm.get("tags") or [],
-        "needs_review": fm.get("needs_review") is True,
-        "archived": is_archived(card), "hidden": is_hidden(card),
-    }
-
 
 
 def create_card(
@@ -696,7 +235,7 @@ def create_card(
             raise CardInputError(f"task status must be one of: {', '.join(allowed_open)}")
         task_type = task_type or default_type
         if task_type not in cfg.get("types", {}):
-            raise CardInputError("task type must be an allowed effective policy value")
+            raise CardInputError("task type must be an allowed effective settings value")
         if by is not None and status != "doing":
             raise CardInputError("--by requires status doing")
     elif kind == "note":
@@ -718,8 +257,8 @@ def create_card(
             raise CardInputError(
                 "conflict: capture ID already exists with different kind, title, body, created-at, or metadata"
             )
-    card_id = f"{unique_item_timestamp(real=True, ws=resolved)}-{slugify(title)}"
-    destination = real_cards_root(resolved) / f"{card_id}.md"
+    card_id = f"{unique_item_timestamp(ws=resolved)}-{slugify(title)}"
+    destination = cards_root(resolved) / f"{card_id}.md"
     if destination.exists():
         raise CardInputError(f"{kind} file already exists: {destination}")
     try:
@@ -738,180 +277,145 @@ def create_card(
             rendered = transition_claim(pending, rendered, "doing", current_username(by, ws=resolved), now_stamp())
     except ValueError as error:
         raise CardInputError(str(error)) from error
-    # New user captures always enter the real workspace. Demo cards are a
-    # read-only sample and the first real capture switches the view over.
     relative = str(destination.relative_to(resolved.root))
-    transaction.apply_item_transaction({relative: rendered.encode("utf-8")}, expected={relative: None}, source_root=resolved.root, ws=resolved)
-    pin_demo_state(resolved)
+    transaction.apply_item_transaction(
+        {relative: rendered.encode("utf-8")},
+        expected={relative: None},
+        source_root=resolved.root,
+        ws=resolved,
+    )
     return Card.read(destination), True
 
 
-
-def card_text_option(args: argparse.Namespace, name: str) -> str:
-    """Read an optional text property supplied inline or from a --*-file option."""
-    value = str(getattr(args, f"{name}_text", None) or getattr(args, name, "") or "")
-    return value if value.strip() else ""
-
-
-
 def capture_card(
-    args: argparse.Namespace, text: str, kind: str, ws: Workspace | None = None,
+    text: str,
+    kind: str,
+    *,
+    title: str | None = None,
+    capture_id: str | None = None,
+    created_at: str | None = None,
+    capture_timestamp: str | None = None,
+    status: str | None = None,
+    task_type: str | None = None,
+    next_action: str = "",
+    instructions: str = "",
+    priority: str | None = None,
+    project: str | None = None,
+    topic: str | None = None,
+    due: str | None = None,
+    due_kind: str | None = None,
+    tags: list[str] | None = None,
+    needs_review: bool | None = None,
+    archived: bool = False,
+    hidden: bool = False,
+    by: str | None = None,
+    ws: Workspace | None = None,
 ) -> tuple[Card, bool]:
-    """Save one quick capture with a retry-safe capture ID when one is supplied.
-
-    Captured notes default to needing review; captured tasks are triaged by status.
-    """
-    raw_title = getattr(args, "title", None)
-    title = raw_title.strip() if isinstance(raw_title, str) else ""
-    if not title and text.strip():
-        title = title_from_note_body(text) if kind == "note" else capture_title(text)
-    if not title:
+    """Save one quick capture with a retry-safe capture ID when one is supplied."""
+    resolved_title = title.strip() if isinstance(title, str) else ""
+    if not resolved_title and text.strip():
+        # A body with only an image or link has no words for a title.
+        resolved_title = title_from_note_body(text) if kind == "note" else (capture_title(text) or "Untitled task")
+    if not resolved_title:
         raise CardInputError(f"{kind} requires non-empty text or a title")
-    supplied_id = getattr(args, "capture_id", None) or None
-    created_at = getattr(args, "created_at", None) or None
-    capture_id = None
-    if supplied_id is not None:
+    normalized_capture_id = None
+    if capture_id:
         try:
-            capture_id = str(uuid.UUID(supplied_id))
+            normalized_capture_id = str(uuid.UUID(capture_id))
         except (AttributeError, ValueError) as error:
             raise CardInputError("capture ID must be a canonical UUID") from error
-        if capture_id != supplied_id.lower():
+        if normalized_capture_id != capture_id.lower():
             raise CardInputError("capture ID must be a canonical UUID")
-        if created_at is None or not is_timestamp(created_at):
+        if not created_at or not is_timestamp(created_at):
             raise CardInputError("a capture ID requires a created-at time in YYYY-MM-DDTHH:MM:SS format")
-    elif created_at is not None:
+    elif created_at:
         raise CardInputError("a created-at time requires a capture ID")
-    needs_review = getattr(args, "needs_review", None)
     return create_card(
-        kind, text, title=title, capture_id=capture_id,
-        created=created_at or getattr(args, "capture_timestamp", None),
-        status=getattr(args, "status", None) if kind == "task" else None,
-        task_type=getattr(args, "task_type", None) if kind == "task" else None,
-        next_action=card_text_option(args, "next_action") if kind == "task" else "",
-        instructions=card_text_option(args, "instructions"),
-        priority=getattr(args, "priority", None), project=getattr(args, "project", None),
-        topic=getattr(args, "topic", None), due=getattr(args, "due", None),
-        due_kind=getattr(args, "due_kind", None), tags=getattr(args, "tags", None),
+        kind,
+        text,
+        title=resolved_title,
+        capture_id=normalized_capture_id,
+        created=created_at or capture_timestamp,
+        status=status if kind == "task" else None,
+        task_type=task_type if kind == "task" else None,
+        next_action=next_action if kind == "task" else "",
+        instructions=instructions,
+        priority=priority,
+        project=project,
+        topic=topic,
+        due=due,
+        due_kind=due_kind,
+        tags=tags,
         needs_review=(kind == "note") if needs_review is None else bool(needs_review),
-        archived=bool(getattr(args, "archived", False)), hidden=bool(getattr(args, "hidden", False)),
-        by=getattr(args, "by", None) if kind == "task" else None,
+        archived=bool(archived),
+        hidden=bool(hidden),
+        by=by if kind == "task" else None,
         ws=ws,
     )
 
 
-
-def capture_title(text: str) -> str:
-    """Keep generated titles short and mark omitted text without summarizing it."""
-    title = re.sub(r"\s+", " ", text).strip()
-    if len(title) <= 80:
-        return title
-    prefix = title[:79]
-    if title[79] != " " and " " in prefix:
-        prefix = prefix.rsplit(" ", 1)[0]
-    return prefix.rstrip() + "…"
-
-
-
-def title_from_note_body(text: str) -> str:
-    meeting_headings = {"### Discussion", "### Decisions", "### Actions"}
-    is_meeting = meeting_headings <= {line.strip() for line in text.splitlines()}
-    for line in text.splitlines():
-        value = line.strip()
-        if not value or (is_meeting and value in meeting_headings):
-            continue
-        value = re.sub(r"^#{1,6}\s+", "", value)
-        if value:
-            return capture_title(value)
-    return "Meeting notes" if is_meeting else "Untitled note"
-
-
-
-def _finish_mutation(
-    item: Card,
+def op_create(
+    ws: Workspace | None,
+    kind: str,
+    text: str,
     *,
-    updated: bool,
-    summary: str,
-    as_json: bool = False,
-    receipt_fn=None,
-    ws: Workspace | None = None,
-) -> int | MutationReceipt:
-    if as_json:
-        auto_sync_after_mutation(changed=updated, ws=ws)
-        receipt = receipt_fn(item, updated=updated) if receipt_fn is not None else saved_receipt(item, updated=updated, ws=ws)
-        return MutationReceipt(receipt)
-    print(summary)
-    return auto_sync_after_mutation(changed=updated, ws=ws)
-
-
-
-def _commit_item_write(
-    resolved: Workspace,
-    item: Card,
-    updated: str,
-    *,
-    expected: bytes | None = None,
-    failure_prefix: str,
-    summary: str,
-    receipt_fn=None,
+    title: str | None = None,
+    capture_id: str | None = None,
+    created_at: str | None = None,
+    capture_timestamp: str | None = None,
+    status: str | None = None,
+    task_type: str | None = None,
+    next_action: str = "",
+    instructions: str = "",
+    priority: str | None = None,
+    project: str | None = None,
+    topic: str | None = None,
+    due: str | None = None,
+    due_kind: str | None = None,
+    tags: list[str] | None = None,
+    needs_review: bool | None = None,
+    archived: bool = False,
+    hidden: bool = False,
+    by: str | None = None,
+    sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
-    _require_mutation_lock()
-    base = active_root(resolved)
-    relative = str(item.path.relative_to(base))
-    try:
-        transaction.apply_item_transaction(
-            {relative: updated.encode("utf-8")},
-            expected={relative: expected if expected is not None else item.raw.encode("utf-8")},
-            source_root=base,
-            ws=resolved,
+    """Create or idempotently replay one task or note capture."""
+    def _run(resolved: Workspace) -> WriteResult:
+        try:
+            card, changed = capture_card(
+                text,
+                kind,
+                title=title,
+                capture_id=capture_id,
+                created_at=created_at,
+                capture_timestamp=capture_timestamp,
+                status=status,
+                task_type=task_type,
+                next_action=next_action,
+                instructions=instructions,
+                priority=priority,
+                project=project,
+                topic=topic,
+                due=due,
+                due_kind=due_kind,
+                tags=tags,
+                needs_review=needs_review,
+                archived=archived,
+                hidden=hidden,
+                by=by,
+                ws=resolved,
+            )
+        except (OSError, ValueError) as error:
+            raise InputError(f"{kind} was not saved: {error}", exit_code=1) from error
+        return WriteResult(
+            card=card,
+            receipt=saved_receipt(card, updated=changed, ws=resolved),
+            message=str(card.path),
+            changed=changed,
         )
-    except (OSError, ValueError) as error:
-        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
-            raise ConflictError(f"{failure_prefix}: {error}") from error
-        raise ValidationError(f"{failure_prefix}: {error}") from error
-    saved = Card.read(item.path)
-    receipt = receipt_fn(saved, updated=True) if receipt_fn is not None else saved_receipt(saved, updated=True, ws=resolved)
-    return WriteResult(
-        card=saved,
-        receipt=receipt,
-        message=summary,
-        changed=True,
-    )
 
-
-
-def _commit_item_change(
-    item: Card,
-    updated: str,
-    *,
-    expected: bytes | None = None,
-    failure_prefix: str,
-    summary: str,
-    as_json: bool = False,
-    receipt_fn=None,
-    ws: Workspace | None = None,
-) -> int | MutationReceipt:
-    resolved = _ws(ws)
-    base = active_root(resolved)
-    relative = str(item.path.relative_to(base))
-    try:
-        transaction.apply_item_transaction(
-            {relative: updated.encode("utf-8")},
-            expected={relative: expected if expected is not None else item.raw.encode("utf-8")},
-            source_root=base,
-            ws=resolved,
-        )
-    except (OSError, ValueError) as error:
-        print(f"error: {failure_prefix}: {error}", file=sys.stderr)
-        return 1
-    return _finish_mutation(
-        Card.read(item.path),
-        updated=True,
-        summary=summary,
-        as_json=as_json,
-        receipt_fn=receipt_fn,
-        ws=resolved,
-    )
-
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
 
 
 def _complete_locked(
@@ -923,7 +427,7 @@ def _complete_locked(
     by: str | None = None,
     match_mode: str = "exact",
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     query = query.strip()
     if not query:
         raise InputError("done requires a non-empty query")
@@ -935,15 +439,13 @@ def _complete_locked(
         raise ConflictError(str(error), exit_code=1) from error
     completed_epoch = int(clock_time.time())
     completed_at = local_stamp(completed_epoch)
-    completion_day = completed_at[:10]
     updated = card_format.replace_property(task.raw, "status", "done")
     updated = card_format.replace_property(updated, "updated", completed_at)
     updated = card_format.replace_property(updated, "completed", completed_at)
     updated = transition_claim(task, updated, "done", username, completed_at)
     try:
-        updated, _timer = finish_lifecycle_timer(task, updated, completed_epoch, ws=resolved)
-        updated = append_completion_note(updated, list(notes), completion_day)
-        updated = append_comments(updated, list(comments), completed_at)
+        updated, _timer = settle_timer(updated, completed_epoch)
+        updated = append_comments(updated, [*notes, *comments], completed_at)
     except ValueError as error:
         raise InputError(f"completion update failed: {error}", exit_code=1) from error
     return _commit_item_write(
@@ -955,7 +457,6 @@ def _complete_locked(
     )
 
 
-
 def op_complete(
     ws: Workspace | None,
     query: str,
@@ -965,6 +466,7 @@ def op_complete(
     by: str | None = None,
     match_mode: str = "exact",
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Complete an open task and record an optional completion note or comment."""
     return _run_write_operation(
@@ -973,8 +475,8 @@ def op_complete(
             resolved, query, notes=notes, comments=comments, by=by, match_mode=match_mode
         ),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
-
 
 
 def _move_locked(
@@ -983,32 +485,38 @@ def _move_locked(
     destination: str,
     *,
     comments: list[str] | tuple[str, ...] = (),
-    takeover: bool = False,
     by: str | None = None,
+    takeover: bool = False,
     match_mode: str = "exact",
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     query = query.strip()
     if not query:
         raise InputError("move requires a non-empty query")
-    allowed_statuses = open_statuses(resolved)
-    if destination not in allowed_statuses:
-        raise InputError(f"move destination must be one of: {', '.join(allowed_statuses)}")
-    if takeover and destination != "doing":
-        raise InputError("--takeover requires destination doing")
-    task = _resolve_unique_card(resolved, query, statuses=allowed_statuses, match_mode=match_mode)
+    allowed = open_statuses(resolved)
+    if destination not in allowed:
+        raise InputError(f"move destination must be one of: {', '.join(allowed)}")
+    task = _resolve_unique_card(resolved, query, kind="task", match_mode=match_mode)
+    if task.frontmatter.get("status") == "done":
+        raise InputError(
+            "completed tasks cannot be reopened with move; use mt add if there is follow-up work",
+            exit_code=1,
+        )
     try:
         username = current_username(by, ws=resolved)
         check_claim(task, username, takeover=takeover)
     except ValueError as error:
         raise ConflictError(str(error), exit_code=1) from error
-    source_status = task.frontmatter["status"]
-    if source_status == destination and (
-        destination != "doing" or task.frontmatter.get("claimed_by") == username
+    if takeover and destination != "doing":
+        raise InputError("--takeover is only valid when moving to doing")
+    if takeover and not task.frontmatter.get("claimed_by"):
+        raise InputError("task is not claimed; --takeover is not needed")
+    if task.frontmatter.get("status") == destination and not (
+        destination == "doing" and task.frontmatter.get("claimed_by") != username
     ):
         return WriteResult(
             card=task,
-            receipt=saved_receipt(task, ws=resolved),
+            receipt=saved_receipt(task, updated=False, ws=resolved),
             message=f"Already {destination}: {task.path.name}",
             changed=False,
         )
@@ -1016,13 +524,13 @@ def _move_locked(
     moved_at = local_stamp(moved_epoch)
     updated = card_format.replace_property(task.raw, "status", destination)
     updated = card_format.replace_property(updated, "updated", moved_at)
-    updated = transition_claim(task, updated, destination, username, moved_at)
     try:
+        updated = transition_claim(task, updated, destination, username, moved_at)
+        if destination != "doing" or takeover:
+            updated, _timer = settle_timer(updated, moved_epoch)
         updated = append_comments(updated, list(comments), moved_at)
-        if destination != "doing" or task.frontmatter.get("claimed_by") != username:
-            updated, _timer = finish_lifecycle_timer(task, updated, moved_epoch, ws=resolved)
     except ValueError as error:
-        raise InputError(f"move update failed: {error}", exit_code=1) from error
+        raise InputError(f"move failed: {error}", exit_code=1) from error
     return _commit_item_write(
         resolved,
         task,
@@ -1032,33 +540,27 @@ def _move_locked(
     )
 
 
-
 def op_move(
     ws: Workspace | None,
     query: str,
     destination: str,
     *,
     comments: list[str] | tuple[str, ...] = (),
-    takeover: bool = False,
     by: str | None = None,
+    takeover: bool = False,
     match_mode: str = "exact",
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
-    """Move an open task to another open status."""
+    """Move an open task to another open status, updating claims and timers."""
     return _run_write_operation(
         ws,
         lambda resolved: _move_locked(
-            resolved,
-            query,
-            destination,
-            comments=comments,
-            takeover=takeover,
-            by=by,
-            match_mode=match_mode,
+            resolved, query, destination, comments=comments, by=by, takeover=takeover, match_mode=match_mode
         ),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
-
 
 
 def _comment_locked(
@@ -1068,7 +570,7 @@ def _comment_locked(
     *,
     match_mode: str = "exact",
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     query = query.strip()
     if not query:
         raise InputError("comment requires a non-empty query")
@@ -1085,11 +587,10 @@ def _comment_locked(
         resolved,
         item,
         updated,
-        expected=item.path.read_bytes(),
+        expected=item.raw.encode("utf-8"),
         failure_prefix="comment failed validation; change rolled back",
         summary=f"Commented and validated: {item.path.relative_to(resolved.root)}",
     )
-
 
 
 def op_comment(
@@ -1099,155 +600,15 @@ def op_comment(
     *,
     match_mode: str = "exact",
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Append one or more timestamped comments to a task or note."""
     return _run_write_operation(
         ws,
         lambda resolved: _comment_locked(resolved, query, comments, match_mode=match_mode),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
-
-
-
-def apply_exact_body_replacements(body: str, raw_json: str) -> str:
-    try:
-        replacements = json.loads(raw_json)
-    except json.JSONDecodeError as error:
-        raise ValueError(
-            f"--replace-file is not valid JSON ({error.msg}; line {error.lineno}, column {error.colno}). "
-            "Pass the JSON through a quoted heredoc (<<'EOF') so the shell does not alter backslashes."
-        ) from error
-    expected = 'a JSON array of {"old": ..., "new": ...} objects'
-    if not isinstance(replacements, list):
-        raise ValueError(f"--replace-file must contain {expected}; got {type(replacements).__name__}")
-    for index, pair in enumerate(replacements, 1):
-        if not isinstance(pair, dict) or set(pair) != {"old", "new"}:
-            raise ValueError(f"--replace-file entry {index} must be an object with exactly old and new; expected {expected}")
-        if not isinstance(pair["old"], str) or not pair["old"]:
-            raise ValueError(f"--replace-file entry {index}: old must be non-empty text")
-        if not isinstance(pair["new"], str):
-            raise ValueError(f"--replace-file entry {index}: new must be text")
-    return apply_body_replacements(body, [(pair["old"], pair["new"]) for pair in replacements])
-
-
-
-def apply_body_replacements(body: str, pairs: list[tuple[str, str]]) -> str:
-    """Replace each old passage that occurs exactly once in body; all or nothing."""
-    matches: list[tuple[int, int, str]] = []
-    for index, (old, new) in enumerate(pairs, 1):
-        if not old:
-            raise ValueError(f"replacement {index} old text must be non-empty")
-        positions: list[int] = []
-        cursor = 0
-        while (position := body.find(old, cursor)) >= 0:
-            positions.append(position)
-            cursor = position + 1
-        if len(positions) != 1:
-            raise ValueError(
-                f"replacement {index} old text {abbreviate(old)} must match exactly once in the "
-                f"original body (found {len(positions)} matches)"
-            )
-        start = positions[0]
-        matches.append((start, start + len(old), new))
-    ordered = sorted(matches)
-    for previous, current in zip(ordered, ordered[1:]):
-        if current[0] < previous[1]:
-            raise ValueError("exact body replacements overlap")
-    result = body
-    for start, end, new in reversed(ordered):
-        result = result[:start] + new + result[end:]
-    return result
-
-
-
-def _apply_body_edit(
-    body: str,
-    *,
-    body_mode: str | None,
-    body_text: str,
-    body_replacements: list[tuple[str, str]] | None,
-    exact_replacements_text: str | None,
-) -> str:
-    """Apply the requested body edit mode to a card body string."""
-    if body_mode == "replace_pairs" and body_replacements is not None:
-        return apply_body_replacements(body, body_replacements)
-    if body_mode == "replace_file" and exact_replacements_text is not None:
-        return apply_exact_body_replacements(body, exact_replacements_text)
-    if body_mode == "append":
-        return body + blank_line_separator(body) + body_text if body_text else body
-    if body_mode == "replace":
-        return body_text
-    return body
-
-
-def _build_edit_metadata(
-    resolved: Workspace,
-    kind: str,
-    current_properties: dict[str, object],
-    *,
-    metadata_fields: dict[str, object] | None,
-    assignments: list[str] | tuple[str, ...],
-    tag_add: list[str] | tuple[str, ...] | None,
-    tag_remove: list[str] | tuple[str, ...] | None,
-) -> dict[str, object]:
-    """Parse --set assignments, merge tag add/remove updates, and validate status edits."""
-    metadata: dict[str, object] = dict(metadata_fields or {})
-    for assignment in assignments or ():
-        field, separator, value = assignment.partition("=")
-        if not separator or not field:
-            raise ValueError("--set requires FIELD=VALUE")
-        allowed = card_format.EDITABLE_FIELDS[kind]
-        if field not in allowed:
-            raise ValueError(f"field '{field}' cannot be set on a {kind}; choose from {', '.join(sorted(allowed))}")
-        if field in metadata:
-            raise ValueError(f"field '{field}' was assigned more than once")
-        if field == "tags":
-            metadata[field] = parse_tag_json(value)
-        elif field in card_format.BOOLEAN_METADATA:
-            if value not in {"true", "false"}:
-                raise ValueError(f"{field} must be true or false")
-            metadata[field] = value == "true"
-        elif field in {"next_action", "processing_instructions"}:
-            metadata[field] = None if value == "null" or value == "" else value
-        elif field == "title":
-            if not value.strip() or any(char in value for char in "\r\n\x00"):
-                raise ValueError("title must be non-empty and single-line")
-            metadata[field] = value.strip()
-        else:
-            metadata[field] = None if value == "null" else value
-    if tag_add or tag_remove:
-        if "tags" in metadata:
-            raise ValueError("use one of --tags/--set tags or --tag/--remove-tag")
-        if any(not tag.strip() for tag in list(tag_add or []) + list(tag_remove or [])):
-            raise ValueError("tags must be non-empty")
-        current_tags = list(current_properties.get("tags") or [])
-        remove = {tag.strip().casefold() for tag in (tag_remove or [])}
-        current_tags = [tag for tag in current_tags if str(tag).strip().casefold() not in remove]
-        existing = {str(tag).strip().casefold() for tag in current_tags}
-        for tag in tag_add or []:
-            tag = tag.strip()
-            if tag.casefold() not in existing:
-                current_tags.append(tag)
-                existing.add(tag.casefold())
-        metadata["tags"] = current_tags
-    if "status" in metadata:
-        if kind != "task":
-            raise ValueError("field 'status' cannot be set on a note")
-        new_status = metadata["status"]
-        if not isinstance(new_status, str) or not new_status.strip():
-            raise ValueError("status must be non-empty")
-        new_status = new_status.strip()
-        if new_status == "doing":
-            raise ValueError("status 'doing' requires claiming; use mt move doing or mt claim")
-        if new_status == "done":
-            raise ValueError("status 'done' requires completing; use mt done")
-        allowed_open = open_statuses(resolved)
-        if new_status not in allowed_open:
-            raise ValueError(
-                f"status must be one of: {', '.join(status for status in allowed_open if status != 'doing')}"
-            )
-        metadata["status"] = new_status
-    return metadata
 
 
 def _edit_locked(
@@ -1267,15 +628,13 @@ def _edit_locked(
     by: str | None = None,
 ) -> WriteResult:
     """Apply metadata and/or body edits to one card while holding the mutation lock."""
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     item = _resolve_unique_card(resolved, query.strip(), match_mode=match_mode)
     kind = item.kind
-    guard_args = argparse.Namespace(expected_hash=expected_hash)
+    original = item.raw.encode("utf-8")
+    if expected_hash is not None and hashlib.sha256(original).hexdigest().casefold() != expected_hash.casefold():
+        raise ConflictError("conflict: item changed since it was loaded (content hash mismatch)", exit_code=1)
     try:
-        original = item.path.read_bytes()
-        verify_edit_guards(item, guard_args, original)
-        if original != item.raw.encode("utf-8"):
-            raise ConflictError("conflict: item changed since it was loaded (content changed)")
         initial_properties, initial_body = dict(item.frontmatter), item.body
         body = _apply_body_edit(
             initial_body,
@@ -1295,8 +654,6 @@ def _edit_locked(
         )
         properties = card_format.apply_property_patch(dict(initial_properties), metadata, kind=kind)
 
-        # A claim blocks conflicting work (lifecycle, archiving, body rewrites),
-        # not additions: appends, comments, and other property edits are open.
         rewrites_body = bool(body_mode and body_mode != "append")
         if item.is_task and item.frontmatter.get("claimed_by") and (
                 rewrites_body or "status" in metadata or "archived" in metadata or "hidden" in metadata):
@@ -1318,26 +675,23 @@ def _edit_locked(
         raw = card_format.render_document(properties, body, expected_kind=kind)
         if item.is_task and properties.get("status") != item.frontmatter.get("status"):
             raw = transition_claim(item, raw, str(properties["status"]), current_username(by, ws=resolved), timestamp)
-            properties, body = card_format.parse_document(raw, expected_kind=kind)
-            properties["updated"] = timestamp
-            raw = card_format.render_document(properties, body, expected_kind=kind)
         if item.is_task and (properties.get("status") != "doing"
                              or properties.get("archived") is True or properties.get("hidden") is True):
-            raw, _timer = finish_lifecycle_timer(item, raw, int(clock_time.time()), ws=resolved)
-        edited_item = save_item_edit(item, raw, guard_args, ws=resolved)
+            raw, _timer = settle_timer(raw, int(clock_time.time()))
+        return _commit_item_write(
+            resolved,
+            item,
+            raw,
+            expected=original,
+            failure_prefix="invalid edit",
+            summary=f"Edited and validated: {item.path.relative_to(resolved.root)}",
+        )
     except TaskError:
         raise
     except (OSError, ValueError) as error:
         if "conflict:" in str(error):
             raise ConflictError(str(error), exit_code=1) from error
         raise InputError(f"invalid edit: {error}", exit_code=2) from error
-    return WriteResult(
-        card=edited_item,
-        receipt=saved_receipt(edited_item, updated=True, ws=resolved),
-        message=f"Edited and validated: {edited_item.path.relative_to(resolved.root)}",
-        changed=True,
-    )
-
 
 
 def op_edit(
@@ -1356,6 +710,7 @@ def op_edit(
     tag_remove: list[str] | tuple[str, ...] | None = None,
     by: str | None = None,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Edit card metadata and/or body text."""
     return _run_write_operation(
@@ -1376,131 +731,387 @@ def op_edit(
             by=by,
         ),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
 
 
-
-def verify_edit_guards(item: Card, args: argparse.Namespace, original: bytes) -> None:
-    expected_hash = getattr(args, "expected_hash", None)
-    if expected_hash is not None and hashlib.sha256(original).hexdigest().casefold() != expected_hash.casefold():
-        raise ValueError("conflict: item changed since it was loaded (content hash mismatch)")
-
-
-
-def save_item_edit(item: Card, raw: str, args: argparse.Namespace, ws: Workspace | None = None) -> Card:
-    resolved = _ws(ws)
-    base = active_root(resolved)
-    relative = str(item.path.relative_to(base))
-    original = item.path.read_bytes()
-    verify_edit_guards(item, args, original)
-    if original != item.raw.encode("utf-8"):
-        raise ValueError("conflict: item changed since it was loaded (content changed)")
-    transaction.apply_item_transaction({relative: raw.encode("utf-8")}, expected={relative: original}, source_root=base, ws=resolved)
-    return Card.read(item.path)
-
-
-
-def _bulk_edit_assignments(values: list[str] | dict[str, object]) -> dict[str, str]:
-    """Parse and validate the metadata assignments shared by bulk edit plans."""
-    assignments: dict[str, str] = {}
-    entries = values.items() if isinstance(values, dict) else (
-        (entry.partition("=")[0], entry.partition("=")[2]) for entry in values
+def _convert_locked(
+    resolved: Workspace,
+    query: str,
+    destination: str,
+    *,
+    status: str | None = None,
+    task_type: str | None = None,
+    next_action: str | None = None,
+    match_mode: str = "exact",
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    query = query.strip()
+    if not query:
+        raise InputError("convert requires a non-empty query")
+    to_note = destination == "note"
+    if to_note and any(val is not None for val in (status, task_type, next_action)):
+        raise InputError("--status, --task-type, and --next-action apply only when converting a note to a task")
+    item = _resolve_unique_card(
+        resolved,
+        query,
+        kind=None if to_note else "note",
+        statuses=open_statuses(resolved) if to_note else None,
+        match_mode=match_mode,
     )
-    for field, value in entries:
-        if not isinstance(field, str) or not field or not isinstance(value, str) or not value:
-            raise ValueError("--set requires non-empty FIELD=VALUE assignments")
-        if field in assignments:
-            raise ValueError(f"field '{field}' was assigned more than once")
-        available = card_format.EDITABLE_FIELDS["task"] | card_format.EDITABLE_FIELDS["note"]
-        if field not in available:
-            raise ValueError(
-                f"field '{field}' cannot be set; choose from "
-                f"{', '.join(sorted(available))}"
-            )
-        if field in card_format.BOOLEAN_METADATA and value not in {"true", "false"}:
-            raise ValueError(f"{field} must be true or false")
-        assignments[field] = value
-    if not assignments:
-        raise ValueError("bulk-edit requires at least one --set FIELD=VALUE")
-    return assignments
-
-
-
-def _apply_bulk_metadata(raw: str, kind: str, assignments: dict[str, str], updated: str, ws: Workspace) -> str:
-    frontmatter, body = card_format.parse_document(raw, expected_kind=kind)
-    allowed = card_format.EDITABLE_FIELDS[kind]
-    targets: dict[str, object] = {}
-    for field, value in assignments.items():
-        if field not in allowed:
-            raise ValueError(f"field '{field}' cannot be set on a {kind}")
-        if field == "status":
-            if value == "doing":
-                raise ValueError("status 'doing' requires claiming; use 'mt move doing' or 'mt claim'")
-            if value == "done":
-                raise ValueError("status 'done' requires completing; use 'mt done'")
-            allowed_open = open_statuses(ws)
-            if value not in allowed_open:
-                valid = [s for s in allowed_open if s != "doing"]
-                raise ValueError(f"status must be one of: {', '.join(valid)}")
-            target = value
-        elif field == "tags":
-            target = parse_tag_json(value)
-        elif field in card_format.BOOLEAN_METADATA:
-            if value not in {"true", "false"}:
-                raise ValueError(f"{field} must be true or false")
-            target = value == "true"
-        else:
-            target = None if value == "null" else value
-        targets[field] = target
-    patched = card_format.apply_property_patch(frontmatter, targets, kind=kind)
-    if patched == frontmatter:
-        return raw
-    if kind == "task" and patched.get("status") != frontmatter.get("status"):
-        for field in CLAIM_FIELDS:
-            patched.pop(field, None)
-    patched["updated"] = updated
-    return card_format.render_document(patched, body, expected_kind=kind)
-
-
-
-def _plan_query(plan: dict[str, object], ws: Workspace) -> card_query.Query:
-    """The query a saved plan holds, checked like one typed on the command line."""
-    stored = plan["query"]
-    if not isinstance(stored, dict):
-        raise ValueError("bulk edit plan has an invalid query")
+    if item.kind == destination:
+        raise InputError(f"convert {destination} destination requires a {'task' if to_note else 'note'} source")
+    now = now_stamp()
     try:
-        query = card_query.query_from_mapping(stored)
-        card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
-    except card_query.QueryError as error:
-        raise ValueError(f"bulk edit plan has an invalid query: {error}") from error
-    return query
+        if to_note:
+            if item.frontmatter.get("claimed_by"):
+                raise ValueError("release the task claim before converting it to a note")
+            task_id = str(item.frontmatter.get("id") or item.path.stem)
+            if time_log_entries(item.raw) or task_id in transaction.read_time_timers(resolved):
+                raise ValueError("a task with tracked time or a running timer cannot be converted to a note")
+            updated = render_converted_note(item, now)
+        else:
+            updated = render_converted_task(
+                item, now, status_override=status, type_override=task_type,
+                next_action_override=next_action, ws=resolved,
+            )
+    except ValueError as error:
+        raise InputError(str(error), exit_code=1) from error
+    return _commit_item_write(
+        resolved,
+        item,
+        updated,
+        failure_prefix="conversion failed validation; change rolled back",
+        summary=f"Converted to {destination}: {item.path.relative_to(resolved.root)}",
+        receipt_fn=lambda saved, updated=True: item_receipt(saved, updated=updated, ws=resolved),
+    )
 
 
+def op_convert(
+    ws: Workspace | None,
+    query: str,
+    destination: str,
+    *,
+    status: str | None = None,
+    task_type: str | None = None,
+    next_action: str | None = None,
+    match_mode: str = "exact",
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Convert an open task to a note, or a note to a task."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _convert_locked(
+            resolved, query, destination, status=status, task_type=task_type,
+            next_action=next_action, match_mode=match_mode,
+        ),
+        sync=sync,
+        quiet_sync=quiet_sync,
+    )
 
-def _bulk_plan_item(item: Card, base: Path, assignments: dict[str, str], updated: str, ws: Workspace) -> tuple[dict[str, object], bytes | None]:
-    kind = item.kind
-    if item.path.is_symlink():
-        raise ValueError(f"cannot edit a symlinked card: {item.path}")
-    original = item.path.read_bytes()
-    if original != item.raw.encode("utf-8"):
-        raise ValueError(f"conflict: item changed during bulk preview: {item.path}")
-    before = {field: item.frontmatter.get(field) for field in assignments}
-    candidate = _apply_bulk_metadata(item.raw, kind, assignments, updated, ws)
-    after_frontmatter = card_format.parse_yaml(card_format.parse_frontmatter(candidate)[0] or "")
-    after = {field: after_frontmatter.get(field) for field in assignments}
-    changed = candidate.encode("utf-8") != original
-    record: dict[str, object] = {
-        "kind": kind,
-        "path": item.path.relative_to(base).as_posix(),
-        "ref": f"@{item.short_ref}",
-        "title": item.title,
-        "content_hash": hashlib.sha256(original).hexdigest(),
-        "changed": changed,
-        "before": before,
-        "after": after,
-    }
-    return record, candidate.encode("utf-8") if changed else None
 
+def _delete_locked(
+    resolved: Workspace,
+    query: str,
+    *,
+    by: str | None = None,
+    match_mode: str = "exact",
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    query = query.strip()
+    if not query:
+        raise InputError("delete requires a non-empty query")
+    task = _resolve_unique_card(resolved, query, match_mode=match_mode)
+    if task.is_task:
+        try:
+            check_claim(task, current_username(by, ws=resolved))
+            timers = transaction.read_time_timers(resolved)
+        except ValueError as error:
+            raise ConflictError(str(error), exit_code=1) from error
+        task_id = str(task.frontmatter.get("id") or task.path.stem)
+        if task_id in timers:
+            raise ConflictError("a task with a running timer cannot be deleted", exit_code=1)
+    base = resolved.root
+    relative = task.path.relative_to(base).as_posix()
+    original = task.raw.encode("utf-8")
+    try:
+        transaction.apply_item_transaction(
+            {}, deletions={relative}, expected={relative: original}, source_root=base, ws=resolved,
+        )
+    except (OSError, ValueError) as error:
+        raise ValidationError(f"delete failed validation; change rolled back: {error}") from error
+    receipt = item_receipt(task, ws=resolved)
+    receipt["deleted"] = True
+    receipt["changed"] = True
+    return WriteResult(card=None, receipt=receipt, message=f"Deleted: {task.path}", changed=True)
+
+
+def op_delete(
+    ws: Workspace | None,
+    query: str,
+    *,
+    by: str | None = None,
+    match_mode: str = "exact",
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Delete one card after verifying claims and running timers."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _delete_locked(resolved, query, by=by, match_mode=match_mode),
+        sync=sync,
+        quiet_sync=quiet_sync,
+    )
+
+
+def _bulk_edit_locked(
+    resolved_ws: Workspace,
+    plan: dict[str, object],
+    *,
+    by: str | None = None,
+) -> WriteResult:
+    _require_mutation_lock(resolved_ws)
+    try:
+        assignments = plan["assignments"]
+        assert isinstance(assignments, dict)
+        base = resolved_ws.root
+        current_items = select_cards(discover(ws=resolved_ws), _plan_query(plan, resolved_ws))
+        current_members = {item.path.relative_to(base).as_posix() for item in current_items}
+        planned_members = {
+            entry.get("path") for entry in plan["items"]
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        }
+        if current_members != planned_members:
+            raise ConflictError("conflict: bulk-edit selection membership changed since preview", exit_code=1)
+        expected: dict[str, bytes] = {}
+        changes: dict[str, bytes] = {}
+        receipts = []
+        seen: set[str] = set()
+        timestamp = now_stamp()
+        root_resolved = store.cards_root(resolved_ws).resolve()
+        for entry in plan["items"]:
+            if not isinstance(entry, dict) or set(entry) != {
+                "kind", "path", "ref", "title", "content_hash", "changed", "before", "after"
+            }:
+                raise ValueError("bulk edit plan contains a malformed card record")
+            kind, relative_text = entry["kind"], entry["path"]
+            if not isinstance(kind, str) or kind not in {"task", "note"} or not isinstance(relative_text, str):
+                raise ValueError("bulk edit plan contains a malformed card path or kind")
+            relative = Path(relative_text)
+            if (
+                relative.is_absolute()
+                or relative.as_posix() != relative_text
+                or len(relative.parts) != 2
+                or relative.parts[0] != "cards"
+                or relative.suffix != ".md"
+                or relative.name in {"", ".", ".."}
+                or relative_text in seen
+            ):
+                raise ValueError(f"bulk edit plan contains an unsafe or duplicate path: {relative_text}")
+            seen.add(relative_text)
+            card_path = base / relative
+            try:
+                resolved = card_path.resolve(strict=True)
+                resolved.relative_to(root_resolved)
+            except (OSError, ValueError) as error:
+                raise ValueError(f"bulk edit plan path is outside the current {kind} cards: {relative_text}") from error
+            if card_path.is_symlink() or resolved.parent != root_resolved:
+                raise ValueError(f"bulk edit plan path is outside the current {kind} cards: {relative_text}")
+            original = card_path.read_bytes()
+            digest = hashlib.sha256(original).hexdigest()
+            if not isinstance(entry["content_hash"], str) or digest != entry["content_hash"]:
+                raise ConflictError(f"conflict: {relative_text} changed since the bulk edit preview", exit_code=1)
+            item = Card.read(card_path)
+            if entry["ref"] != f"@{item.short_ref}" or entry["title"] != item.title:
+                raise ConflictError(f"conflict: {relative_text} no longer matches the preview", exit_code=1)
+            if set(assignments) - set(card_format.EDITABLE_FIELDS[kind]):
+                raise ValueError(f"bulk edit field is not available on {kind} {relative_text}")
+            before = {field: item.frontmatter.get(field) for field in assignments}
+            raw = _apply_bulk_metadata(item.raw, kind, assignments, timestamp, resolved_ws)
+            parsed = card_format.parse_yaml(card_format.parse_frontmatter(raw)[0] or "")
+            after = {field: parsed.get(field) for field in assignments}
+            changed = raw.encode("utf-8") != original
+            if (
+                type(entry["changed"]) is not bool
+                or entry["changed"] is not changed
+                or entry["before"] != before
+                or entry["after"] != after
+            ):
+                raise ConflictError(f"conflict: {relative_text} no longer matches the previewed metadata change", exit_code=1)
+            expected[relative_text] = original
+            if changed:
+                if item.is_task and set(assignments) & {"status", "archived", "hidden"}:
+                    username = current_username(by, ws=resolved_ws)
+                    check_claim(item, username)
+                    if parsed.get("status") != item.frontmatter.get("status"):
+                        raw = transition_claim(item, raw, str(parsed["status"]), username, timestamp)
+                    if parsed.get("status") != "doing" or parsed.get("archived") is True or parsed.get("hidden") is True:
+                        raw, _timer = settle_timer(raw, int(clock_time.time()))
+                changes[relative_text] = raw.encode("utf-8")
+            receipts.append({"ref": entry["ref"], "path": relative_text, "changed": changed})
+        changed_count = len(changes)
+        unchanged_count = len(receipts) - changed_count
+        if (
+            plan["selected"] != len(receipts)
+            or plan["changed"] != changed_count
+            or plan["unchanged"] != unchanged_count
+        ):
+            raise ValueError("bulk edit plan counts do not match the current cards")
+        if changes:
+            transaction.apply_item_transaction(changes, expected=expected, source_root=base, ws=resolved_ws)
+    except TaskError:
+        raise
+    except (OSError, ValueError) as error:
+        if "conflict:" in str(error):
+            raise ConflictError(str(error), exit_code=1) from error
+        raise ValidationError(f"bulk edit failed validation; changes rolled back: {error}") from error
+    return WriteResult(
+        card=None,
+        receipt={
+            "saved": True,
+            "selected": len(receipts),
+            "changed": changed_count,
+            "unchanged": unchanged_count,
+            "items": receipts,
+        },
+        message=f"Bulk edit applied: {changed_count} changed; {unchanged_count} already set.",
+        changed=bool(changes),
+    )
+
+
+def op_bulk_edit(
+    ws: Workspace | None,
+    plan: dict[str, object],
+    *,
+    by: str | None = None,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Apply a validated, hash-guarded bulk-edit plan."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _bulk_edit_locked(resolved, plan, by=by),
+        sync=sync,
+        quiet_sync=quiet_sync,
+    )
+
+
+def _topic_rename_locked(
+    resolved: Workspace,
+    old: str,
+    new: str,
+    *,
+    merge: bool = False,
+    dry_run: bool = False,
+    by: str | None = None,
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    try:
+        plan = topic_rename_plan(old, new, merge, ws=resolved)
+        username = current_username(by, ws=resolved)
+        claimed = []
+        for card, _new_topic in plan:
+            try:
+                check_claim(card, username)
+            except ValueError:
+                claimed.append(f"@{card.short_ref} (claimed by {card.frontmatter.get('claimed_by')})")
+        if claimed:
+            raise CardInputError(
+                f"cannot rename: claimed by someone else: {', '.join(claimed)}. "
+                f"Release the claim or pass --by with the claiming username; nothing was changed"
+            )
+        base = resolved.root
+        timestamp = now_stamp()
+        changes: dict[str, bytes] = {}
+        expected: dict[str, bytes | None] = {}
+        records = []
+        for card, new_topic in plan:
+            relative = card.path.relative_to(base).as_posix()
+            if card.path.is_symlink():
+                raise CardInputError(f"cannot edit a symlinked card: {card.path}")
+            original = card.path.read_bytes()
+            if original != card.raw.encode("utf-8"):
+                raise CardInputError(f"conflict: card changed while planning: {relative}")
+            records.append({"ref": f"@{card.short_ref}", "path": relative, "title": card.title,
+                            "from": card.frontmatter["topic"], "to": new_topic})
+            if card.frontmatter["topic"] == new_topic:
+                continue
+            properties, body = card_format.parse_document(card.raw, expected_kind=card.kind)
+            patched = card_format.apply_property_patch(properties, {"topic": new_topic}, kind=card.kind)
+            patched["updated"] = timestamp
+            changes[relative] = card_format.render_document(patched, body, expected_kind=card.kind).encode("utf-8")
+            expected[relative] = original
+        if not dry_run and changes:
+            transaction.apply_item_transaction(changes, expected=expected, source_root=base, ws=resolved)
+    except CardInputError as error:
+        raise InputError(str(error), exit_code=1) from error
+    except (OSError, ValueError) as error:
+        raise ValidationError(f"topic rename failed; changes rolled back: {error}") from error
+    saved = not dry_run
+    return WriteResult(
+        card=None,
+        receipt={"saved": saved, "dry_run": dry_run, "selected": len(records),
+                 "changed": len(changes), "items": records},
+        changed=saved and bool(changes),
+    )
+
+
+def op_topic_rename(
+    ws: Workspace | None,
+    old: str,
+    new: str,
+    *,
+    merge: bool = False,
+    dry_run: bool = False,
+    by: str | None = None,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Rename or merge a topic subtree across cards."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _topic_rename_locked(resolved, old, new, merge=merge, dry_run=dry_run, by=by),
+        sync=sync and not dry_run,
+        quiet_sync=quiet_sync,
+    )
+
+
+def op_focus(
+    ws: Workspace | None,
+    selection: card_query.Query,
+    *,
+    query: str = "",
+    clear: bool = False,
+    cycle_next: bool = False,
+    by: str | None = None,
+) -> dict:
+    """Update or read local focus state under the mutation lock and return focus context."""
+    def _run(resolved: Workspace) -> WriteResult:
+        actor = current_username(by, ws=resolved)
+        if clear:
+            clear_focus_task_id(resolved)
+        elif query:
+            task = _resolve_unique_card(resolved, query, statuses=open_statuses(resolved))
+            if task.frontmatter.get("status") not in {"inbox", "active", "doing"}:
+                raise InputError(
+                    "focus requires an inbox, active, or doing task; read blocked or deferred work first"
+                )
+            check_claim(task, actor)
+            write_focus_task_id(str(task.frontmatter.get("id") or task.path.stem), ws=resolved)
+        open_query = card_query.narrow(selection, "status", open_statuses(resolved))
+        open_tasks = select_cards(discover(ws=resolved), open_query) if open_query else []
+        context = focus_context(open_tasks, actor=actor, ws=resolved)
+        candidates = context["candidates"]
+        if cycle_next and candidates:
+            current_id = context["selected"]["id"]
+            current_index = next(index for index, item in enumerate(candidates) if item["id"] == current_id)
+            selected_task = candidates[(current_index + 1) % len(candidates)]
+            write_focus_state(str(selected_task["id"]), "cycle", ws=resolved)
+            context = focus_context(open_tasks, actor=actor, ws=resolved)
+        return WriteResult(card=None, receipt=context, changed=False)
+
+    return _run_write_operation(ws, _run, sync=False).receipt
 
 
 def _stop_timer_card(
@@ -1511,14 +1122,16 @@ def _stop_timer_card(
     if timer is None:
         return card
     updated = card_format.replace_property(updated, "updated", timestamp)
-    base = active_root(resolved)
-    relative = str(card.path.relative_to(base))
-    transaction.apply_item_transaction(
-        {relative: updated.encode("utf-8")}, expected={relative: card.raw.encode("utf-8")},
-        source_root=base, ws=resolved,
+    result = _commit_item_write(
+        resolved,
+        card,
+        updated,
+        expected=card.raw.encode("utf-8"),
+        failure_prefix="time log failed validation",
+        summary="",
     )
-    return Card.read(card.path)
-
+    assert result.card is not None
+    return result.card
 
 
 def _time_start_locked(
@@ -1528,7 +1141,7 @@ def _time_start_locked(
     parallel: bool = False,
     by: str | None = None,
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     query = query.strip()
     if not query:
         raise InputError("time start requires a task")
@@ -1539,7 +1152,6 @@ def _time_start_locked(
         if is_archived(task) or is_hidden(task):
             raise ValueError("unarchive and unhide the task before starting a timer")
         task_id = str(task.frontmatter.get("id") or task.path.stem)
-        # One snapshot of the running timers; the cards in it are what any stop is built from.
         running = {store.card_task_id(card): (card, timer)
                    for card, timer in transaction.read_time_timer_cards(resolved)}
         if task_id in running:
@@ -1554,36 +1166,37 @@ def _time_start_locked(
             updated = transition_claim(task, updated, "doing", username, timestamp)
         updated = card_format.replace_property(updated, "timer", timer)
         updated = card_format.replace_property(updated, "updated", timestamp)
-        base = active_root(resolved)
-        relative = str(task.path.relative_to(base))
-        transaction.apply_item_transaction(
-            {relative: updated.encode("utf-8")}, expected={relative: task.raw.encode("utf-8")},
-            source_root=base, ws=resolved,
+        saved_result = _commit_item_write(
+            resolved,
+            task,
+            updated,
+            expected=task.raw.encode("utf-8"),
+            failure_prefix="could not start timer",
+            summary="",
         )
+    except TaskError as error:
+        raise ConflictError(str(error), exit_code=1) from error
     except (OSError, ValueError) as error:
         raise ConflictError(f"could not start timer: {error}", exit_code=1) from error
     if not parallel:
-        # Second, separate write per card. If this stops early, both timers keep
-        # running, which is an ordinary state that `mt time stop` resolves.
         for other_id, (other, other_timer) in sorted(running.items()):
             if other_timer["by"] != username:
                 continue
             try:
                 _stop_timer_card(resolved, other, max(started_epoch, int(other_timer["start_epoch"])), timestamp)
-            except (OSError, ValueError) as error:
+            except (OSError, ValueError, TaskError) as error:
                 raise ConflictError(
                     f"started the timer, but could not stop the timer on {other.title}: "
                     f"{error}; both timers are running, use mt time stop on the one to end",
                     exit_code=1, sync_needed=True,
                 ) from error
-    saved = Card.read(task.path)
+    assert saved_result.card is not None
     return WriteResult(
-        card=saved,
-        receipt=saved_receipt(saved, updated=True, ws=resolved),
+        card=saved_result.card,
+        receipt=saved_receipt(saved_result.card, updated=True, ws=resolved),
         message=f"Started timer for [@{task.short_ref}] {task.title} at {timer['start']} ({username}).",
         changed=True,
     )
-
 
 
 def op_time_start(
@@ -1593,14 +1206,15 @@ def op_time_start(
     parallel: bool = False,
     by: str | None = None,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Start a timer on an open task (claiming and moving it to doing if needed)."""
     return _run_write_operation(
         ws,
         lambda resolved: _time_start_locked(resolved, query, parallel=parallel, by=by),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
-
 
 
 def _time_end_locked(
@@ -1612,9 +1226,8 @@ def _time_end_locked(
     duration: str | None = None,
     by: str | None = None,
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     try:
-        # One snapshot: the owner check and the write both use the card and timer chosen here.
         running = {store.card_task_id(card): (card, timer)
                    for card, timer in transaction.read_time_timer_cards(resolved)}
     except ValueError as error:
@@ -1640,23 +1253,27 @@ def _time_end_locked(
         raise ConflictError(f"multiple timers are running; specify a task: {', '.join(refs)}", exit_code=1)
     if timer["by"] != current_username(by, ws=resolved):
         raise ConflictError(f"timer belongs to {timer['by']}; use --by {shlex.quote(str(timer['by']))}", exit_code=1)
-    base = active_root(resolved)
-    relative = str(task.path.relative_to(base))
     if action == "cancel":
         properties, body = card_format.parse_document(task.raw)
         del properties["timer"]
         properties["updated"] = now_stamp()
         try:
-            transaction.apply_item_transaction(
-                {relative: card_format.render_document(properties, body).encode("utf-8")},
-                expected={relative: task.raw.encode("utf-8")}, source_root=base, ws=resolved,
-            )
-        except store.StaleCardError as error:
-            raise ConflictError(f"card changed since the timer was read; nothing was written, run the command again: {error}",
-                                exit_code=1) from error
-        except (OSError, ValueError) as error:
-            raise InputError(f"could not cancel timer: {error}", exit_code=1) from error
-        cancelled = Card.read(task.path)
+            cancelled = _commit_item_write(
+                resolved,
+                task,
+                card_format.render_document(properties, body),
+                expected=task.raw.encode("utf-8"),
+                failure_prefix="could not cancel timer",
+                summary="",
+            ).card
+        except ConflictError as error:
+            raise ConflictError(
+                f"card changed since the timer was read; nothing was written, run the command again: {error}",
+                exit_code=1,
+            ) from error
+        except ValidationError as error:
+            raise InputError(str(error), exit_code=1) from error
+        assert cancelled is not None
         return WriteResult(
             card=cancelled,
             receipt=saved_receipt(cancelled, updated=True, ws=resolved),
@@ -1677,10 +1294,12 @@ def _time_end_locked(
     already_saved = timer_session_saved(task, timer)
     try:
         updated_task = _stop_timer_card(resolved, task, end_epoch, now_stamp())
-    except store.StaleCardError as error:
-        raise ConflictError(f"card changed since the timer was read; nothing was written, run the command again: {error}",
-                            exit_code=1) from error
-    except (OSError, ValueError) as error:
+    except ConflictError as error:
+        raise ConflictError(
+            f"card changed since the timer was read; nothing was written, run the command again: {error}",
+            exit_code=1,
+        ) from error
+    except (OSError, ValueError, ValidationError) as error:
         raise ValidationError(f"time log failed validation; running timer was retained: {error}", exit_code=1) from error
     summary = (
         "Timer session was already saved; cleared the running state."
@@ -1695,7 +1314,6 @@ def _time_end_locked(
     )
 
 
-
 def op_time_end(
     ws: Workspace | None,
     *,
@@ -1705,95 +1323,226 @@ def op_time_end(
     duration: str | None = None,
     by: str | None = None,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Stop or cancel a running timer."""
     return _run_write_operation(
         ws,
-        lambda resolved: _time_end_locked(
-            resolved, query=query, action=action, at=at, duration=duration, by=by
-        ),
+        lambda resolved: _time_end_locked(resolved, query=query, action=action, at=at, duration=duration, by=by),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
 
 
+def _time_remove_locked(resolved: Workspace, session_id_arg: str) -> WriteResult:
+    _require_mutation_lock(resolved)
+    session_ref = session_id_arg.lower()
+    if not re.fullmatch(r"[0-9a-f]{8,32}", session_ref):
+        raise InputError("use a session ID from 'mt time list' (at least 8 hexadecimal characters)", exit_code=2)
+    matches = [
+        (task, entry)
+        for task in discover("task", ws=resolved)
+        for entry in time_log_entries(task.raw)
+        if str(entry["session_id"]).startswith(session_ref)
+    ]
+    if not matches:
+        raise NotFoundError(f"no recorded session matches '{session_ref}'", exit_code=1, prefixed=True)
+    if len(matches) > 1:
+        lines = "\n".join(f"  {entry['session_id']}  [@{task.short_ref}] {task.title}" for task, entry in matches)
+        raise InputError(f"multiple sessions match; use a longer session ID:\n{lines}", exit_code=2)
+    task, entry = matches[0]
+    session_id = str(entry["session_id"])
+    properties, body = card_format.parse_document(task.raw, expected_kind="task")
+    entries = properties.get("time_entries", [])
+    if not isinstance(entries, list):
+        raise ValidationError("task time_entries property is malformed")
+    properties["time_entries"] = [
+        item for item in entries if not isinstance(item, dict) or item.get("session_id") != session_id
+    ]
+    if not properties["time_entries"]:
+        properties.pop("time_entries")
+    updated = card_format.render_document(properties, body, expected_kind="task")
+    updated = card_format.replace_property(updated, "updated", now_stamp())
+    result = _commit_item_write(
+        resolved,
+        task,
+        updated,
+        expected=task.raw.encode("utf-8"),
+        failure_prefix="session removal failed validation; task was restored",
+        summary=f"Removed session {session_id} ({format_duration(int(entry['elapsed_seconds']))}) "
+                f"from [@{task.short_ref}] {task.title}.",
+    )
+    return result
 
-def workspace_topic_counts(cards: list[Card]) -> dict[str, int]:
-    """Cards per exact topic path, counting every card including hidden and archived."""
-    counts: dict[str, int] = {}
-    for card in cards:
-        topic = card.frontmatter.get("topic")
-        if isinstance(topic, str) and topic:
-            counts[topic] = counts.get(topic, 0) + 1
-    return counts
+
+def op_time_remove(ws: Workspace | None, session_id: str, *, sync: bool = True, quiet_sync: bool = True) -> WriteResult:
+    """Remove a recorded time session from a task."""
+    return _run_write_operation(ws, lambda resolved: _time_remove_locked(resolved, session_id), sync=sync, quiet_sync=quiet_sync)
 
 
+def _time_add_locked(
+    resolved: Workspace,
+    query: str,
+    *,
+    duration: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    try:
+        end_epoch = parse_time_argument(end) if end else int(clock_time.time())
+        if start:
+            if duration:
+                raise ValueError("use either DURATION or --start, not both")
+            start_epoch = parse_time_argument(start)
+            seconds = end_epoch - start_epoch
+        else:
+            if not duration:
+                raise ValueError("provide DURATION or --start TIME")
+            seconds = parse_duration(duration)
+            start_epoch = end_epoch - seconds
+        if seconds <= 0 or end_epoch > int(clock_time.time()):
+            raise ValueError("session start must precede end, and end cannot be in the future")
+    except ValueError as error:
+        raise InputError(str(error), exit_code=2) from error
+    task = _resolve_unique_card(resolved, query.strip(), kind="task")
+    timer = {
+        "session_id": uuid.uuid4().hex,
+        "task_id": str(task.frontmatter.get("id") or task.path.stem),
+        "start": local_stamp(start_epoch),
+        "start_epoch": start_epoch,
+    }
+    saved, message = save_time_session(task, timer, end_epoch, ws=resolved)
+    if not saved:
+        raise ValidationError(message)
+    updated = Card.read(task.path)
+    return WriteResult(
+        card=updated,
+        receipt=saved_receipt(updated, updated=True, ws=resolved),
+        message=f"Added {format_duration(seconds)} to [@{task.short_ref}] {task.title}.",
+        changed=True,
+    )
 
-def suggested_topics(cfg: dict) -> list[str]:
-    values = cfg.get("suggested_topics")
-    return [card_format.normalize_topic(value) for value in values
-            if isinstance(value, str) and card_format.topic_path_error(value) is None] if isinstance(values, list) else []
+
+def op_time_add(
+    ws: Workspace | None,
+    query: str,
+    *,
+    duration: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Record a manual time session on a task."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _time_add_locked(resolved, query, duration=duration, start=start, end=end),
+        sync=sync,
+        quiet_sync=quiet_sync,
+    )
 
 
-
-def workspace_topic_tree(cards: list[Card], cfg: dict) -> list[dict[str, object]]:
-    return card_format.topic_tree(workspace_topic_counts(cards), suggested_topics(cfg))
-
-
-
-def topic_query(path: str) -> card_query.Query:
-    """Every card at or under a topic, whether archived or hidden."""
-    return card_query.Query(topic=(path,), archived="include", hidden="include")
-
-
-
-def topic_rename_plan(old: str, new: str, merge: bool, ws: Workspace | None = None) -> list[tuple[Card, str]]:
-    """Cards to move and their new topics, or ValueError when the rename is not allowed."""
+def op_draft_create(
+    ws: Workspace | None,
+    kind: str,
+    *,
+    draft_id: str | None = None,
+    title: str | None = None,
+    body: str = "",
+    capture_id: str | None = None,
+    created: str | None = None,
+) -> dict[str, object]:
+    """Create a new-mode draft in the workspace."""
     resolved = _ws(ws)
-    for label, value in (("OLD", old), ("NEW", new)):
-        problem = card_format.topic_path_error(value)
-        if problem:
-            raise CardInputError(f"{label} topic {problem}")
-    old, new = card_format.normalize_topic(old), card_format.normalize_topic(new)
-    old_key, new_key = card_format.topic_key(old), card_format.topic_key(new)
-    if new == old:
-        raise CardInputError("OLD and NEW are the same topic")
-    if len(new_key) > len(old_key) and new_key[:len(old_key)] == old_key:
-        raise CardInputError(f"cannot move topic '{old}' into its own subtree '{new}'")
-    cards = discover(ws=resolved)
-    affected = select_cards(cards, topic_query(old))
-    if not affected:
-        raise CardInputError(f"no cards use topic '{old}' or anything under it")
-    if new_key != old_key and not merge:
-        moving = {card.path for card in affected}
-        existing = select_cards([card for card in cards if card.path not in moving], topic_query(new))
-        if existing or any(card_format.topic_key(item) == new_key for item in suggested_topics(store.policy(resolved))):
-            raise CardInputError(f"topic '{new}' already exists; use --merge to combine into it")
-    plan = []
-    for card in affected:
-        parts = str(card.frontmatter["topic"]).split(card_format.TOPIC_SEPARATOR)
-        rest = parts[len(old_key):]
-        plan.append((card, card_format.TOPIC_SEPARATOR.join([new, *rest])))
-    return plan
+    if title is not None and not card_format.is_single_line_text(title):
+        raise InputError("draft title must be non-empty and single-line", exit_code=2)
+    stamp = now_stamp()
+    if created is not None and (not isinstance(created, str) or not is_timestamp(created)):
+        raise InputError("--created-at must be a local ISO timestamp with seconds", exit_code=2)
+    raw_capture_id = capture_id or str(uuid.uuid4())
+    try:
+        parsed_capture_id = uuid.UUID(raw_capture_id)
+    except (AttributeError, ValueError) as error:
+        raise InputError("--capture-id must be a valid UUID", exit_code=2) from error
+    if str(parsed_capture_id) != raw_capture_id.lower():
+        raise InputError("--capture-id must be a canonical UUID", exit_code=2)
+    fields: dict[str, object] = {
+        "kind": kind,
+        "mode": "new",
+        "title": title or "",
+        "capture_id": str(parsed_capture_id),
+        "created": created or stamp,
+    }
+    if kind == "task":
+        default_status, default_priority, default_type = task_defaults(store.policy(resolved))
+        fields.update({
+            "status": default_status, "priority": default_priority, "type": default_type,
+            "project": None, "topic": None, "tags": [], "due": None, "due_kind": None,
+        })
+    try:
+        return draft_store.save(
+            resolved.root,
+            draft_id=draft_id,
+            fields=fields,
+            body=body,
+            now=stamp,
+        )
+    except (OSError, ValueError) as error:
+        raise InputError(str(error), exit_code=1) from error
 
+
+def op_draft_edit(
+    ws: Workspace | None,
+    draft_id: str,
+    *,
+    fields: dict[str, object],
+    body: str,
+    expected_hash: str,
+) -> dict[str, object]:
+    """Update an existing draft with compare-and-swap."""
+    resolved = _ws(ws)
+    return draft_store.save(
+        resolved.root,
+        draft_id=draft_id,
+        fields=fields,
+        body=body,
+        expected_content_hash=expected_hash,
+        now=now_stamp(),
+    )
+
+
+def op_draft_discard(
+    ws: Workspace | None,
+    draft_id: str,
+    *,
+    expected_hash: str | None,
+) -> bool:
+    """Discard a draft with compare-and-swap."""
+    resolved = _ws(ws)
+    return draft_store.discard(resolved.root, draft_id, expected_hash)
 
 
 def _save_new_draft(resolved: Workspace, draft: dict[str, object]) -> tuple[Card, bool]:
     """Capture a new card from a 'new'-mode draft."""
     body = str(draft.get("body") or "")
-    capture_args = argparse.Namespace(
-        text=[body],
+    return capture_card(
+        body,
+        str(draft["kind"]),
         title=str(draft.get("title") or "").strip() or None,
         capture_id=str(draft.get("capture_id") or ""),
         created_at=str(draft.get("created") or ""),
-        instructions_text=str(draft.get("instructions") or ""),
+        instructions=str(draft.get("instructions") or ""),
+        priority=draft.get("priority") if isinstance(draft.get("priority"), str) else None,
+        project=draft.get("project") if isinstance(draft.get("project"), str) else None,
+        topic=draft.get("topic") if isinstance(draft.get("topic"), str) else None,
+        due=draft.get("due") if isinstance(draft.get("due"), str) else None,
+        due_kind=draft.get("due_kind") if isinstance(draft.get("due_kind"), str) else None,
+        tags=list(draft.get("tags") or []) if isinstance(draft.get("tags"), list) else [],
+        status=draft.get("status") if draft["kind"] == "task" and isinstance(draft.get("status"), str) else None,
+        task_type=draft.get("type") if draft["kind"] == "task" and isinstance(draft.get("type"), str) else None,
+        ws=resolved,
     )
-    for field in ("priority", "project", "topic", "due", "due_kind"):
-        setattr(capture_args, field, draft.get(field))
-    capture_args.tags = draft.get("tags") or []
-    if draft["kind"] == "task":
-        capture_args.status = draft.get("status")
-        capture_args.task_type = draft.get("type")
-    return capture_card(capture_args, body, draft["kind"], ws=resolved)
 
 
 def _draft_save_locked(
@@ -1802,7 +1551,7 @@ def _draft_save_locked(
     *,
     expected_hash: str | None = None,
 ) -> tuple[WriteResult, bool]:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     path = draft_store.draft_path(resolved.root, draft_id)
     item: Card | None = None
     changed = False
@@ -1842,30 +1591,26 @@ def _draft_save_locked(
     return result, draft_removed
 
 
-
 def op_draft_save(
     ws: Workspace | None,
     draft_id: str,
     *,
     expected_hash: str | None = None,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Apply a draft to the workspace and remove the draft file."""
-    resolved = _ws(ws)
-    # Keep the global mutation lock order aligned with migration and card
-    # writes: time/mutation first, drafts second. Auto-sync runs below after
-    # both locks have been released.
-    with time_mutation_lock(resolved):
+    def _run(resolved: Workspace) -> WriteResult:
         result, draft_removed = _draft_save_locked(
             resolved,
             draft_id,
             expected_hash=expected_hash,
         )
-    if sync and (result.changed or draft_removed):
-        sync_error = transaction.run_auto_sync_for_receipt(resolved)
-        if sync_error:
-            return replace(result, sync_error=sync_error)
-    return result
+        if draft_removed and not result.changed:
+            return replace(result, changed=True)
+        return result
+
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
 
 
 def op_card_metadata(
@@ -1877,6 +1622,7 @@ def op_card_metadata(
     kind: str | None = None,
     match_mode: str = "exact",
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Apply a card metadata patch with a whole-card compare-and-swap."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash or ""):
@@ -1889,11 +1635,10 @@ def op_card_metadata(
         item_kind = item.kind
         if kind is not None and item_kind != kind:
             raise InputError(f"{kind} metadata can only be applied to a {kind}")
-        # Status and visibility flags have their own guarded commands.
         allowed_fields = card_format.EDITABLE_FIELDS[item_kind] - {"status", *card_format.BOOLEAN_METADATA}
         if set(patch) - allowed_fields:
             raise InputError("metadata patch contains unsupported or missing fields", exit_code=2)
-        original = item.path.read_bytes()
+        original = item.raw.encode("utf-8")
         actual_hash = hashlib.sha256(original).hexdigest()
         if actual_hash.casefold() != expected_hash.casefold():
             raise ConflictError("conflict: card changed since it was loaded (content hash mismatch)")
@@ -1922,25 +1667,7 @@ def op_card_metadata(
             receipt_fn=lambda saved, updated=True: store.item_receipt(saved, updated=updated, ws=resolved),
         )
 
-    return _run_write_operation(ws, _run, sync=sync)
-
-
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=".mt-attach-", dir=str(path.parent))
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
 
 
 def _store_attachment_locked(
@@ -1952,9 +1679,8 @@ def _store_attachment_locked(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
-    real: bool = False,
 ) -> WriteResult:
-    _require_mutation_lock()
+    _require_mutation_lock(resolved)
     if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
         raise InputError("attachment must not be empty", exit_code=2)
     payload_bytes = bytes(data)
@@ -1965,7 +1691,7 @@ def _store_attachment_locked(
         raise InputError(f"attachment exceeds max_attachment_mb ({limit_mb} MB)", exit_code=2)
 
     item = _resolve_unique_card(resolved, card_ref, match_mode=match_mode) if card_ref else None
-    target_dir = resolved.real_attachments_root() if real else resolved.attachments_root()
+    target_dir = resolved.attachments_root()
     if target_dir.is_symlink():
         raise ValidationError("attachments/ must not be a symbolic link")
     if target_dir.exists() and not target_dir.is_dir():
@@ -2001,7 +1727,7 @@ def _store_attachment_locked(
                 counter += 1
 
     if not deduplicated:
-        _atomic_write_bytes(target_path, payload_bytes)
+        card_format.atomic_write(target_path, payload_bytes)
         file_changed = True
 
     relative_path = f"../attachments/{stored_name}"
@@ -2026,24 +1752,27 @@ def _store_attachment_locked(
     }
 
     if item is not None:
-        original = item.path.read_bytes()
         properties = dict(item.frontmatter)
         body = item.body
         new_body = f"{body.rstrip()}\n\n{markdown}" if body.strip() else markdown
         properties["updated"] = store.now_stamp()
         raw = card_format.render_document(properties, new_body, expected_kind=item.kind)
-        card_result = _commit_item_write(
-            resolved,
-            item,
-            raw,
-            expected=original,
-            failure_prefix="attach failed",
-            summary=f"Attached {stored_name} to @{item.short_ref}",
-            receipt_fn=lambda saved, updated=True: {
-                **receipt,
-                "card": store.item_receipt(saved, updated=updated, ws=resolved),
-            },
-        )
+        try:
+            card_result = _commit_item_write(
+                resolved,
+                item,
+                raw,
+                failure_prefix="attach failed",
+                summary=f"Attached {stored_name} to @{item.short_ref}",
+                receipt_fn=lambda saved, updated=True: {
+                    **receipt,
+                    "card": store.item_receipt(saved, updated=updated, ws=resolved),
+                },
+            )
+        except (ConflictError, ValidationError):
+            if file_changed:
+                target_path.unlink(missing_ok=True)
+            raise
         return WriteResult(
             card=card_result.card,
             receipt=card_result.receipt,
@@ -2068,8 +1797,8 @@ def op_store_attachment(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
-    real: bool = False,
     sync: bool = True,
+    quiet_sync: bool = True,
 ) -> WriteResult:
     """Store an attachment in attachments/ and optionally append its Markdown link to a card."""
     return _run_write_operation(
@@ -2082,9 +1811,7 @@ def op_store_attachment(
             card_ref=card_ref,
             match_mode=match_mode,
             label=label,
-            real=real,
         ),
         sync=sync,
+        quiet_sync=quiet_sync,
     )
-
-

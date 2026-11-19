@@ -23,6 +23,7 @@ sys.path.insert(0, str(SOURCE_ROOT / "tests"))
 import card_format  # noqa: E402
 import card_query  # noqa: E402
 import cli_cards  # noqa: E402
+import cli_helpers  # noqa: E402
 import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
@@ -43,7 +44,7 @@ class WorkspaceIsolationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         base = Path(temporary.name)
-        shared = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8").replace(
+        shared = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8").replace(
             "demo_workspace: true", "demo_workspace: false")
         # A keeps the shipped policy. B defaults to waiting and has no `urgent` priority or `someday` status.
         policies = {
@@ -56,7 +57,7 @@ class WorkspaceIsolationTests(unittest.TestCase):
         for name, policy in policies.items():
             root = base / name
             (root / "cards").mkdir(parents=True)
-            (root / "mt-policy.yaml").write_text(policy, encoding="utf-8")
+            (root / "settings.yaml").write_text(policy, encoding="utf-8")
             self.roots[name] = root
         self.assertNotIn("urgent:", policies["b"])
         self.a = Workspace.at(self.roots["a"], app_root=SOURCE_ROOT)
@@ -103,7 +104,7 @@ class WorkspaceIsolationTests(unittest.TestCase):
         card_query.add_query_arguments(parser)
         args = parser.parse_args([])
         with mock.patch.dict(os.environ, {"MT_PROJECT": "beta"}):
-            self.assertEqual(store.command_query(args, selected).project, ("alpha",))
+            self.assertEqual(cli_helpers.command_query(args, selected).project, ("alpha",))
             self.assertEqual(taskweb.board_filters(selected, args).get("project"), ["alpha"])
             self.assertEqual(card_query.env_scope(argparse.Namespace(query_args=True, project=None, topic=None),
                                                   selected.environ), ["project alpha (MT_PROJECT)"])

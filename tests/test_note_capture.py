@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,7 @@ class NoteCaptureTests(unittest.TestCase):
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(
             ".git", ".mt", ".DS_Store"
         ))
+        legacy_workspace(self.root)
         self.editor = temporary / "editor"
         self.editor.write_text(EDITOR_STUB, encoding="utf-8")
         self.editor.chmod(0o755)
@@ -252,7 +254,7 @@ class NoteCaptureTests(unittest.TestCase):
 
     def test_json_receipt_reports_local_success_when_auto_sync_fails(self) -> None:
         subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         policy = policy_path.read_text(encoding="utf-8")
         policy_path.write_text(policy.replace("auto_sync: false", "auto_sync: true", 1), encoding="utf-8")
         receipt = self.create_capture(b"Initial", title="Sync later")

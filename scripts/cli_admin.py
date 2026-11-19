@@ -2,20 +2,24 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 
 import card_query
 from cli_helpers import (
     REPO_ALIAS_RE,
+    command_query,
     load_repo_aliases,
     show_workspace,
     validate_repo_workspace,
@@ -26,25 +30,30 @@ import store
 import transaction
 from store import (
     _ws,
-    active_root,
-    command_query,
-    demo_active,
     discover,
     foreign_env,
     workspace_env,
 )
 import validation
 from workspace import (
+    WORKSPACE_DIRECTORY,
     Workspace,
+    create_workspace,
+    demo_environ,
+    default_workspace_path,
     is_data_workspace,
+    is_legacy_workspace,
+    is_unmigrated_workspace,
+    seed_demo_workspace,
+    unmigrated_message,
 )
 
 SKILL_TARGETS = (".agents/skills", ".claude/skills")
 SKILL_MARKER = "installed-by: microtask"
 SKILL_WORKSPACE_BLOCK = re.compile(r"<!-- mt:workspace -->\n.*?<!-- /mt:workspace -->", re.DOTALL)
 SKILL_COMMAND = re.compile(r"(?<![\w/.-])(?:\./)?mt(?= [A-Za-z-])")
-APPLICATION_FILES = ("mt", "mt-policy.yaml", "install.sh", "README.md", "LICENSE", "AGENTS.md",
-                     "CLAUDE.md", "GEMINI.md", "CONTRIBUTING.md", ".gitignore")
+APPLICATION_FILES = ("mt", "install.sh", "README.md", "LICENSE", "AGENTS.md",
+                     "CLAUDE.md", "GEMINI.md", "CONTRIBUTING.md", ".gitignore", "VERSION")
 APPLICATION_FOLDERS = ("scripts", "tools", "templates", ".agents")
 
 
@@ -56,7 +65,7 @@ def portable_invocation(ws: Workspace | None = None) -> tuple[str, str | None]:
     """
     resolved = _ws(ws)
     on_path = shutil.which("mt")
-    if on_path and resolved.root == resolved.app_root and Path(on_path).resolve() == (resolved.app_root / "mt").resolve():
+    if on_path and resolved.in_app and Path(on_path).resolve() == (resolved.app_root / "mt").resolve():
         return "mt", None
     here = resolved.root.resolve()
     for name, path in sorted(load_repo_aliases().items()):
@@ -118,6 +127,9 @@ def skills_invocation(project: str | None, topic: str | None, ws: Workspace | No
 def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
     project_dir = Path(args.dir).expanduser().resolve()
+    if not project_dir.is_dir():
+        print(f"error: project directory does not exist: {project_dir}", file=sys.stderr)
+        return 2
     sources = skill_sources(resolved)
     if not sources:
         print(f"error: no skills found in {resolved.app_root / '.agents' / 'skills'}", file=sys.stderr)
@@ -182,7 +194,7 @@ def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None
         print("warning: the skills name a folder on this machine, so do not commit them. To share them, give "
               f"the workspace an alias with mt repo add NAME {shlex.quote(str(resolved.root))} and install again "
               "with mt -R NAME skills install.", file=sys.stderr)
-    if resolved.root == resolved.app_root and not (args.project or args.topic):
+    if resolved.in_app and not (args.project or args.topic):
         print("note: agents will see every card in this workspace; add --project or --topic to limit them.",
               file=sys.stderr)
     return 0
@@ -249,15 +261,13 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     print(paint(top, "36"))
     box_line("WORKSPACE", "1;36")
     box_line(str(resolved.root), "1", location=True)
-    if resolved.root != resolved.app_root:
+    if not resolved.in_app:
         box_line(f"Application: {resolved.app_root}", "2", location=True)
     box_line()
     total = task_count + notes_count
     box_line(f"{total} card{'s' if total != 1 else ''}   ·   "
              f"{task_count} task{'s' if task_count != 1 else ''}   ·   "
              f"{notes_count} note{'s' if notes_count != 1 else ''}", "1")
-    if demo_active(resolved):
-        box_line("Demo workspace · bundled examples", "33")
     print(paint("╰" + "─" * (width - 2) + "╯", "36"))
 
     print()
@@ -279,7 +289,7 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     section("GIT")
     if git_state == "ready":
         print(f"  {paint('●', '32')}  Branch   {paint(str(repository['branch']), '1')}")
-        for action, remote in (("Sync", "origin"), ("Update", "upstream")):
+        for action, remote in (("Sync", "origin"),):
             target = str(repository[remote])
             if target == "-":
                 print(f"  {paint('○', '33')}  {action:<8} {paint('add ' + remote, '33')}")
@@ -310,7 +320,7 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
 
 
 def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    """Show effective policy, with JSON available for automation."""
+    """Show effective settings, with JSON available for automation."""
     try:
         effective = store.policy(_ws(ws))
     except (OSError, ValueError) as error:
@@ -319,7 +329,7 @@ def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int
     if args.as_json:
         print(json.dumps(effective, ensure_ascii=False, sort_keys=True))
         return 0
-    print("Effective workspace policy")
+    print("Effective workspace settings")
     for key, value in effective.items():
         label = key.replace("_", " ").capitalize()
         if isinstance(value, dict):
@@ -339,20 +349,17 @@ def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int
 def copy_application(
     target: Path, *, examples: bool = False, ws: Workspace | None = None,
 ) -> None:
-    """Copy the self-contained application into TARGET with an empty cards/ folder."""
+    """Copy the application into TARGET, with an empty workspace/ that keeps this workspace's settings."""
     resolved = _ws(ws)
-    files = APPLICATION_FILES
     folders = APPLICATION_FOLDERS + (("examples",) if examples else ())
-    for name in files:
-        # Settings come from the workspace in use; everything else is the application.
-        root = resolved.root if name.startswith("mt-policy") else resolved.app_root
-        if (root / name).is_file():
-            shutil.copy2(root / name, target / name)
+    for name in APPLICATION_FILES:
+        if (resolved.app_root / name).is_file():
+            shutil.copy2(resolved.app_root / name, target / name)
     for name in folders:
         if (resolved.app_root / name).is_dir():
             shutil.copytree(resolved.app_root / name, target / name,
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store", "*.swp", ".env"))
-    (target / "cards").mkdir()
+    create_workspace(target / WORKSPACE_DIRECTORY, resolved.app_root, policy=resolved.root / "settings.yaml")
 
 
 def command_repo_add(args: argparse.Namespace) -> int:
@@ -431,7 +438,7 @@ def command_update(args: argparse.Namespace, ws: Workspace | None = None) -> int
         command.append("--json")
     if args.force:
         command.append("--force")
-    return subprocess.run(command, cwd=resolved.app_root, check=False, env=foreign_env(resolved)).returncode
+    return subprocess.run(command, cwd=resolved.app_root, check=False, env=resolved.environ).returncode
 
 
 def command_import_github(args: argparse.Namespace, ws: Workspace | None = None) -> int:
@@ -452,23 +459,20 @@ def command_validate(args: argparse.Namespace, ws: Workspace | None = None) -> i
     try:
         effective_policy = store.policy(resolved)
     except (OSError, ValueError) as error:
-        print("FAILED: invalid policy:", file=sys.stderr)
+        print("FAILED: invalid settings:", file=sys.stderr)
         for line in str(error).splitlines():
             print(f"  - {line}", file=sys.stderr)
         return 1
-    report = validation.audit_workspace(active_root(resolved), effective_policy)
-    if report.errors:
-        print(f"FAILED: {len(report.errors)} error(s):", file=sys.stderr)
-        for error in report.errors:
-            print(f"  - {error}", file=sys.stderr)
-        return 1
-    for warning in report.warnings:
-        print(f"WARNING: {warning}", file=sys.stderr)
-    print(
-        f"OK: validated {report.task_count} task file(s), {report.note_count} note file(s), "
-        f"and {report.draft_count} draft file(s)."
-    )
-    return 0
+    report = validation.audit_workspace(resolved.root, effective_policy)
+    code, stdout_lines, stderr_lines = validation.format_audit_report(report)
+    for line in stderr_lines:
+        print(line, file=sys.stderr)
+    if code == 0 and resolved.root == resolved.app_root and not resolved.environ.get("MT_WORKSPACE"):
+        print("note: your cards sit next to the application code. Run 'mt migrate' to move them into "
+              "workspace/, so 'mt update' works without Git.", file=sys.stderr)
+    for line in stdout_lines:
+        print(line)
+    return code
 
 
 def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | None = None) -> int:
@@ -476,7 +480,7 @@ def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | N
     resolved = _ws(ws)
     if destination.exists():
         if is_data_workspace(destination):
-            print(f"{destination} is already a data-only workspace; nothing changed.")
+            print(f"{destination} is already a workspace folder; nothing changed.")
             return 0
         print(f"error: {destination} already exists", file=sys.stderr)
         return 1
@@ -485,17 +489,14 @@ def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | N
         return 1
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     try:
-        (staging / "cards").mkdir()
-        (staging / "cards" / ".gitkeep").touch()
-        shutil.copy2(resolved.root / "mt-policy.yaml", staging / "mt-policy.yaml")
-        (staging / ".gitignore").write_text(".mt/\nmt-policy.local.yaml\n.DS_Store\n", encoding="utf-8")
+        create_workspace(staging, resolved.app_root, policy=resolved.root / "settings.yaml")
         staging.chmod(0o755)
         os.rename(staging, destination)
     except OSError as error:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"error: could not create {destination}: {error}", file=sys.stderr)
         return 1
-    print(f"Created a data-only workspace in {destination} with your settings (mt-policy.yaml) and no cards.")
+    print(f"Created a workspace folder in {destination} with your settings (settings.yaml) and no cards.")
     print(f"It has no application of its own; this mt ({resolved.app_root}) runs it.")
     if shutil.which("git") is None:
         print("Git is not installed, so it has no history or sync; run 'git init' there later.")
@@ -523,8 +524,44 @@ def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | N
     return 0
 
 
+def init_own_workspace(args: argparse.Namespace, ws: Workspace) -> int:
+    """Create this application's own workspace/ folder: the one plain ./mt uses."""
+    if args.local or args.data:
+        print("error: --local and --data need a DIRECTORY; plain 'mt init' creates this app's workspace/",
+              file=sys.stderr)
+        return 2
+    target = default_workspace_path(ws.app_root)
+    if ws.environ.get("MT_WORKSPACE"):
+        print(f"error: MT_WORKSPACE is set, so mt uses {ws.environ['MT_WORKSPACE']}, not {target}. "
+              "Unset it to create this app's own workspace", file=sys.stderr)
+        return 2
+    if is_data_workspace(target):
+        print(f"Workspace already exists: {target}")
+        return 0
+    if is_unmigrated_workspace(target):
+        print(f"error: {unmigrated_message(target, str(ws.app_root / 'mt') + ' migrate')}", file=sys.stderr)
+        return 1
+    if is_legacy_workspace(ws.app_root):
+        print(f"error: {ws.app_root} keeps its cards next to the application. "
+              "Run 'mt migrate' to move them into workspace/", file=sys.stderr)
+        return 1
+    if target.exists() and not target.is_dir():
+        print(f"error: {target} exists and is not a folder", file=sys.stderr)
+        return 1
+    try:
+        create_workspace(target, ws.app_root)
+    except OSError as error:
+        print(f"error: could not create {target}: {error}", file=sys.stderr)
+        return 1
+    print(f"Created workspace: {target}")
+    print("Run 'mt demo' to try it with example cards.")
+    return 0
+
+
 def command_init(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
+    if args.directory is None:
+        return init_own_workspace(args, resolved)
     destination = Path(args.directory).expanduser().resolve()
     if args.data:
         if args.local:
@@ -533,7 +570,7 @@ def command_init(args: argparse.Namespace, ws: Workspace | None = None) -> int:
             return 2
         return init_data_workspace(destination, args.origin, ws=resolved)
     if not args.local:
-        command = ["bash", str(resolved.app_root / "install.sh"), "--no-path", str(destination)]
+        command = ["bash", str(resolved.app_root / "install.sh"), "--no-path", "--yes", str(destination)]
         if args.origin:
             command.append(args.origin)
         return subprocess.run(command, check=False, env=foreign_env(resolved)).returncode
@@ -553,7 +590,6 @@ def command_init(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     try:
         copy_application(staging, examples=True, ws=resolved)
-        (staging / "cards" / ".gitkeep").touch()
         staging.chmod(0o755)
         os.rename(staging, destination)
     except OSError as error:
@@ -561,10 +597,10 @@ def command_init(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         print(f"error: could not create {destination}: {error}", file=sys.stderr)
         return 1
     print(f"Copied microtask from {resolved.app_root} without network access, with your settings "
-          "(mt-policy.yaml) and no cards. It has no Git yet; see 'mt init --help' to add sync and updates.",
+          "(settings.yaml) and no cards. It has no Git yet; see 'mt init --help' to add sync and updates.",
           flush=True)
     # The installer checks the copy and prints the same next steps as the online path.
-    return subprocess.run(["bash", str(destination / "install.sh"), "--no-path", str(destination)],
+    return subprocess.run(["bash", str(destination / "install.sh"), "--no-path", "--yes", str(destination)],
                           check=False, env=foreign_env(resolved)).returncode
 
 
@@ -587,7 +623,7 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         if value is True:
             command.append(flag)
         else:
-            command.extend(arg for item in (value if isinstance(value, list) else [value]) for arg in (flag, item))
+            command.extend(f"{flag}={item}" for item in (value if isinstance(value, list) else [value]))
     # Become the dashboard instead of waiting on it as a child: a supervisor's SIGTERM (for
     # example `docker stop`) then reaches the server itself, which closes and finishes a running
     # sync. Ctrl-C and the exit code behave as before.
@@ -596,3 +632,87 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     os.chdir(resolved.root)
     os.execve(sys.executable, command, workspace_env(resolved))
     return 0  # Not reached, except when tests replace os.execve.
+
+
+_DEMO_ORPHAN_SECONDS = 300
+
+
+def _sweep_stale_demo_dirs(demo_parent: Path) -> None:
+    """Remove leftover demo directories: unlocked ones, and ones with no lock file after a few minutes."""
+    if not demo_parent.is_dir():
+        return
+    for entry in demo_parent.iterdir():
+        if not entry.name.startswith("demo-") or entry.is_symlink() or not entry.is_dir():
+            continue
+        lock_path = entry / ".demo.lock"
+        if not lock_path.exists():
+            # A demo that died before taking its lock. A young folder may be one another
+            # process is creating right now.
+            try:
+                age = time.time() - entry.stat().st_mtime
+            except OSError:
+                continue
+            if age > _DEMO_ORPHAN_SECONDS:
+                shutil.rmtree(entry, ignore_errors=True)
+            continue
+        try:
+            with lock_path.open("a+") as lock_file:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    continue
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def command_demo(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    """Start a temporary demo workspace seeded from examples/ and serve its dashboard."""
+    resolved = _ws(ws)
+    if not (resolved.app_root / "examples").is_dir():
+        print("error: bundled examples/ folder is missing", file=sys.stderr)
+        return 1
+    # Check the filter flags before creating anything. The demo's statuses and priorities come
+    # from the same template its workspace is created from.
+    template_ws = Workspace.at(resolved.app_root / "templates", app_root=resolved.app_root, environ=demo_environ())
+    if command_query(args, ws=template_ws) is None:
+        return 2
+    dir_name = f"microtask-demo-{os.getuid()}" if hasattr(os, "getuid") else "microtask-demo"
+    demo_parent = Path(tempfile.gettempdir()) / dir_name
+    demo_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = demo_parent.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or (hasattr(os, "getuid") and info.st_uid != os.getuid())
+        or info.st_mode & 0o077
+    ):
+        print(f"error: {demo_parent} is not a private folder owned by you; remove it and try again", file=sys.stderr)
+        return 1
+    _sweep_stale_demo_dirs(demo_parent)
+    demo_dir = Path(tempfile.mkdtemp(prefix="demo-", dir=demo_parent))
+    lock_file = (demo_dir / ".demo.lock").open("a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        demo_ws = seed_demo_workspace(demo_dir, app_root=resolved.app_root)
+        print(f"Demo workspace: {demo_dir}")
+        print(f"Try CLI commands in another terminal: {resolved.app_root / 'mt'} -R {demo_dir} list")
+        print("Press Ctrl-C to stop; all demo changes will be deleted on exit.")
+        sys.stdout.flush()
+        app_str = str(resolved.app_root)
+        if app_str not in sys.path:
+            sys.path.insert(0, app_str)
+        from tools import taskweb  # noqa: E402
+        return taskweb.serve_dashboard(
+            demo_ws,
+            args.host,
+            args.port,
+            no_open=args.no_open,
+            filters=taskweb.board_filters(demo_ws, args),
+            allow_hosts=getattr(args, "allow_host", None),
+            demo=True,
+        )
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        shutil.rmtree(demo_dir, ignore_errors=True)
+        lock_file.close()

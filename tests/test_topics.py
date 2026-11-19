@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -55,9 +56,10 @@ class TopicCliTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
+        legacy_workspace(self.root)
         for card in (self.root / "cards").glob("*.md"):
             card.unlink()
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def mt(self, *args: str) -> subprocess.CompletedProcess:
@@ -167,7 +169,7 @@ class TopicCliTests(unittest.TestCase):
         self.nested()
         result = self.mt("topic", "list", "nope")
         self.assertEqual((result.returncode, result.stdout), (1, ""))
-        self.assertEqual(result.stderr.strip(), "error: unknown topic: nope")
+        self.assertIn("error: unknown topic: nope", result.stderr)
         self.assertEqual(self.ok("topic", "list", "personal"), "")  # suggested_topics counts as known
 
     def test_topic_list_tree_draws_connectors(self) -> None:
@@ -270,7 +272,7 @@ class TopicCliTests(unittest.TestCase):
         arguments = argparse.Namespace(old="learning", new="study", dry_run=False, merge=False, as_json=False)
         with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
             self.assertEqual(
-                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root)),
                 1,
             )
         self.assertEqual({path: path.read_bytes() for path in cards}, before)
@@ -287,7 +289,7 @@ class TopicCliTests(unittest.TestCase):
 
         with patch.object(transaction, "apply_item_transaction", side_effect=concurrent):
             self.assertEqual(
-                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root)),
                 1,
             )
         self.assertIn("edited meanwhile", cards[0].read_text())

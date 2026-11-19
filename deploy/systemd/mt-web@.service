@@ -1,7 +1,7 @@
 # Template unit: one dashboard per user. Start it with
 #   systemctl enable --now mt-web@alice
-# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the data-only
-# workspace /srv/mt/alice with the app in /opt/microtask/current.
+# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the
+# workspace folder /srv/mt/alice with the app in /opt/microtask/current.
 [Unit]
 Description=microtask dashboard for %i
 After=network.target
@@ -18,6 +18,7 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/microtask/current/mt -R /srv/mt/%i web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME}
 Restart=on-failure
 RestartSec=3
+UMask=0077
 # mt web waits up to 60 seconds for a running sync after SIGTERM.
 TimeoutStopSec=90
 

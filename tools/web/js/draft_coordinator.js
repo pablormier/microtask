@@ -17,39 +17,39 @@ function createDraftCoordinator() {
     },
 
     captureContext() {
-      return {
-        workspaceKey: this.workspaceKey,
-        busy: this.busy,
-        attachmentUploading: this.attachmentUploading,
-        store: this.getDraftStore(),
-        taskDefaults: this.taskDefaults,
-        taskStatuses: this.taskStatuses,
-        taskPriorityPolicy: this.taskPriorityPolicy,
-        taskTypePolicy: this.taskTypePolicy,
-        scopeDefaults: {
-          // A card created under several selected projects or topics has no obvious home.
-          project: this.filters.project.length === 1 ? this.filters.project[0] : "",
-          topic: this.filters.topic.length === 1 ? this.filters.topic[0] : "",
-        },
-        taskOptionsFromDraft: draft => this.taskOptionsFromDraft(draft),
-        captureDraftFields: draft => this.captureDraftFields(draft),
-        getDrafts: () => this.drafts,
-        getCards: () => this.tasks,
-        scheduleDraftSave: (draft, delay) => this.scheduleDraftSave(draft, delay),
-        setMode: mode => { this.mode = mode; },
-        openWorkspaceDraft: draft => this.openWorkspaceDraft(draft),
-        finishWorkspaceDraft: draft => this.finishWorkspaceDraft(draft),
-        saveConflictAsNewDraft: draft => this.saveConflictAsNewDraft(draft),
-        clearStatus: () => { this.draftWorkspaceStatus = ""; this.captureComposer.message = ""; this.captureComposer.messageError = false; },
-        nextTick: callback => this.$nextTick(callback),
-        focusInput: () => this.$nextTick(() => {
-          const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
-          if (input) input.focus();
-        }),
-        confirm: message => typeof window !== "undefined" && typeof window.confirm === "function"
-          ? window.confirm(message) : true,
-        discardWorkspaceDraft: (draft, confirmed) => this.discardWorkspaceDraft(draft, confirmed),
-      };
+      if (!this._captureContext) {
+        const self = this;
+        this._captureContext = {
+          get workspaceKey() { return self.workspaceKey; },
+          get busy() { return self.busy; },
+          get attachmentUploading() { return self.attachmentUploading; },
+          get store() { return self.getDraftStore(); },
+          get taskDefaults() { return self.taskDefaults; },
+          get taskStatuses() { return self.taskStatuses; },
+          get taskPriorityPolicy() { return self.taskPriorityPolicy; },
+          get taskTypePolicy() { return self.taskTypePolicy; },
+          get scopeDefaults() {
+            return {
+              // A card created under several selected projects or topics has no obvious home.
+              project: self.filters.project.length === 1 ? self.filters.project[0] : "",
+              topic: self.filters.topic.length === 1 ? self.filters.topic[0] : "",
+            };
+          },
+          getCards: () => self.tasks,
+          scheduleDraftSave: (draft, delay) => self.scheduleDraftSave(draft, delay),
+          finishWorkspaceDraft: draft => self.finishWorkspaceDraft(draft),
+          clearStatus: () => { self.draftWorkspaceStatus = ""; self.captureComposer.message = ""; self.captureComposer.messageError = false; },
+          nextTick: callback => self.$nextTick(callback),
+          focusInput: () => self.$nextTick(() => {
+            const input = (self.$refs && self.$refs.composerBody) || document.getElementById("mt-composer-body");
+            if (input) input.focus();
+          }),
+          confirm: message => typeof window !== "undefined" && typeof window.confirm === "function"
+            ? window.confirm(message) : true,
+          discardWorkspaceDraft: (draft, confirmed) => self.discardWorkspaceDraft(draft, confirmed),
+        };
+      }
+      return this._captureContext;
     },
 
     propertyContext() {
@@ -96,24 +96,25 @@ function createDraftCoordinator() {
     },
 
     async saveCardBody(ref, expectedHash, body) {
+      this._busyCount = (this._busyCount || 0) + 1;
       this.busy = true;
       this.actionMessage = "";
       this.actionError = false;
       try {
         const query = this.collectionQuery();
-        const response = await fetch("/api/card-edit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Microtask-Token": this.apiToken },
-          body: JSON.stringify({ ref, expected_hash: expectedHash, body, query, include: this.includedCardIds() }),
-        });
-        const payload = await response.json();
-        if (!response.ok) {
+        const result = await postJson(
+          "/api/card-edit",
+          { ref, expected_hash: expectedHash, body, query, include: this.includedCardIds() },
+          this.apiToken,
+        );
+        if (!result.ok) {
           return {
             ok: false,
-            conflict: Boolean(payload.conflict || response.status === 409),
-            error: payload.error || "Could not save card content",
+            conflict: result.conflict,
+            error: result.error || "Could not save card content",
           };
         }
+        const payload = result.payload;
         await this.saveBodyKeepingProperties(async () => {
           await this.applyPayload(payload, false, query);
           return payload;
@@ -127,7 +128,8 @@ function createDraftCoordinator() {
       } catch (error) {
         return { ok: false, conflict: false, error: (error && error.message) || "Could not save card content" };
       } finally {
-        this.busy = false;
+        this._busyCount = Math.max(0, (this._busyCount || 1) - 1);
+        this.busy = this._busyCount > 0;
       }
     },
 
@@ -157,42 +159,18 @@ function createDraftCoordinator() {
     draftDisplayTitle(draft) {
       if (!draft) return "Untitled draft";
       if (String(draft.title || "").trim()) return String(draft.title).trim();
-      const firstLine = String(draft.body || "").split(/\r?\n/).find(line => line.trim());
+      // Like the title a saved card gets: images read as their alt text and links as their label.
+      const firstLine = String(draft.body || "")
+        .replace(/!\[([^\]\r\n]*)\]\([^)\r\n]*\)/g, "$1")
+        .replace(/\[([^\]\r\n]+)\]\([^)\r\n]*\)/g, "$1")
+        .split(/\r?\n/).find(line => line.trim());
       return firstLine ? firstLine.trim() : "Untitled draft";
     },
 
-    cleanExcerpt(text) {
-      if (!text) return "";
-      // Matches extract_excerpt in tools/web_payloads.py: fence, math and rule lines carry no text,
-      // and table rows read as their cells.
-      let s = String(text).split("\n")
-        .filter(line => !/^\s*(?:(?:`{3,}|~{3,})[^`~]*|\$\$|\\\[|\\\]|([-*_])(?:\s*\1){2,})\s*$/.test(line))
-        .filter(line => !/^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-*:?\s*\|?\s*$/.test(line))
-        .map(line => line.trimStart().startsWith("|")
-          ? line.trim().replace(/^\|+|\|+$/g, "").split("|").map(cell => cell.trim()).filter(Boolean).join(" · ")
-          : line)
-        .join("\n");
-      s = s.replace(/^#{1,6}\s+/gm, "");
-      s = s.replace(/^\s*([-*+]|\d+\.)\s+/gm, "");
-      s = s.replace(/^\s*>\s*/gm, "");
-      s = s.replace(/!?\[([^\]]*)\]\((?:[^\s()]|\([^()]*\))*(?:\s+["'][^"']*["'])?\s*\)/g, "$1");
-      s = s.replace(/\[([^\]]+)\]\([^\s)]*$/g, "$1");
-      s = s.replace(/\[([^\]]+)$/g, "$1");
-      s = s.replace(/`([^`]+)`/g, "$1");
-      s = s.replace(/`/g, "");
-      s = s.replace(/\$\$([\s\S]+?)\$\$|\\\(([\s\S]+?)\\\)|\\\[([\s\S]+?)\\\]/g, (_, a, b, c) => (a || b || c).trim());
-      s = s.replace(/(^|[^\w$\\])\$([^\s$](?:[^$]*[^\s$])?)\$(?![\w$])/g, "$1$2");
-      s = s.replace(/~~([^~]+)~~/g, "$1");
-      s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
-      s = s.replace(/(^|\W)__([^_]+)__(\W|$)/g, "$1$2$3");
-      s = s.replace(/(^|\W)\*([^*]+)\*(\W|$)/g, "$1$2$3");
-      s = s.replace(/(^|\s|\W)_([^\s_]|(?:[^\s_].*?[^\s_]))_(\s|\W|$)/g, "$1$2$3");
-      return s.replace(/\s+/g, " ").trim();
-    },
-
     draftExcerpt(draft) {
-      const body = String(draft && draft.body || "");
-      const text = this.cleanExcerpt(body);
+      const excerpt = String(draft && draft.excerpt || "").trim();
+      if (excerpt) return excerpt;
+      const text = String(draft && draft.body || "").replace(/\s+/g, " ").trim();
       if (!text) return "Empty draft";
       return text.length > 180 ? text.slice(0, 177).trimEnd() + "…" : text;
     },
@@ -217,7 +195,6 @@ function createDraftCoordinator() {
       this.captureComposer.zenView = "write";
       this.captureComposer.zenMetaOpen = false;
       this.captureComposer.previewHtml = "";
-      if (this.captureComposer.surface) this.captureComposer.surface.setValue(draft.body);
       this.captureComposer.open = true;
       this.$nextTick(() => {
         const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");
@@ -281,14 +258,6 @@ function createDraftCoordinator() {
       return this.getDraftStore().schedule(draft, delay);
     },
 
-    saveWorkspaceDraft(draft) {
-      return this.getDraftStore().save(draft);
-    },
-
-    flushWorkspaceDraft(draft) {
-      return this.getDraftStore().flush(draft);
-    },
-
     async saveConflictAsNewDraft(draft) {
       if (!draft || this.draftBusy) return null;
       const newId = this.captureComposer.makeId();
@@ -318,7 +287,10 @@ function createDraftCoordinator() {
       if (!draft || draft.state === "conflict" || this.draftBusy) return null;
       this.draftBusy = true;
       try {
-        const result = await this.getDraftStore().finish(draft);
+        const result = await this.getDraftStore().finish(draft, {
+          query: this.collectionQuery(),
+          include: this.includedCardIds(),
+        });
         if (!result) return null;
         await this.applyPayload(result);
         if (this.captureComposer.draft === draft) {

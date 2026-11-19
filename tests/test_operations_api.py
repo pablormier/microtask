@@ -26,8 +26,8 @@ class OperationsApiTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "data-ws"
         (self.root / "cards").mkdir(parents=True)
-        policy_text = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy_text = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy_text.replace("demo_workspace: true", "demo_workspace: false"),
             encoding="utf-8",
         )

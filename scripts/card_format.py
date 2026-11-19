@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+from pathlib import Path
 import re
 import uuid
 import calendar
@@ -584,7 +586,7 @@ def apply_property_patch(
     """Apply one typed, semantic property patch without serializing a card.
 
     Callers parse the document once and render the returned properties once;
-    the candidate transaction applies workspace policy. Null clears nullable
+    the candidate transaction applies workspace settings. Null clears nullable
     fields, empty action/guidance clears the property, and
     clearing due also clears its due_kind.
     """
@@ -642,3 +644,32 @@ def apply_property_patch(
         result[field] = value
     require_valid_properties(result, kind=kind)
     return result
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    """Atomically write ``content`` to ``path`` using a sibling temporary file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def is_single_line_text(value: object) -> bool:
+    """Return True when ``value`` is a non-empty string with no newlines or NUL."""
+    return isinstance(value, str) and bool(value.strip()) and not any(c in value for c in "\r\n\x00")
+
+
+def prose_fields(frontmatter: dict, body: str) -> list[str]:
+    """Return prose fields on a card that can contain @references or attachment links."""
+    fields = [body]
+    for key in ("next_action", "processing_instructions"):
+        value = frontmatter.get(key)
+        if isinstance(value, str) and value:
+            fields.append(value)
+    for comment in frontmatter.get("comments") or ():
+        if isinstance(comment, dict) and isinstance(comment.get("text"), str):
+            fields.append(comment["text"])
+    return fields

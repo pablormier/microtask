@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ "${1:-}" == "update" ]]; then
-  if [[ -n "${MT_WORKSPACE:-}" && "${MT_WORKSPACE%/}" != "$repo_root" ]]; then
-    echo "error: mt update changes the application at $repo_root, not the data-only workspace" \
-      "$MT_WORKSPACE; run it without -R or MT_WORKSPACE" >&2
-    exit 2
+_mt_dir() {
+  case "$1" in
+    */*) printf '%s\n' "${1%/*}" ;;
+    *) printf '.\n' ;;
+  esac
+}
+source="${BASH_SOURCE[0]}"
+while [[ -L "$source" ]]; do
+  dir="$(cd -P "$(_mt_dir "$source")" && pwd)"
+  target="$(readlink "$source")"
+  if [[ "$target" == /* ]]; then
+    source="$target"
+  else
+    source="$dir/$target"
   fi
+done
+repo_root="$(cd -P "$(_mt_dir "$source")" && pwd)"
+if [[ "${1:-}" == "update" ]]; then
   shift
   exec python3 "$repo_root/scripts/update.py" "$@"
 fi

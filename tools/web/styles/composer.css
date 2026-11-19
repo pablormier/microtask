@@ -45,14 +45,6 @@
   font-size: var(--mt-font-size-lg);
   font-weight: 650;
 }
-.mt-composer-eyebrow {
-  margin: 0 0 2px;
-  color: var(--mt-text-muted);
-  font-size: var(--mt-font-size-xs);
-  font-weight: 750;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
 .mt-composer-capture-date {
   margin: 0 0 14px;
   color: var(--mt-text-muted);

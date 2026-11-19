@@ -139,7 +139,6 @@ function createContentEditor() {
       this.previewHtml = "";
       this.conflict = false;
       this.error = "";
-      if (this.surface) this.surface.setValue(this.text);
       ctx.clearStatus();
       ctx.focusInput();
     },
@@ -154,7 +153,6 @@ function createContentEditor() {
         this.error = STALE_UNSAVED_MESSAGE;
       }
       this.persist();
-      if (this.surface) this.surface.setValue(this.text);
       this.schedulePreview(ctx);
     },
 

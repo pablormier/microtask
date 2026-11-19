@@ -14,7 +14,7 @@ captures, [focus](../mt-focus/SKILL.md) picks one task to start right now, and
 
 Do not just reformat `mt focus` output. Gather enough context to make good
 judgments about what actually matters, what is blocked, and what needs a head
-start—then keep the output short.
+start. Then keep the output short.
 
 Use `--by` only with the user's own identity. Support scope filters
 (`--topic`, `--project`, `--tag`) the same way as [weekly](../mt-weekly/SKILL.md)
@@ -32,7 +32,7 @@ when the user narrows the week (for example, "work only").
 - `mt list --triage --limit 5 --full` to note whether unreviewed inbox items
   are piling up (or if an urgent capture belongs in this week's plan), without
   triaging them here.
-- Read `calendar` from `mt policy --json`. If absent or `include` is empty,
+- Read `calendar` from `mt settings --json`. If absent or `include` is empty,
   skip calendar lookup. Otherwise use the environment's connected calendar
   capability to read only those IDs for the planning week (or the user's
   requested period) in the user's timezone, respecting `account`/`provider`
@@ -67,7 +67,7 @@ Group by what the user needs to decide:
 
 - **Must do this week**: overdue items, hard deadlines this week, and anything
   due next week that needs a head start now.
-- **Already started**: work in progress—flag anything stale so the user can
+- **Already started**: work in progress. Flag anything stale so the user can
   decide whether to finish it or pause it.
 - **Waiting on others**: items that need a quick follow-up or nudge this week.
 - **If you have time**: one or two good next picks from `active` candidates.

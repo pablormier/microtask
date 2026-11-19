@@ -22,127 +22,74 @@ sys.path.insert(0, str(APP_ROOT / "scripts"))
 import attachments  # noqa: E402
 import card_format  # noqa: E402, F401
 import card_query  # noqa: E402
-import cli  # noqa: E402
+import cli_helpers  # noqa: E402
+import cli_parser  # noqa: E402
 import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402, F401
 import store  # noqa: E402
 import transaction  # noqa: E402
-from workspace import Workspace  # noqa: E402
+from workspace import Workspace, missing_workspace_error  # noqa: E402
 
 try:
     from .web_actions import (
         BackgroundSync,
-        DRAFT_ACTION_HANDLERS,
-        ITEM_ACTION_HANDLERS,
         UNSYNCED_ACTIONS,
         handle_api_action,
-        handle_card_edit,
-        handle_card_metadata,
-        handle_checkbox,
-        handle_comment,
-        handle_done,
-        handle_draft_discard,
-        handle_draft_finish,
         handle_draft_save,
-        handle_due_clear,
-        handle_due_set,
-        handle_flag_update,
-        handle_move,
-        handle_priority,
-        handle_review,
-        handle_time_cancel,
-        handle_time_start,
-        handle_time_stop,
-        item_by_ref,
-        sync_once,
-        valid_utf8,
     )
     from .web_assets import (
         WEB_DIR,
         application_version,
         build_html,
-        fill_placeholders,
-        load_css,
-        load_js,
-        load_template,
+        build_html_with_nonce,
         safe_json,
         vendor_file,
     )
     from .web_payloads import (
-        MAX_INCLUDED_IDS,
         bootstrap_config,
         dashboard_detail,
-        dashboard_meta,
         dashboard_payload,
-        extract_excerpt,
-        included_ids,
+        draft_list_payload,
         request_query,
         search_cards,
         task_to_dict,
     )
-    from .web_queries import collection_results  # noqa: F401
 except ImportError:  # Direct script entry point or file-based test loader.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from web_actions import (  # noqa: F401
         BackgroundSync,
-        DRAFT_ACTION_HANDLERS,
-        ITEM_ACTION_HANDLERS,
         UNSYNCED_ACTIONS,
         handle_api_action,
-        handle_card_edit,
-        handle_card_metadata,
-        handle_checkbox,
-        handle_comment,
-        handle_done,
-        handle_draft_discard,
-        handle_draft_finish,
         handle_draft_save,
-        handle_due_clear,
-        handle_due_set,
-        handle_flag_update,
-        handle_move,
-        handle_priority,
-        handle_review,
-        handle_time_cancel,
-        handle_time_start,
-        handle_time_stop,
-        item_by_ref,
-        sync_once,
-        valid_utf8,
     )
     from web_assets import (  # noqa: F401
         WEB_DIR,
         application_version,
         build_html,
-        fill_placeholders,
-        load_css,
-        load_js,
-        load_template,
+        build_html_with_nonce,
         safe_json,
         vendor_file,
     )
     from web_payloads import (  # noqa: F401
-        MAX_INCLUDED_IDS,
         bootstrap_config,
         dashboard_detail,
-        dashboard_meta,
         dashboard_payload,
-        extract_excerpt,
-        included_ids,
+        draft_list_payload,
         request_query,
         search_cards,
         task_to_dict,
     )
-    from web_queries import collection_results  # noqa: F401
 
 
 class TaskWebServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = ()):
+    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = (),
+                 *, demo: bool = False):
         super().__init__(address, TaskWebHandler)
         self.allow_hosts = {name.lower() for name in allow_hosts}  # NAME or NAME:PORT, from --allow-host.
         self.requested_host = address[0]  # As given on the command line, which may be a name.
         self.token = token
         self.workspace = workspace
+        self.demo = bool(demo)
         # Parsed cards reused across requests; every read re-checks each file's stat signature.
         self.cache = store.CardCache()
         self.sync = BackgroundSync()
@@ -159,6 +106,9 @@ class TaskWebServer(ThreadingHTTPServer):
         return self._cached_restart_notice
 
 
+MAX_BODY_BYTES = 10 * 1024 * 1024
+
+
 def split_host_header(value: str) -> tuple[str, int | None]:
     """Split a Host header into a lowercase host (IPv6 keeps its brackets) and a port."""
     value = value.strip().lower()
@@ -167,7 +117,9 @@ def split_host_header(value: str) -> tuple[str, int | None]:
         host, port = host + "]", rest[1:] if rest.startswith(":") else ""
     else:
         host, _, port = value.partition(":")
-    return host, int(port) if port.isdigit() else None
+    if not port:
+        return host, None
+    return host, int(port) if port.isdigit() else -1
 
 
 class TaskWebHandler(BaseHTTPRequestHandler):
@@ -188,7 +140,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             name, allowed_port = split_host_header(entry)
             if host == name and allowed_port in (None, port):
                 return True
-        if port != self.server.server_address[1]:
+        if (80 if port is None else port) != self.server.server_address[1]:
             return False
         bound = {name.lower() for name in (self.server.requested_host, self.server.server_address[0])}
         bound_hosts = {f"[{name}]" if ":" in name else name for name in bound}
@@ -220,12 +172,19 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_html(self, page: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+    def send_html(self, page: str, status: HTTPStatus = HTTPStatus.OK, *, nonce: str = "") -> None:
         body = page.encode("utf-8")
         self.send_response(status.value)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if nonce:
+            self.send_header(
+                "Content-Security-Policy",
+                f"default-src 'self'; script-src 'self' 'nonce-{nonce}' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; "
+                "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -295,15 +254,12 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         raw_filename = self.headers.get("X-Filename", "")
         filename = unquote(raw_filename) if raw_filename else ""
         content_type = self.headers.get("Content-Type")
-        scope = (self.headers.get("X-Attachment-Scope") or "").strip().lower()
-        real_workspace = scope == "workspace"
         try:
             result = operations.op_store_attachment(
                 ws,
                 raw_bytes,
                 filename=filename,
                 content_type=content_type,
-                real=real_workspace,
                 sync=False,
             )
         except store.InputError as error:
@@ -334,18 +290,14 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             rel = unquote(url.path[len("/attachments/"):])
             ws = self.server.workspace.for_operation()
             found = attachments.resolve_attachment_path(ws.attachments_root(), rel)
-            if found is None and ws.demo_active():
-                # Drafts/new cards created from the capture composer live in the real workspace
-                # even while demo mode is active, so serve real attachments too.
-                found = attachments.resolve_attachment_path(ws.real_attachments_root(), rel)
             if found is None:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             else:
                 self.send_attachment_file(found)
             return
         if url.path in ("/", "/index.html"):
-            page = build_html(bootstrap_config(self.server.workspace, self.server.token))
-            self.send_html(page)
+            page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.server.token))
+            self.send_html(page, nonce=nonce)
             return
         if url.path == "/api/item":
             values = parse_qs(url.query).get("id", [])
@@ -368,8 +320,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 include = params.pop("include", None)
                 ws = self.server.workspace.for_operation()
                 payload = dashboard_payload(ws, self.server.cache, api_token=self.server.token, include=include,
-                                            query=request_query(ws, params))
-                payload["sync_warning"] = self.server.sync.warning
+                                            query=request_query(ws, params), demo=self.server.demo)
+                payload["sync_warning"] = self.server.sync.current_warning()
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
                 payload["query_aliased"] = card_query.uses_aliases(params)
@@ -395,9 +347,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
-        if self.path == "/api/drafts":
+        if url.path == "/api/drafts":
             try:
-                self.send_json(HTTPStatus.OK, {"drafts": draft_store.list_drafts(self.server.workspace.root)})
+                self.send_json(HTTPStatus.OK, {"drafts": draft_list_payload(self.server.workspace.root)})
             except (OSError, ValueError) as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
@@ -406,7 +358,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.reject_host():
             return
-        if self.headers.get("X-Microtask-Token") != self.server.token:
+        if not secrets.compare_digest(self.headers.get("X-Microtask-Token") or "", self.server.token):
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
             return
         if urlsplit(self.path).path == "/api/attachments":
@@ -417,6 +369,12 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid content length"})
             return
+        if length < 0:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid content length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "request body too large"})
+            return
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -425,21 +383,22 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "request body must be an object"})
             return
+        path = urlsplit(self.path).path
         ws = self.server.workspace.for_operation()
         try:
             query = request_query(ws, body.get("query"))
         except card_query.QueryError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
-        status, payload = handle_api_action(ws, self.path, body, self.server.token)
-        if self.path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed")):
+        status, payload = handle_api_action(ws, path, body)
+        if path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed")):
             self.server.sync.request(ws)
         if status == HTTPStatus.OK:
             # Actions return receipts; build the queried collection once, after success.
-            # A fresh handle: the write may have ended demo mode.
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
-                                           api_token=self.server.token, query=query, include=body.get("include")),
-                       "sync_warning": self.server.sync.warning,
+                                           api_token=self.server.token, query=query, include=body.get("include"),
+                                           demo=self.server.demo),
+                       "sync_warning": self.server.sync.current_warning(),
                        "restart_notice": self.server.restart_notice(),
                        **payload}
         self.send_json(status, payload)
@@ -460,17 +419,17 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
 
 
 def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
-                    allow_hosts: Iterable[str] = ()) -> int:
+                    allow_hosts: Iterable[str] = (), demo: bool = False) -> int:
     token = secrets.token_urlsafe(24)
     try:
-        server = TaskWebServer((host, port), token, workspace, allow_hosts)
+        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
     actual_host, actual_port = server.server_address
     url = dashboard_url(actual_host, actual_port, filters)
     if not no_open:
-        cli.open_in_browser(url)
+        cli_helpers.open_in_browser(url)
     print(url, flush=True)
     # Process supervisors stop us with SIGTERM; treat it like Ctrl-C so the cleanup below runs.
     previous = None
@@ -493,7 +452,8 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the local web dashboard.")
-    cli.add_web_arguments(parser)
+    cli_parser.add_web_arguments(parser)
+    parser.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -501,8 +461,13 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     # The process edge: `mt web` starts this script with the selected workspace in its environment.
     workspace = Workspace.resolve()
+    missing = missing_workspace_error(workspace.environ, app_root=workspace.app_root)
+    if missing:
+        print(f"error: {missing}", file=sys.stderr)
+        return 2
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
-                           filters=board_filters(workspace, args), allow_hosts=args.allow_host)
+                           filters=board_filters(workspace, args), allow_hosts=args.allow_host,
+                           demo=bool(args.demo))
 
 
 if __name__ == "__main__":

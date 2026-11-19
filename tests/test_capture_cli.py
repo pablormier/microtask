@@ -36,10 +36,10 @@ class CaptureCLITests(unittest.TestCase):
         self.root.mkdir()
         shutil.copytree(ROOT / "scripts", self.root / "scripts")
         shutil.copy2(ROOT / "mt", self.root / "mt")
-        policy = (ROOT / "mt-policy.yaml").read_text()
+        policy = (ROOT / "templates" / "settings.yaml").read_text()
         policy = re.sub(r"auto_sync:.*", "auto_sync: false", policy)
         policy = re.sub(r"demo_workspace:.*", "demo_workspace: false", policy)
-        (self.root / "mt-policy.yaml").write_text(policy)
+        (self.root / "settings.yaml").write_text(policy)
         (self.root / "cards").mkdir()
         editor = self.root / "editor.py"
         editor.write_text("import sys\nfrom pathlib import Path\np = Path(sys.argv[-1])\np.write_text(p.read_text() + '\\nSecond line\\n## Notes\\nLiteral body')\n")
@@ -161,7 +161,7 @@ class CaptureCLITests(unittest.TestCase):
         self.process.kill()
         self.process.wait()
         os.close(self.master)
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         policy_path.write_text(policy_path.read_text().replace("default_status: inbox", "default_status: active")
                                .replace("default_priority: none", "default_priority: high"))
         self.start_capture("")

@@ -71,19 +71,14 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
     },
 
     async post(path, body) {
-      const response = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Microtask-Token": context().apiToken },
-        body: JSON.stringify(body || {}),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        const error = new Error(payload.error || "Draft action failed");
-        error.conflict = Boolean(payload.conflict || response.status === 409);
-        error.missing = response.status === 404;
+      const result = await postJson(path, body, context().apiToken);
+      if (!result.ok) {
+        const error = new Error(result.error || "Draft action failed");
+        error.conflict = result.conflict;
+        error.missing = result.missing;
         throw error;
       }
-      return payload;
+      return result.payload;
     },
 
     // Everything a save writes, as one comparable string.
@@ -120,12 +115,13 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
       removeFromList(this, draft.id);
     },
 
-    async finish(draft) {
+    async finish(draft, extra = {}) {
       if (!editable(draft) || !await this.flush(draft)) return null;
       try {
         const result = await this.post("/api/draft-finish", {
           id: draft.id,
           expected_hash: draft.content_hash,
+          ...(extra || {}),
         });
         draft.state = "closed";
         removeFromList(this, draft.id);
