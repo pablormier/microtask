@@ -258,6 +258,7 @@ function createBoardApi() {
     async uploadAttachmentsForTarget(target, files, textarea) {
       const accessors = this._attachmentTargetAccessors(target);
       if (!accessors || !files || !files.length) return;
+      this._attachmentUploadCount = (this._attachmentUploadCount || 0) + 1;
       this.attachmentUploading = true;
       try {
         await uploadAndInsertAttachments({
@@ -271,7 +272,8 @@ function createBoardApi() {
           nextTick: fn => this.$nextTick(fn),
         });
       } finally {
-        this.attachmentUploading = false;
+        this._attachmentUploadCount = Math.max(0, (this._attachmentUploadCount || 1) - 1);
+        this.attachmentUploading = this._attachmentUploadCount > 0;
       }
     },
 

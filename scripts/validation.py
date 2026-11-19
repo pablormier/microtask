@@ -371,7 +371,11 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                 elif entry.is_dir():
                     _walk_attachments(entry)
                 elif entry.is_file():
-                    size = entry.stat().st_size
+                    try:
+                        size = entry.stat().st_size
+                    except OSError as error:
+                        errors.append(f"could not inspect attachment {rel_entry}: {error}")
+                        continue
                     if size > max_bytes:
                         limit_mb = policy.get("rules", {}).get("max_attachment_mb", attachments.DEFAULT_MAX_ATTACHMENT_MB)
                         errors.append(

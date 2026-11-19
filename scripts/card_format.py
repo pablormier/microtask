@@ -663,11 +663,12 @@ def is_single_line_text(value: object) -> bool:
 
 
 def prose_fields(frontmatter: dict, body: str) -> list[str]:
-    """Return prose fields on a card that can contain @references."""
+    """Return prose fields on a card that can contain @references or attachment links."""
     fields = [body]
-    next_action = frontmatter.get("next_action")
-    if isinstance(next_action, str) and next_action:
-        fields.append(next_action)
+    for key in ("next_action", "processing_instructions"):
+        value = frontmatter.get(key)
+        if isinstance(value, str) and value:
+            fields.append(value)
     for comment in frontmatter.get("comments") or ():
         if isinstance(comment, dict) and isinstance(comment.get("text"), str):
             fields.append(comment["text"])

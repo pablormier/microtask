@@ -44,20 +44,9 @@ def rule_level(policy: dict, rule: str) -> str:
 
 def backticked_ref_messages(rel: Path | str, fm: dict[str, object], body: str) -> list[str]:
     """Report inline-backticked `` `@ref` `` mentions that will not render as links."""
-    texts: list[str] = [body]
-    for field in ("next_action", "processing_instructions"):
-        value = fm.get(field)
-        if isinstance(value, str) and value:
-            texts.append(value)
-    comments = fm.get("comments")
-    if isinstance(comments, list):
-        for comment in comments:
-            if isinstance(comment, dict) and isinstance(comment.get("text"), str):
-                texts.append(comment["text"])
-
     seen: set[str] = set()
     refs: list[str] = []
-    for text in texts:
+    for text in card_format.prose_fields(fm, body):
         for ref in card_references.backticked_references(text):
             if ref.casefold() not in seen:
                 seen.add(ref.casefold())
@@ -113,19 +102,9 @@ def broken_attachment_messages(
     """Report ../attachments/... links whose target file does not exist."""
     if attachments_root is None:
         return []
-    texts: list[str] = [body]
-    for field in ("next_action", "processing_instructions"):
-        value = fm.get(field)
-        if isinstance(value, str) and value:
-            texts.append(value)
-    comments = fm.get("comments")
-    if isinstance(comments, list):
-        for comment in comments:
-            if isinstance(comment, dict) and isinstance(comment.get("text"), str):
-                texts.append(comment["text"])
     missing: list[str] = []
     seen: set[str] = set()
-    for text in texts:
+    for text in card_format.prose_fields(fm, body):
         for target in attachments.extract_attachment_targets(text):
             if target in seen:
                 continue

@@ -1756,24 +1756,27 @@ def _store_attachment_locked(
     }
 
     if item is not None:
-        original = item.path.read_bytes()
         properties = dict(item.frontmatter)
         body = item.body
         new_body = f"{body.rstrip()}\n\n{markdown}" if body.strip() else markdown
         properties["updated"] = store.now_stamp()
         raw = card_format.render_document(properties, new_body, expected_kind=item.kind)
-        card_result = _commit_item_write(
-            resolved,
-            item,
-            raw,
-            expected=original,
-            failure_prefix="attach failed",
-            summary=f"Attached {stored_name} to @{item.short_ref}",
-            receipt_fn=lambda saved, updated=True: {
-                **receipt,
-                "card": store.item_receipt(saved, updated=updated, ws=resolved),
-            },
-        )
+        try:
+            card_result = _commit_item_write(
+                resolved,
+                item,
+                raw,
+                failure_prefix="attach failed",
+                summary=f"Attached {stored_name} to @{item.short_ref}",
+                receipt_fn=lambda saved, updated=True: {
+                    **receipt,
+                    "card": store.item_receipt(saved, updated=updated, ws=resolved),
+                },
+            )
+        except (ConflictError, ValidationError):
+            if file_changed:
+                target_path.unlink(missing_ok=True)
+            raise
         return WriteResult(
             card=card_result.card,
             receipt=card_result.receipt,

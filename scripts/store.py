@@ -565,12 +565,7 @@ class ReferenceIndex:
 
 
 def item_references(item: Card, index: ReferenceIndex) -> list[dict[str, object]]:
-    values = [item.body, str(item.next_action or ""),
-              str(item.frontmatter.get("processing_instructions") or "")]
-    comments = item.frontmatter.get("comments", [])
-    if isinstance(comments, list):
-        values.extend(str(comment.get("text") or "") for comment in comments if isinstance(comment, dict))
-    text = "\n\n".join(values)
+    text = "\n\n".join(card_format.prose_fields(item.frontmatter, item.body))
     return [index.resolve(ref) for ref in card_references.extract_references(text)]
 
 

@@ -236,6 +236,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "attachment must not be empty"})
             return
         ws = self.server.workspace.for_operation()
+        store.pin_demo_state(ws)
+        store.maybe_seed_demo(ws)
         policy = store.policy(ws)
         max_bytes = attachments.max_attachment_bytes(policy)
         if length > max_bytes:
@@ -290,6 +292,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if url.path.startswith("/attachments/"):
             rel = unquote(url.path[len("/attachments/"):])
             ws = self.server.workspace.for_operation()
+            store.pin_demo_state(ws)
+            store.maybe_seed_demo(ws)
             found = attachments.resolve_attachment_path(ws.attachments_root(), rel)
             if found is None and ws.demo_active():
                 # Drafts/new cards created from the capture composer live in the real workspace

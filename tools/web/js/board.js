@@ -89,6 +89,7 @@ function taskBoard() {
     contentEditor: createContentEditor(),
     commentText: "",
     attachmentDragTarget: "",
+    _attachmentUploadCount: 0,
     attachmentUploading: false,
     actionMessage: "",
     actionError: false,

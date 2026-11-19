@@ -54,9 +54,13 @@ async function uploadAttachmentFile(apiToken, file, options = {}) {
     body: file,
   });
   let payload = {};
-  try {
-    payload = await response.json();
-  } catch (_) {}
+  if (typeof readJsonResponse === "function") {
+    payload = await readJsonResponse(response);
+  } else {
+    try {
+      payload = await response.json();
+    } catch (_) {}
+  }
   if (!response.ok || !payload.attachment) {
     throw new Error(payload.error || ("Attachment upload failed (" + response.status + ")"));
   }

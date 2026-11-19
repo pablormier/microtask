@@ -203,13 +203,6 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   border: 1px solid var(--mt-border);
   margin: 8px 0;
 }
-.mt-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin: 8px 0 10px;
-}
 .mt-extra-details {
   flex: 0 0 100%;
   width: 100%;
