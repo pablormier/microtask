@@ -136,7 +136,7 @@ def due_kind_error(value: object, due: object, cfg: dict) -> str | None:
     allowed = cfg.get("due_kinds", {})
     if not isinstance(value, str) or not isinstance(allowed, dict) or value not in allowed:
         choices = ", ".join(str(name) for name in allowed) if isinstance(allowed, dict) else ""
-        return f"due_kind must be one of {choices or 'the effective policy values'} when due is set"
+        return f"due_kind must be one of {choices or 'the effective settings values'} when due is set"
     return None
 
 
@@ -512,7 +512,7 @@ def read_cards(
             if card.is_task and (not isinstance(status, str) or status not in allowed):
                 raise ValueError(
                     f"{card.path}: invalid or missing task status {status!r}; "
-                    "custom status IDs must be defined in mt-policy.yaml"
+                    "custom status IDs must be defined in settings.yaml"
                 )
             cards.append(card)
         if cache is not None and not skipped:

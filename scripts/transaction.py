@@ -34,7 +34,8 @@ from store import (
 import validation
 from workspace import Workspace
 
-SYNC_PATHS = (":(glob)cards/*.md", ":(glob)drafts/*.md", "mt-policy.yaml")
+# mt-policy.yaml is the settings file of old-style installs until 'mt migrate' renames it.
+SYNC_PATHS = (":(glob)cards/*.md", ":(glob)drafts/*.md", "settings.yaml", "mt-policy.yaml")
 _TIME_LOCK_STATE = threading.local()
 atomic_write = draft_store.atomic_write
 
@@ -223,7 +224,7 @@ def run_validator(ws: Workspace | None = None) -> bool:
     try:
         effective_policy = store.policy(resolved)
     except (OSError, ValueError) as error:
-        print("FAILED: invalid policy:", file=sys.stderr)
+        print("FAILED: invalid settings:", file=sys.stderr)
         for line in str(error).splitlines():
             print(f"  - {line}", file=sys.stderr)
         return False
@@ -463,8 +464,8 @@ def task_commit_message(changes: list[tuple[str, str, str | None]], ws: Workspac
     markdown_changes = [change for change in changes if Path(change[1]).suffix == ".md"]
     drafts = [change for change in markdown_changes if change[1].startswith("drafts/")]
     cards = [change for change in markdown_changes if not change[1].startswith("drafts/")]
-    if any(old_path == "mt-policy.yaml" for _, old_path, _ in changes):
-        message = "Update tasks and policy" if cards else "Update workspace policy"
+    if any(old_path in {"settings.yaml", "mt-policy.yaml"} for _, old_path, _ in changes):
+        message = "Update tasks and settings" if cards else "Update workspace settings"
         if drafts:
             message += f" and {len(drafts)} draft{'s' if len(drafts) != 1 else ''}"
         return message
@@ -620,7 +621,7 @@ def _sync_stage_and_commit_local(resolved: Workspace, message_arg: str | None) -
     status = git_text("status", "--porcelain", "--untracked-files=all", ws=resolved)
     if status.returncode != 0 or status.stdout:
         print(
-            "error: sync requires a clean working tree after committing cards and policy; "
+            "error: sync requires a clean working tree after committing cards and settings; "
             "commit or remove non-task changes first",
             file=sys.stderr,
         )

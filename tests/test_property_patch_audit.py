@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,8 @@ class PropertyPatchAuditTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
-        policy = self.root / "mt-policy.yaml"
+        legacy_workspace(self.root)
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def run_mt(self, *args, input_bytes: bytes | None = None):
@@ -88,7 +90,7 @@ class PropertyPatchAuditTests(unittest.TestCase):
         from workspace import Workspace
 
         properties, _ = card_format.parse_document(
-            operations.render_new_card("note", "audit", "Audit", ws=Workspace.at(ROOT)))
+            operations.render_new_card("note", "audit", "Audit", ws=Workspace.at(ROOT / "templates")))
         properties["hidden"] = False
         with self.assertRaisesRegex(ValueError, "hidden must be true or false"):
             card_format.apply_property_patch(properties, {"hidden": 0}, kind="note")

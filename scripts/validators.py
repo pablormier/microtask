@@ -1,4 +1,4 @@
-"""Workspace-policy checks applied after canonical card structure is validated."""
+"""Workspace-settings checks applied after canonical card structure is validated."""
 from __future__ import annotations
 
 from dataclasses import dataclass

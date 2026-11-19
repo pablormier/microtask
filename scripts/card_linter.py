@@ -14,20 +14,20 @@ DEFAULT_LEVELS = {
 
 
 def normalize_lint_policy(raw: object) -> dict[str, str]:
-    """Validate and normalize the optional ``lint`` policy mapping."""
+    """Validate and normalize the optional ``lint`` settings mapping."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise ValueError("policy lint must be a mapping of rule names to 'off' or 'warn'")
+        raise ValueError("settings lint must be a mapping of rule names to 'off' or 'warn'")
     normalized: dict[str, str] = {}
     for rule, level in raw.items():
         if rule not in DEFAULT_LEVELS:
-            raise ValueError(f"unknown policy lint rule '{rule}'")
+            raise ValueError(f"unknown settings lint rule '{rule}'")
         if level is False:
             # YAML 1.1 parses unquoted 'off' as boolean False.
             level = "off"
         if not isinstance(level, str) or level not in VALID_LEVELS:
-            raise ValueError(f"policy lint.{rule} must be 'off' or 'warn'")
+            raise ValueError(f"settings lint.{rule} must be 'off' or 'warn'")
         normalized[str(rule)] = level
     return normalized
 

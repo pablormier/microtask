@@ -2,7 +2,7 @@
 # into clear tasks with the mt-triage skill. Render from the repository root:
 #   vhs docs/demo/triage.tape
 # Requires VHS (brew install vhs) and a signed-in Claude Code (claude). The
-# workspace is a throwaway copy in /tmp/mt-demo/todo.
+# workspace is a throwaway copy in /tmp/mt-demo/microtask.
 #
 # Claude's answers differ between runs. Hidden stretches skip the time Claude
 # spends working, so the GIF shows each prompt and its result.

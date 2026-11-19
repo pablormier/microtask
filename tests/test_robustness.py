@@ -42,8 +42,8 @@ class RobustnessTests(unittest.TestCase):
         self.base = Path(temporary.name)
         self.root = self.base / "data"
         (self.root / "cards").mkdir(parents=True)
-        policy = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy.replace("demo_workspace: true", "demo_workspace: false").replace("auto_sync: true", "auto_sync: false"),
             encoding="utf-8")
         (self.root / ".gitignore").write_text(".mt/\n", encoding="utf-8")  # As `mt` creates for data workspaces.

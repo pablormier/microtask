@@ -4,6 +4,7 @@ import json
 import os
 import pty
 import shutil
+from support import legacy_workspace
 import signal
 import subprocess
 import sys
@@ -23,7 +24,9 @@ class RepositorySelectorTests(unittest.TestCase):
         self.target = self.home / "target workspace"
         ignored = shutil.ignore_patterns(".git", ".mt", ".DS_Store")
         shutil.copytree(SOURCE_ROOT, self.launcher, ignore=ignored)
+        legacy_workspace(self.launcher)
         shutil.copytree(SOURCE_ROOT, self.target, ignore=ignored)
+        legacy_workspace(self.target)
         self.env = os.environ.copy()
         self.env.update(
             {
@@ -161,18 +164,21 @@ class RepositorySelectorTests(unittest.TestCase):
         (source / "drafts" / "private.md").write_text("SECRET-7f3a draft\n")
         (source / ".mt").mkdir(exist_ok=True)
         (source / ".mt" / "focus.json").write_text("{}")
-        (source / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: false\n")
+        (source / "settings.local.yaml").write_text("rules:\n  auto_sync: false\n")
         (source / "my-notes.txt").write_text("SECRET-7f3a notes\n")
         destination = self.home / "project tasks"
 
         result = self.run_mt("init", str(destination), "--local")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([path.name for path in (destination / "cards").iterdir()], [".gitkeep"])
-        for private in ("drafts", ".mt/focus.json", "mt-policy.local.yaml", "my-notes.txt", ".git"):
+        workspace = destination / "workspace"
+        self.assertEqual([path.name for path in (workspace / "cards").iterdir()], [".gitkeep"])
+        self.assertEqual(list((workspace / "drafts").iterdir()), [])
+        for private in (".mt/focus.json", "settings.local.yaml", "my-notes.txt", ".git"):
             self.assertFalse((destination / private).exists(), private)
+            self.assertFalse((workspace / private).exists(), private)
         self.assertTrue((destination / ".agents/skills/microtask/SKILL.md").is_file())
-        self.assertEqual((destination / "mt-policy.yaml").read_text(), (source / "mt-policy.yaml").read_text())
+        self.assertEqual((workspace / "settings.yaml").read_text(), (source / "settings.yaml").read_text())
         self.assertTrue(os.access(destination / "mt", os.X_OK))
         self.assertNotIn("SECRET-7f3a", "".join(p.read_text(errors="ignore") for p in destination.rglob("*") if p.is_file()))
         added = subprocess.run([str(destination / "mt"), "add", "Project task"], cwd=self.home,
@@ -183,7 +189,7 @@ class RepositorySelectorTests(unittest.TestCase):
         again = self.run_mt("init", str(destination), "--local")
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("already a microtask workspace", again.stdout)
-        self.assertEqual(len(list((destination / "cards").glob("*.md"))), 1)
+        self.assertEqual(len(list((workspace / "cards").glob("*.md"))), 1)
         other = self.home / "code"
         other.mkdir()
         refused = self.run_mt("init", str(other), "--local")
@@ -201,7 +207,7 @@ class RepositorySelectorTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(log.read_text().splitlines(),
-                         ["--no-path", str(self.home / "project-tasks"), "git@example.com:me/tasks.git"])
+                         ["--no-path", "--yes", str(self.home / "project-tasks"), "git@example.com:me/tasks.git"])
 
     def test_alias_lifecycle_and_stale_target_errors(self) -> None:
         added = self.run_mt("repo", "add", "work", str(self.target))
@@ -239,6 +245,7 @@ class RepositorySelectorTests(unittest.TestCase):
             second,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
+        legacy_workspace(second)
         self.assertEqual(self.run_mt("repo", "add", "zeta", str(second)).returncode, 0)
         self.assertEqual(self.run_mt("repo", "add", "alpha", str(self.target)).returncode, 0)
 

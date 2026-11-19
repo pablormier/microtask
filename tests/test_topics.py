@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -55,9 +56,10 @@ class TopicCliTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
+        legacy_workspace(self.root)
         for card in (self.root / "cards").glob("*.md"):
             card.unlink()
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def mt(self, *args: str) -> subprocess.CompletedProcess:

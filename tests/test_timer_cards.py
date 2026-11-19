@@ -44,8 +44,8 @@ class TimerCardTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "data"
         (self.root / "cards").mkdir(parents=True)
-        policy = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8")
-        (self.root / "mt-policy.yaml").write_text(
+        policy = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8")
+        (self.root / "settings.yaml").write_text(
             policy.replace("demo_workspace: true", "demo_workspace: false"), encoding="utf-8")
         self.ws = Workspace.at(self.root, app_root=SOURCE_ROOT,
                                environ={**os.environ, "MT_USERNAME": "tester"})
@@ -301,7 +301,7 @@ class TimerCardTests(unittest.TestCase):
     def test_a_workspace_with_a_pending_timer_file_stays_out_of_demo_mode(self) -> None:
         app = self.root.parent / "app"
         (app / "examples").mkdir(parents=True)
-        (app / "mt-policy.yaml").write_text((SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8"),
+        (app / "settings.yaml").write_text((SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
                                             encoding="utf-8")
         ws = Workspace.at(app, app_root=app)
         self.assertTrue(ws.pin_demo())
@@ -415,7 +415,7 @@ class TimerCardTests(unittest.TestCase):
     def test_a_demo_workspaces_old_timer_file_is_imported_onto_the_demo_card(self) -> None:
         app = self.root.parent / "app"
         shutil.copytree(SOURCE_ROOT / "examples", app / "examples")
-        (app / "mt-policy.yaml").write_text((SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8"),
+        (app / "settings.yaml").write_text((SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
                                             encoding="utf-8")
         ws = Workspace.at(app, app_root=app, environ={**os.environ, "MT_USERNAME": "tester"})
         self.assertTrue(ws.pin_demo())
@@ -434,7 +434,7 @@ class TimerCardTests(unittest.TestCase):
     # The dashboard and timers
 
     def test_a_partly_applied_switch_from_the_dashboard_still_requests_a_sync(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         old, new = self.add_task("Old synced timer"), self.add_task("New synced timer")
         operations.op_time_start(self.ws, self.ref(old), sync=False)
         base = self.start_server()

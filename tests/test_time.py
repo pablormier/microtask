@@ -6,6 +6,7 @@ import os
 import json
 import re
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,7 @@ class TimeTrackingTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
+        legacy_workspace(self.root)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -185,7 +187,7 @@ class TimeTrackingTests(unittest.TestCase):
             self.assertEqual(result, 1)
         for path, raw in before.items():
             self.assertEqual(path.read_bytes(), raw)
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
+        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
         rejected = self.run_mt("time", "start", second.stem)
         self.assertNotEqual(rejected.returncode, 0)
         for path, raw in before.items():
@@ -241,7 +243,7 @@ class TimeTrackingTests(unittest.TestCase):
             self.assertNotEqual(self.run_mt("time", "stop", task.stem, *flags).returncode, 0)
             self.assertEqual(task.read_bytes(), before)
             self.assertIn(task.stem, self.timers())
-        policy = self.run_mt("policy", "--json")
+        policy = self.run_mt("settings", "--json")
         self.assertEqual(float(json.loads(policy.stdout)["rules"]["timer_warn_hours"]), 8)
 
     def test_backdated_session_on_completed_task_preserves_completion_and_recent_update(self) -> None:
@@ -654,7 +656,7 @@ class TimeTrackingTests(unittest.TestCase):
 
 
     def test_concurrent_starts_keep_one_running_timer_per_task(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  max_doing_tasks: 10\n")
+        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 10\n")
         titles = [f"Concurrent start {index}" for index in range(8)]
         tasks = {title: self.add_task(title) for title in titles}
         barrier = threading.Barrier(len(titles))

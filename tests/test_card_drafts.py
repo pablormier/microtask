@@ -23,7 +23,7 @@ class CardDraftTests(unittest.TestCase):
         self.root.mkdir()
         shutil.copytree(SOURCE / 'scripts', self.root / 'scripts', ignore=shutil.ignore_patterns())
         shutil.copy2(SOURCE / 'mt', self.root / 'mt')
-        (self.root / 'mt-policy.yaml').write_text((SOURCE / 'mt-policy.yaml').read_text().replace('demo_workspace: true', 'demo_workspace: false'))
+        (self.root / 'settings.yaml').write_text((SOURCE / 'templates' / 'settings.yaml').read_text().replace('demo_workspace: true', 'demo_workspace: false'))
         (self.root / 'cards').mkdir()
 
     def run_mt(self, *args, data=None, actor='test-run'):

@@ -983,7 +983,7 @@ def command_topic_rename(args: argparse.Namespace, ws: Workspace | None = None) 
     print(f"{verb} {len(changes)} card(s) from '{card_format.normalize_topic(args.old)}' to '{card_format.normalize_topic(args.new)}'.")
     if any(card_format.topic_key(item)[:len(card_format.topic_key(args.old))] == card_format.topic_key(args.old)
            for item in suggested_topics(store.policy(resolved))):
-        print("Note: suggested_topics in the workspace policy still lists the old name; update it by hand.")
+        print("Note: suggested_topics in the workspace settings still lists the old name; update it by hand.")
     return auto_sync_after_mutation(changed=bool(changes), ws=resolved) if saved else 0
 
 

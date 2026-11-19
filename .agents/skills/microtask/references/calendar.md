@@ -19,7 +19,7 @@ its own authentication instructions. In another app, use its official
 connector or tool setup documentation. There is no universal calendar tool
 name or microtask command for connecting an account. Prefer read-only calendar
 access where the integration supports it. Keep credentials in that integration,
-not in microtask policy.
+not in microtask settings.
 
 Ask your agent:
 
@@ -35,7 +35,7 @@ for your app, rather than guess IDs or report an empty schedule.
 
 ## Save preferences
 
-Create or edit `mt-policy.local.yaml` in the selected microtask workspace,
+Create or edit `settings.local.yaml` in the selected microtask workspace,
 preserving any unrelated settings:
 
 ```yaml
@@ -60,7 +60,7 @@ both commitments and contextual events; no calendar category is required.
 - Missing `calendar`, `calendar: null`, or an empty `include` disables automatic
   calendar lookup. There is no separate `enabled` setting.
 
-Shared defaults can go in `mt-policy.yaml`. Local settings override shared
+Shared defaults can go in `settings.yaml`. Local settings override shared
 settings recursively, and local lists replace shared lists rather than append
 to them. To disable inherited calendars locally, use:
 
@@ -70,8 +70,8 @@ calendar:
 ```
 
 An empty local mapping inherits shared settings. Use `guidance: ""` to clear
-inherited guidance. Both policy files survive `mt update`; `mt sync` omits
-`mt-policy.local.yaml`. This omission does not prevent other Git commands from
+inherited guidance. Neither settings file is touched by `mt update`; `mt sync` omits
+`settings.local.yaml`. This omission does not prevent other Git commands from
 tracking or publishing it.
 
 You can ask the agent to do this for you:
@@ -79,27 +79,27 @@ You can ask the agent to do this for you:
 > Use my Work and Personal calendars for planning, and save that preference
 > locally. Treat location entries as context.
 
-When asked to configure calendars, agents should read the effective policy,
+When asked to configure calendars, agents should read the effective settings,
 discover IDs through the available integration, and clarify ambiguous selections
 before saving. Edit only the requested settings in the selected workspace's
 local file, preserve unrelated YAML, and validate afterward. Read the existing
-policy files for this edit; ordinary planning uses the merged CLI output.
+settings files for this edit; ordinary planning uses the merged CLI output.
 For another workspace, use `mt -R PATH_OR_NAME` for the commands below and edit
-that workspace's local policy. Do not edit the bundled skills for personal
+that workspace's local settings. Do not edit the bundled skills for personal
 calendar preferences.
 
 ## Verify
 
-Run these from the selected workspace:
+Run these from the app folder:
 
 ```sh
-./mt policy --json
+./mt settings --json
 ./mt validate
 ```
 
 The effective `calendar` object contains `include` entries normalized to
 mappings and `guidance` text (empty by default). Invalid field names, entry
-shapes, and guidance types are rejected. Policy validation checks configuration
+shapes, and guidance types are rejected. Settings validation checks configuration
 structure, not whether the calendars exist or can be accessed.
 
 Then ask:

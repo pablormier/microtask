@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,8 @@ class CLIUnificationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
-        policy = self.root / "mt-policy.yaml"
+        legacy_workspace(self.root)
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("demo_workspace: true", "demo_workspace: false"))
 
     def run_mt(self, *args, input_bytes=None):
@@ -64,7 +66,7 @@ class CLIUnificationTests(unittest.TestCase):
     def test_unchanged_web_metadata_does_not_trigger_auto_sync(self):
         created = self.json(self.run_mt("note", "Body", "--title", "No change", "--json"))
         before = self.snapshot(created["ref"])
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text().replace("auto_sync: false", "auto_sync: true"))
         result = self.json(self.run_mt("edit", created["ref"], "--title", "No change",
                                        "--expected-hash", before["content_hash"], "--json"))

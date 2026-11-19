@@ -23,7 +23,7 @@ class QuickSearchTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "cards").mkdir()
-        (self.root / "mt-policy.yaml").write_text((ROOT / "mt-policy.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+        (self.root / "settings.yaml").write_text((ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"), encoding="utf-8")
         self._old_cwd = Path.cwd()
         self.cache = store.CardCache()
         self.ws = workspace.Workspace(root=self.root)

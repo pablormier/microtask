@@ -27,7 +27,7 @@ class CardCacheTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "cards"
-        self.ws = Workspace.at(SOURCE_ROOT)
+        self.ws = Workspace.at(SOURCE_ROOT / "templates")
         self.root.mkdir()
         for name in (TASK, OTHER_TASK, NOTE):
             shutil.copy2(EXAMPLES / name, self.root / name)
@@ -136,7 +136,8 @@ class DashboardCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "repo"
             root.mkdir()
-            shutil.copy2(SOURCE_ROOT / "mt-policy.yaml", root / "mt-policy.yaml")
+            shutil.copy2(SOURCE_ROOT / "templates" / "settings.yaml", root / "settings.yaml")
+            shutil.copy2(SOURCE_ROOT / "mt", root / "mt")
             shutil.copytree(SOURCE_ROOT / "scripts", root / "scripts")
             shutil.copytree(SOURCE_ROOT / "tools", root / "tools")
             (root / "cards").mkdir()

@@ -114,8 +114,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Create a data-only workspace: cards/, mt-policy.yaml and a Git repository, with
-# no app files. The shipped policy has auto_sync off and init adds no 'origin'
+# Create a workspace folder: cards/, settings.yaml and a Git repository, with
+# no app files. The shipped settings have auto_sync off and init adds no 'origin'
 # remote, so nothing in it syncs. The Git identity is set for this one commit
 # because root on a server often has none. Bytecode is not written, so nothing
 # lands in the read-only app folder.

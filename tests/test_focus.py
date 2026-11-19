@@ -4,6 +4,7 @@ import re
 import hashlib
 import json
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ class FocusTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"),
         )
+        legacy_workspace(self.root)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

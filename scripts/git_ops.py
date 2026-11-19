@@ -236,4 +236,4 @@ def origin_publication_problem(repo_root: Path, *, allow_public: bool = False) -
         detail += " It is a fork, and GitHub keeps forks of public repositories public; create a new private repository instead."
     else:
         detail += " Make it private on GitHub or point origin at a private repository."
-    return detail + " To publish on purpose, set rules.allow_public_origin: true in mt-policy.yaml."
+    return detail + " To publish on purpose, set rules.allow_public_origin: true in settings.yaml."

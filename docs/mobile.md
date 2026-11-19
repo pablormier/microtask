@@ -9,6 +9,13 @@ ways to use it from your phone, ordered from easiest setup to most capable:
 3. **[`mt web` over Tailscale](#mt-web-over-tailscale)**: the responsive web board served privately from your own machine.
 4. **[Always-on Telegram bot with Claude Code](#telegram-bot-with-claude-code-on-a-raspberry-pi-or-vps)**: fast two-way chat, voice notes, direct `./mt` execution, and `mt sync` on a Raspberry Pi or small VPS.
 
+The first two options work on a clone of your private repository and expect
+the microtask app files in it. With the layout where the app and `workspace/`
+are separate, that repository holds only your cards, settings and drafts. If
+you rely on options 1 or 2, keep the app files in the repository as before (an
+old-style workspace), or add them yourself, until this guide covers the new
+layout. Options 3 and 4 run on a machine where microtask is installed.
+
 ---
 
 ## Claude or Codex Cloud mobile apps (no server)
@@ -132,12 +139,14 @@ curl -fsSL https://bun.sh/install | bash
 source ~/.bashrc
 ```
 
-Clone your **private** `microtask` repository and verify `./mt` works and can
-push/pull without interactive password prompts (for example, using an SSH key):
+Install microtask and give the installer your **private** repository when it
+asks; it clones your cards into `~/microtask/workspace`. Then verify `./mt`
+works and can push/pull without interactive password prompts (for example,
+using an SSH key):
 
 ```sh
-git clone git@github.com:YOU/your-tasks-repo.git ~/todo
-cd ~/todo
+curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash
+cd ~/microtask
 ./mt info
 ./mt sync
 ```
@@ -165,10 +174,10 @@ server:
    echo '{"hasCompletedOnboarding": true}' > ~/.claude.json
    ```
 
-   Test that Claude starts cleanly inside `~/todo`:
+   Test that Claude starts cleanly inside `~/microtask`:
 
    ```sh
-   cd ~/todo
+   cd ~/microtask
    claude
    ```
 
@@ -186,7 +195,7 @@ server:
 Start Claude Code inside your `microtask` workspace:
 
 ```sh
-cd ~/todo
+cd ~/microtask
 claude
 ```
 
@@ -207,7 +216,7 @@ Start a `tmux` session so Claude keeps running after you close SSH:
 
 ```sh
 tmux new -s microtask-bot
-cd ~/todo
+cd ~/microtask
 claude --channels plugin:telegram@claude-plugins-official
 ```
 
@@ -231,7 +240,7 @@ Now pair your Telegram account:
 * **Avoid terminal permission stalls:** When you message Claude from Telegram,
   it cannot click `[Allow]` in your server terminal if it asks permission to
   run `./mt`. To avoid stalling, pre-allow safe commands in
-  `~/todo/.claude/settings.local.json` (which is local to the server and not
+  `~/microtask/.claude/settings.local.json` (which is local to the server and not
   committed to Git):
 
   ```json
@@ -251,7 +260,7 @@ Now pair your Telegram account:
 
 * **Auto-start on reboot (`systemd`):** Once you've tested the setup in `tmux`,
   you can run the `tmux` command from a `systemd --user` service (with
-  `WorkingDirectory=%h/todo` and `Restart=always`) so it comes back
+  `WorkingDirectory=%h/microtask` and `Restart=always`) so it comes back
   automatically if your Pi reboots.
 
 ### 7. Example prompts from Telegram

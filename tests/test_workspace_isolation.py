@@ -43,7 +43,7 @@ class WorkspaceIsolationTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         base = Path(temporary.name)
-        shared = (SOURCE_ROOT / "mt-policy.yaml").read_text(encoding="utf-8").replace(
+        shared = (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8").replace(
             "demo_workspace: true", "demo_workspace: false")
         # A keeps the shipped policy. B defaults to waiting and has no `urgent` priority or `someday` status.
         policies = {
@@ -56,7 +56,7 @@ class WorkspaceIsolationTests(unittest.TestCase):
         for name, policy in policies.items():
             root = base / name
             (root / "cards").mkdir(parents=True)
-            (root / "mt-policy.yaml").write_text(policy, encoding="utf-8")
+            (root / "settings.yaml").write_text(policy, encoding="utf-8")
             self.roots[name] = root
         self.assertNotIn("urgent:", policies["b"])
         self.a = Workspace.at(self.roots["a"], app_root=SOURCE_ROOT)

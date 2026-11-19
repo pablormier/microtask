@@ -43,6 +43,6 @@ the note for source context.
 If an open issue changes after capture, the importer leaves it open and stops
 instead of replacing a note that may already contain triage edits. Compare the
 issue with the local note, reconcile the wanted text through `mt`, sync the
-approved result when required by workspace policy, then close the issue once
+approved result when required by workspace settings, then close the issue once
 the capture is reconciled. The source hash is command-owned; do not edit it to
 bypass this conflict. There is no automatic conflict-reset command.

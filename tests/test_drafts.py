@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,7 @@ class DraftCliTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
+        legacy_workspace(self.root)
         self.env = os.environ.copy()
         self.editor = Path(self.temporary.name) / "editor"
         self.editor.write_text(EDITOR_STUB, encoding="utf-8")
@@ -266,7 +268,7 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
     def test_task_capture_claims_explicit_and_default_doing_and_rolls_back_at_limit(self) -> None:
-        policy_path = self.root / "mt-policy.yaml"
+        policy_path = self.root / "settings.yaml"
         policy_text = policy_path.read_text(encoding="utf-8")
         policy_text = policy_text.replace("default_status: inbox", "default_status: doing")
         policy_text = policy_text.replace("max_doing_tasks: 5", "max_doing_tasks: 2")

@@ -485,7 +485,7 @@ def task_defaults(cfg: dict) -> tuple[str, str, str]:
         value = cfg.get(field)
         allowed = cfg.get(allowed_field)
         if not isinstance(value, str) or not isinstance(allowed, dict) or value not in allowed:
-            raise ValueError(f"policy {field} must name a configured {singular}")
+            raise ValueError(f"settings {field} must name a configured {singular}")
         values.append(value)
     return values[0], values[1], values[2]
 
@@ -498,7 +498,7 @@ def unassigned_priority(cfg: dict) -> str:
 
 
 def default_priority(cfg: dict) -> str:
-    """Return the shared policy default used when creating either card kind."""
+    """Return the shared settings default used when creating either card kind."""
     return task_defaults(cfg)[1]
 
 
@@ -519,7 +519,7 @@ def validate_shared_metadata(
     if selected_priority is not None and (
         not isinstance(selected_priority, str) or selected_priority not in cfg.get("priorities", {})
     ):
-        raise ValueError("priority must be an allowed effective policy value")
+        raise ValueError("priority must be an allowed effective settings value")
     normalized: dict[str, object] = {"priority": selected_priority}
     if project is not None and (not isinstance(project, str) or not project.strip()
                                 or any(char in project for char in "\r\n\x00")):
@@ -574,7 +574,7 @@ def render_new_card(
     needs_review: bool = False,
     ws: Workspace,
 ) -> str:
-    """Render a new card; tasks fill status and type from policy defaults."""
+    """Render a new card; tasks fill status and type from settings defaults."""
     cfg = store.policy(ws)
     default_status, default_priority, default_type = task_defaults(cfg)
     if kind == "task":
@@ -617,7 +617,7 @@ def render_converted_task(note: Card, today: str, *, status_override: str | None
     if status not in allowed_open:
         raise ValueError(f"task status must be one of: {', '.join(allowed_open)}")
     if task_type not in cfg.get("types", {}):
-        raise ValueError("task type must be an allowed effective policy value")
+        raise ValueError("task type must be an allowed effective settings value")
     properties = {key: value for key, value in note.frontmatter.items()
                   if key not in {"kind", "status", "type", "next_action"}}
     properties.update(kind="task", title=note.title, status=status, type=task_type, updated=today)
@@ -693,7 +693,7 @@ def create_card(
             raise CardInputError(f"task status must be one of: {', '.join(allowed_open)}")
         task_type = task_type or default_type
         if task_type not in cfg.get("types", {}):
-            raise CardInputError("task type must be an allowed effective policy value")
+            raise CardInputError("task type must be an allowed effective settings value")
         if by is not None and status != "doing":
             raise CardInputError("--by requires status doing")
     elif kind == "note":

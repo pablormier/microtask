@@ -5,3 +5,7 @@ __pycache__/
 .mt/
 .playwright-mcp/
 docs/plans/
+workspace/
+.update-tmp/
+VERSION
+.release-files

@@ -23,7 +23,7 @@ want the overview.
   `mt search`, and pipe text in from other tools. The dashboard is optional and
   edits the same files.
 - **Ready for your agents.** Any agent that can run shell commands can use it
-  without extra setup. The workspace's `AGENTS.md` and microtask skill explain
+  without extra setup. The `AGENTS.md` and microtask skill in the app folder explain
   the commands, and the CLI rejects edits made from an outdated copy of a card,
   so an agent can work on your list safely.
 - **Synced and versioned by Git.** `mt sync` backs up to your private repo and
@@ -31,11 +31,21 @@ want the overview.
 
 ## Quick start
 
-```sh
+Install with one command:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash
 ```
 
-Open a new terminal, then:
+It downloads the latest release, asks where to put it and your cards (Enter
+accepts each default), and adds `mt` to your shell config. Or clone the
+repository and create its workspace, with nothing else to set up:
+
+```bash
+git clone https://github.com/pablormier/microtask.git && cd microtask && ./mt init
+```
+
+Then, in a new terminal (or `./mt` in the clone):
 
 ```sh
 mt add "Call the dentist" --status active
@@ -48,12 +58,59 @@ A new workspace starts with example cards so every command has something to
 work on. They disappear as soon as you create your first card.
 
 To sync across machines, create an empty private repository (not a fork,
-which GitHub keeps public) and pass it when installing
-(`… | bash -s -- ~/todo git@github.com:YOU/tasks.git`). On another machine:
+which GitHub keeps public) and give its URL when the installer asks. On
+another machine, run the installer again and give it the same URL: it clones
+your cards into the new workspace.
+
+## Where things live
+
+The app and your cards are kept apart, so an update never touches your data.
+
+```
+microtask/                 the app: replaced as a whole by mt update
+  mt  scripts/  tools/  templates/  .agents/skills/  ...
+  workspace/               your data, created by the installer or ./mt init
+    cards/  drafts/  settings.yaml    what mt sync shares
+    settings.local.yaml  .mt/         this machine only, safe to delete
+```
+
+`workspace/` can be its own Git repository, which is how `mt sync` backs it up
+to your private repo. To keep your cards somewhere else, such as a synced
+folder, set `MT_WORKSPACE` to its absolute path in your shell config; the
+installer does this when you choose another workspace folder.
+
+## Updating
 
 ```sh
-gh repo clone YOU/tasks ~/todo && ~/todo/install.sh
+mt update --check     # show the current, next and latest version and what would change
+mt update             # install the next release
 ```
+
+`mt update` downloads a release and replaces the app files. It needs no Git,
+and it leaves your workspace alone. Before 1.0 it moves one minor version at a
+time, so after a jump it asks you to run it again. See
+[Install, sync, and updates](docs/sync-and-updates.md#update). In a Git clone,
+use `git pull`.
+
+## Moving an old install
+
+Earlier versions kept the app and your cards in one folder, which was also your
+Git repository. Version 0.2.0 asks you to migrate it. Run `mt migrate` in
+that folder (`mt migrate --check` shows what would happen first). It moves your
+`.git`, `cards/`, `drafts/`, and settings into `workspace/`, renames
+`mt-policy.yaml` to `settings.yaml`, and makes one commit there that records the
+removal of the app files and the rename. Nothing is pushed.
+
+Once that commit is pushed, for example by `mt sync`, other machines still on
+the old layout will lose their app files on their next pull. On each of them,
+run the installer or `mt migrate` before syncing. The commit also renames
+`mt-policy.yaml` to `settings.yaml`, which older versions do not read, so every machine
+must be on 0.2.0 or later before it syncs.
+
+If another machine already pulled that commit, its app files are gone and the
+old folder now holds only your cards and settings, which is a valid workspace
+folder. Run the installer and enter that folder at the "Workspace folder"
+prompt (or pass `--workspace FOLDER`) to get it working again.
 
 ## A card is just Markdown
 
@@ -127,7 +184,7 @@ Skills in [`.agents/skills`](.agents/skills) cover the common workflows:
 
 The agent follows [AGENTS.md](AGENTS.md) and the
 [microtask skill](.agents/skills/microtask/SKILL.md). Codex and Cursor read
-`AGENTS.md` on their own, and the workspace's `CLAUDE.md` and `GEMINI.md`
+`AGENTS.md` on their own, and the `CLAUDE.md` and `GEMINI.md` next to it
 point Claude Code and Gemini CLI to it. For other agents, ask them to read
 `AGENTS.md` first. The agent proposes new cards for your review before
 creating them, claims a task before working on it, and does not complete or

@@ -140,7 +140,12 @@ from transaction import (  # noqa: F401
 from workspace import (  # noqa: F401
     Workspace,
     is_data_workspace,
+    is_unmigrated_workspace,
+    missing_workspace_error,
 )
+
+# Commands that work on the application or on other folders, so they run without a workspace.
+NO_WORKSPACE_COMMANDS = {"init", "migrate", "repo", "skills", "update"}
 
 
 def main() -> int:
@@ -150,17 +155,19 @@ def main() -> int:
     ws = Workspace.resolve()
     try:
         arguments, repo_selector = consume_repo_selector(arguments)
+        # 'mt migrate' is the one command that accepts a workspace folder still named mt-policy.yaml.
+        migrating = bool(arguments) and arguments[0] == "migrate"
         if repo_selector is not None:
-            selected_root = resolve_repo_selector(repo_selector)
+            selected_root = resolve_repo_selector(repo_selector, allow_unmigrated=migrating)
             if selected_root != ws.root.resolve():
-                if is_data_workspace(selected_root):
+                if is_data_workspace(selected_root) or (migrating and is_unmigrated_workspace(selected_root)):
                     # Restart this application on the selected data, so every root is set at import.
                     executable = ws.app_root / "mt"
                     env = {**os.environ, "MT_WORKSPACE": str(selected_root)}
                 else:
                     executable, env = selected_root / "mt", foreign_env(ws)
                 os.execve(str(executable), [str(executable), *arguments], env)
-        error = workspace_error(ws)
+        error = None if migrating and is_unmigrated_workspace(ws.root) else workspace_error(ws)
         if error:
             raise ValueError(error)
     except ValueError as error:
@@ -168,6 +175,12 @@ def main() -> int:
         return 2
     root_parser = parser()
     args = root_parser.parse_args(arguments)
+    if args.command in NO_WORKSPACE_COMMANDS:
+        return args.func(args, ws=ws) if "ws" in inspect.signature(args.func).parameters else args.func(args)
+    missing = missing_workspace_error(ws.environ, app_root=ws.app_root)
+    if missing:
+        print(f"error: {missing}", file=sys.stderr)
+        return 2
     scope = apply_capture_scope(args, ws=ws) if args.command in {"add", "note"} else card_query.env_scope(args, ws.environ)
     if args.command == "run":
         if args.argv and args.argv[0] == "--":
@@ -211,7 +224,7 @@ def main() -> int:
         args.text = [args.file_text]
     if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
         root_parser.error("an empty body requires --title")
-    if args.command != "policy":
+    if args.command != "settings":
         ws.pin_demo()
         ws.maybe_seed_demo()
     if args.command in {

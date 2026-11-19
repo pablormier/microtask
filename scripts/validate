@@ -4,7 +4,7 @@
 Orchestrates validation of every Markdown card in cards/ (kind comes from frontmatter):
   * has YAML frontmatter
   * has all required fields
-  * task status is configured in policy
+  * task status is configured in settings
   * priority / type are valid
   * due is YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, or null
   * due_kind is consistent with due
@@ -52,7 +52,7 @@ def main() -> int:
         repo_root = Workspace.resolve().root
         effective_policy = policy_parser.load_policy(repo_root)
     except (OSError, ValueError) as error:
-        print("FAILED: invalid policy:", file=sys.stderr)
+        print("FAILED: invalid settings:", file=sys.stderr)
         for line in str(error).splitlines():
             print(f"  - {line}", file=sys.stderr)
         return 1

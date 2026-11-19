@@ -584,7 +584,7 @@ def apply_property_patch(
     """Apply one typed, semantic property patch without serializing a card.
 
     Callers parse the document once and render the returned properties once;
-    the candidate transaction applies workspace policy. Null clears nullable
+    the candidate transaction applies workspace settings. Null clears nullable
     fields, empty action/guidance clears the property, and
     clearing due also clears its due_kind.
     """

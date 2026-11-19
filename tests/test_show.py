@@ -149,7 +149,7 @@ class TaskShowTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(SOURCE_ROOT / "mt", self.root / "mt")
-        shutil.copy2(SOURCE_ROOT / "mt-policy.yaml", self.root / "mt-policy.yaml")
+        shutil.copy2(SOURCE_ROOT / "templates" / "settings.yaml", self.root / "settings.yaml")
         shutil.copytree(SOURCE_ROOT / "scripts", self.root / "scripts")
         shutil.copytree(SOURCE_ROOT / "tools", self.root / "tools")
         (self.root / "cards").mkdir()

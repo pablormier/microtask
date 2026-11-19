@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from support import legacy_workspace
 import subprocess
 import tempfile
 import unittest
@@ -19,9 +20,10 @@ class GoldenCliTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root, ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
+        legacy_workspace(self.root)
         for card in (self.root / "cards").glob("*.md"):
             card.unlink()
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text(encoding="utf-8").replace("demo_workspace: true", "demo_workspace: false"),
                           encoding="utf-8")
         self.env = {**os.environ, "MT_USERNAME": "golden-user", "NO_COLOR": "1"}

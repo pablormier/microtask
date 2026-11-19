@@ -25,8 +25,43 @@ _DETERMINISTIC_RULE_KEYS = {
 }
 
 
+WORKSPACE_DIRECTORY = "workspace"
+WORKSPACE_GITIGNORE = ".gitignore"
+SETTINGS_FILE = "settings.yaml"
+LOCAL_SETTINGS_FILE = "settings.local.yaml"
+# Before 0.2.0 the settings file was called mt-policy.yaml. Only detection and 'mt migrate' use these.
+OLD_SETTINGS_FILE = "mt-policy.yaml"
+OLD_LOCAL_SETTINGS_FILE = "mt-policy.local.yaml"
+
+
 def is_data_workspace(path: Path) -> bool:
-    return (path / "cards").is_dir() and (path / "mt-policy.yaml").is_file() and not (path / "mt").exists()
+    return (path / "cards").is_dir() and (path / "settings.yaml").is_file() and not (path / "mt").exists()
+
+
+def is_legacy_workspace(path: Path) -> bool:
+    """A folder that keeps cards and settings next to the application code, as older installs did.
+
+    Either settings file name counts: installs from before 0.2.0 call it mt-policy.yaml.
+    """
+    return ((path / "cards").is_dir()
+            and ((path / SETTINGS_FILE).is_file() or (path / OLD_SETTINGS_FILE).is_file())
+            and (path / "mt").is_file() and (path / "scripts" / "cli.py").is_file())
+
+
+def is_unmigrated_workspace(path: Path) -> bool:
+    """A workspace folder with no application that still has the old mt-policy.yaml name."""
+    return ((path / "cards").is_dir() and (path / OLD_SETTINGS_FILE).is_file()
+            and not (path / SETTINGS_FILE).exists() and not (path / "mt").exists())
+
+
+def unmigrated_message(path: Path, command: str) -> str:
+    """Tell the user to run 'mt migrate'; command is the form that selects this folder."""
+    return (f"the workspace {path} still uses {OLD_SETTINGS_FILE}, which is now {SETTINGS_FILE}. "
+            f"Run '{command}' to rename it")
+
+
+def default_workspace_path(app_root: Path = APP_ROOT) -> Path:
+    return app_root / WORKSPACE_DIRECTORY
 
 
 def resolve_workspace_root(
@@ -34,12 +69,22 @@ def resolve_workspace_root(
     *,
     app_root: Path = APP_ROOT,
 ) -> Path:
-    """Folder holding cards and policy: MT_WORKSPACE when set, else app_root."""
+    """Folder holding cards and settings.
+
+    MT_WORKSPACE when set; else app_root/workspace when it is a workspace; else
+    app_root itself when it is an old-style workspace; else app_root/workspace,
+    which does not exist yet: 'mt init' creates it (see missing_workspace_error).
+    """
     env = os.environ if environ is None else environ
     value = env.get("MT_WORKSPACE")
-    if not value:
+    if value:
+        return Path(value)
+    default = default_workspace_path(app_root)
+    if is_data_workspace(default):
+        return default
+    if is_legacy_workspace(app_root):
         return app_root
-    return Path(value)
+    return default
 
 
 def workspace_error(
@@ -57,10 +102,56 @@ def workspace_error(
     root = resolve_workspace_root(env, app_root=app_root)
     if root == app_root or is_data_workspace(root):
         return None
+    if is_unmigrated_workspace(root):
+        return unmigrated_message(root, f"MT_WORKSPACE={root} {app_root / 'mt'} migrate")
     return (
-        f"MT_WORKSPACE must name a data-only workspace (cards/ and mt-policy.yaml, no mt); "
+        f"MT_WORKSPACE must name a workspace folder (cards/ and settings.yaml, no mt); "
         f"select a full workspace with -R instead: {value}"
     )
+
+
+def create_workspace(path: Path, app_root: Path = APP_ROOT, *, policy: Path | None = None) -> None:
+    """Create or complete a workspace at path from templates/, never overwriting a file.
+
+    policy names the settings.yaml to start from; the default is the one in templates/.
+    """
+    path = Path(path)
+    templates = app_root / "templates"
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "cards").mkdir(exist_ok=True)
+    (path / "cards" / ".gitkeep").touch()
+    (path / "drafts").mkdir(exist_ok=True)
+    if policy is None or not Path(policy).is_file():
+        policy = templates / "settings.yaml"
+    for name, source in (("settings.yaml", policy),
+                         (WORKSPACE_GITIGNORE, templates / "workspace.gitignore")):
+        if not (path / name).exists():
+            (path / name).write_bytes(Path(source).read_bytes())
+
+
+def missing_workspace_error(
+    environ: Mapping[str, str] | None = None,
+    *,
+    app_root: Path = APP_ROOT,
+) -> str | None:
+    """Explain how to create the workspace when there is none yet, or None when there is one.
+
+    Nothing creates a workspace as a side effect of another command: only 'mt init' and
+    the installer do, so running mt from the wrong folder fails instead of adding data there.
+    """
+    env = os.environ if environ is None else environ
+    if env.get("MT_WORKSPACE"):
+        return None
+    default = default_workspace_path(app_root)
+    if is_unmigrated_workspace(default):
+        return unmigrated_message(default, f"{Path(app_root) / 'mt'} migrate")
+    root = resolve_workspace_root(env, app_root=app_root)
+    if root != default or is_data_workspace(default):
+        return None
+    if (Path(app_root) / ".mt-hosted").exists():
+        return ("no workspace selected. This is a hosted version folder: workspaces live in /srv/mt. "
+                "Select one with -R /srv/mt/NAME or MT_WORKSPACE")
+    return f"no workspace yet. Run '{Path(app_root) / 'mt'} init' to create one in {default}"
 
 
 def rebase_demo_dates(text: str) -> str:
@@ -148,8 +239,9 @@ class Workspace:
                          policy_cache=self._policy_cache)
 
     @property
-    def is_data_only(self) -> bool:
-        return self.root != self.app_root and is_data_workspace(self.root)
+    def in_app(self) -> bool:
+        """The workspace is the application's own: its workspace/ folder, or an old-style root."""
+        return self.root in (self.app_root, default_workspace_path(self.app_root))
 
     def real_cards_root(self) -> Path:
         return self.root / "cards"
@@ -161,10 +253,8 @@ class Workspace:
         return not any(self.real_cards_root().glob("*.md"))
 
     def policy(self) -> dict:
-        stamp = (
-            _stat_signature(self.root / "mt-policy.yaml"),
-            _stat_signature(self.root / "mt-policy.local.yaml"),
-        )
+        shared, local = policy_parser.settings_paths(self.root)
+        stamp = (_stat_signature(shared), _stat_signature(local))
         entry = self._policy_cache.entry
         if entry is not None and entry[0] == stamp:
             return entry[1]
@@ -191,7 +281,7 @@ class Workspace:
         enabled = self.policy().get("rules", {}).get("demo_workspace", True)
         self._demo_state = bool(
             enabled
-            and self.root == self.app_root
+            and self.in_app
             and (self.app_root / "examples").is_dir()
             and self.is_empty()
             and not self.real_legacy_timer_path().exists()
@@ -265,3 +355,13 @@ class Workspace:
     def foreign_env(self) -> dict[str, str]:
         """Environment for another application copy, which must use its own workspace."""
         return {key: value for key, value in self.environ.items() if key != "MT_WORKSPACE"}
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) == 3 and sys.argv[1] == "create":
+        create_workspace(Path(sys.argv[2]).absolute())
+    else:
+        print("usage: workspace.py create PATH", file=sys.stderr)
+        raise SystemExit(2)

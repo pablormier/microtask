@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,7 @@ class MoveTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"))
+        legacy_workspace(self.root)
         self.env = {**os.environ, "MT_USERNAME": "move-test", "MT_AUTO_SYNC": "false"}
 
     def tearDown(self) -> None:
@@ -124,7 +126,7 @@ class MoveTests(unittest.TestCase):
         self.assertEqual(self.read(no_action["ref"])["properties"]["status"], "doing")
         self.assertEqual(self.run_mt("move", no_action["ref"], "active").returncode, 0)
 
-        policy = self.root / "mt-policy.yaml"
+        policy = self.root / "settings.yaml"
         policy.write_text(policy.read_text(encoding="utf-8").replace("max_doing_tasks: 5", "max_doing_tasks: 1"),
                           encoding="utf-8")
         first = self.task("First task")

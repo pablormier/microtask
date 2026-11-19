@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ class DemoWorkspaceTests(unittest.TestCase):
             self.root,
             ignore=shutil.ignore_patterns(".git", ".mt", ".DS_Store"),
         )
+        legacy_workspace(self.root)
         self.env = os.environ.copy()
 
     def tearDown(self) -> None:
@@ -134,7 +136,7 @@ class DemoWorkspaceTests(unittest.TestCase):
         self.assertEqual(deleted.returncode, 0, deleted.stderr)
 
     def test_demo_workspace_disabled_by_policy(self) -> None:
-        policy_local = self.root / "mt-policy.local.yaml"
+        policy_local = self.root / "settings.local.yaml"
         policy_local.write_text("rules:\n  demo_workspace: false\n", encoding="utf-8")
 
         result = self.run_mt("list", "--status", "active")

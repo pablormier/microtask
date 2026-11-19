@@ -32,7 +32,7 @@ when the user narrows the week (for example, "work only").
 - `mt list --triage --limit 5 --full` to note whether unreviewed inbox items
   are piling up (or if an urgent capture belongs in this week's plan), without
   triaging them here.
-- Read `calendar` from `mt policy --json`. If absent or `include` is empty,
+- Read `calendar` from `mt settings --json`. If absent or `include` is empty,
   skip calendar lookup. Otherwise use the environment's connected calendar
   capability to read only those IDs for the planning week (or the user's
   requested period) in the user's timezone, respecting `account`/`provider`

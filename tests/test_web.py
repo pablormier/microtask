@@ -38,7 +38,7 @@ class WebDashboardTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "repo"
         self.root.mkdir()
         shutil.copy2(SOURCE_ROOT / "mt", self.root / "mt")
-        shutil.copy2(SOURCE_ROOT / "mt-policy.yaml", self.root / "mt-policy.yaml")
+        shutil.copy2(SOURCE_ROOT / "templates" / "settings.yaml", self.root / "settings.yaml")
         shutil.copytree(SOURCE_ROOT / "scripts", self.root / "scripts")
         shutil.copytree(SOURCE_ROOT / "tools", self.root / "tools")
         (self.root / "cards").mkdir()
@@ -366,14 +366,14 @@ print(json.dumps({'body': payload['body'], 'hash': payload['content_hash'], 'exp
         self.assertEqual(sorted(data_statuses, key=statuses.index), data_statuses)
 
     def test_custom_status_and_labels_are_presentation_metadata(self) -> None:
-        shared_policy = self.root / "mt-policy.yaml"
+        shared_policy = self.root / "settings.yaml"
         shared_policy.write_text(
             shared_policy.read_text(encoding="utf-8").replace(
                 '  done: "Done"\n', '  done: "Done"\n  review: "Review"\n', 1
             ),
             encoding="utf-8",
         )
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             """statuses:
   inbox: Captured
   active: Ready
@@ -716,7 +716,7 @@ view_labels:
         self.assertLess(card.index('class="mt-card-footer"'), card.index('class="mt-ref mt-card-ref"'))
 
     def test_deadlines_view_hides_year_progress_bar_via_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  show_year_progress: false\n",
             encoding="utf-8",
         )
@@ -730,7 +730,7 @@ view_labels:
         self.assertTrue(meta["show_deadline_progress"])
 
     def test_deadlines_view_hides_entry_progress_bars_via_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  show_deadline_progress: false\n",
             encoding="utf-8",
         )
@@ -743,7 +743,7 @@ view_labels:
         self.assertIn("this.showDeadlineProgress = meta.show_deadline_progress !== false", rendered)
 
     def test_deadline_progress_anchor_from_local_config(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  deadline_progress_start: created\n",
             encoding="utf-8",
         )
@@ -2016,7 +2016,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
 
         remote = Path(self.temporary.name) / "remote.git"
         shutil.copy2(SOURCE_ROOT / ".gitignore", self.root / ".gitignore")
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         for arguments in (("init", "-q", "-b", "main"), ("config", "user.name", "Web Test"),
                           ("config", "user.email", "web@example.invalid"), ("add", "."),
                           ("commit", "-qm", "Initial"), ("init", "-q", "--bare", "-b", "main", str(remote)),

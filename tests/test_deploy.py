@@ -19,6 +19,28 @@ UPGRADE = SOURCE_ROOT / "deploy" / "upgrade.sh"
 BASH = shutil.which("bash")
 
 
+def clone_working_tree(destination: Path) -> None:
+    """Clone this checkout, then overlay its uncommitted files so the scripts run the code under test."""
+    subprocess.run(["git", "clone", "--quiet", str(SOURCE_ROOT), str(destination)],
+                   check=True, capture_output=True, text=True)
+    listed = subprocess.run(["git", "-C", str(SOURCE_ROOT), "ls-files", "-z", "--cached", "--others",
+                             "--exclude-standard"], check=True, capture_output=True).stdout
+    wanted = {name for name in listed.decode().split("\0") if name and (SOURCE_ROOT / name).is_file()}
+    for name in wanted:
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(SOURCE_ROOT / name, target)
+    tracked = subprocess.run(["git", "-C", str(destination), "ls-files", "-z"],
+                             check=True, capture_output=True).stdout.decode().split("\0")
+    for name in tracked:
+        if name and name not in wanted and (destination / name).exists():
+            (destination / name).unlink()
+    identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
+    subprocess.run(["git", "-C", str(destination), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(destination), *identity, "commit", "--quiet", "--allow-empty",
+                    "-m", "working tree"], check=True, capture_output=True)
+
+
 def tag_releases(source: Path) -> None:
     """Give a local clone two release tags, the second on a new commit."""
     identity = ["-c", "user.name=test", "-c", "user.email=test@example.com"]
@@ -26,6 +48,8 @@ def tag_releases(source: Path) -> None:
         ["tag", "v1.0.0"],
         [*identity, "commit", "--quiet", "--allow-empty", "-m", "second release"],
         ["tag", "v1.1.0"],
+        ["tag", "v1.3.0"],
+        ["tag", "v3.0.0"],
     ):
         subprocess.run(["git", "-C", str(source), *command], check=True, capture_output=True, text=True)
 
@@ -39,8 +63,7 @@ class AddUserScriptTests(unittest.TestCase):
         # A local clone source keeps everything off the network. It gets two
         # release tags, the second on a new commit.
         cls.source = base / "source"
-        subprocess.run(["git", "clone", "--quiet", str(SOURCE_ROOT), str(cls.source)],
-                       check=True, capture_output=True, text=True)
+        clone_working_tree(cls.source)
         tag_releases(cls.source)
         # A checkout of the app, as add-user.sh finds it in /opt/microtask/current.
         cls.app = base / "app"
@@ -80,7 +103,7 @@ class AddUserScriptTests(unittest.TestCase):
         log = subprocess.run(["git", "-C", str(workspace), "log", "--oneline"],
                              check=True, capture_output=True, text=True).stdout.splitlines()
         self.assertEqual(len(log), 1)
-        policy = (workspace / "mt-policy.yaml").read_text()
+        policy = (workspace / "settings.yaml").read_text()
         self.assertIn("auto_sync: false", policy)
 
         self.assertEqual((self.root / "etc/mt/alice.env").read_text(),
@@ -165,8 +188,7 @@ class UpgradeScriptTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         base = Path(cls.temporary.name).resolve()
         cls.source = base / "source"
-        subprocess.run(["git", "clone", "--quiet", str(SOURCE_ROOT), str(cls.source)],
-                       check=True, capture_output=True, text=True)
+        clone_working_tree(cls.source)
         tag_releases(cls.source)
         cls.base = base
 
@@ -211,6 +233,7 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertEqual(self.link("current"), "v1.0.0")
         self.assertIsNone(self.link("previous"))
         self.assertIn("v1.0.0", result.stdout)
+        self.assertTrue((self.apps / "v1.0.0" / ".mt-hosted").is_file())
         self.assertEqual([path.name for path in self.apps.iterdir() if path.name.startswith(".")], [])
         mode = (self.apps / "v1.0.0" / "mt").stat().st_mode
         self.assertFalse(mode & (stat.S_IWGRP | stat.S_IWOTH))
@@ -244,6 +267,51 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertIsNone(self.link("previous"))
         self.assertTrue((self.apps / "v1.1.0").is_dir())
         self.assertIn("stays in", result.stderr)
+
+    def test_workspace_still_using_the_old_settings_name_stops_the_switch(self) -> None:
+        self.assertEqual(self.upgrade("v1.0.0").returncode, 0)
+        self.add_user("alice")
+        self.add_user("bob")
+        (self.root / "srv/mt/bob/settings.yaml").rename(self.root / "srv/mt/bob/mt-policy.yaml")
+
+        result = self.upgrade("v1.1.0")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FAILED: bob", result.stderr)
+        self.assertIn("mt-policy.yaml", result.stderr)
+        self.assertIn("migrate", result.stderr)
+        self.assertNotIn("FAILED: alice", result.stderr)
+        self.assertEqual(self.link("current"), "v1.0.0")
+        self.assertFalse((self.root / "srv/mt/bob/settings.yaml").exists())
+
+    def test_skipping_a_minor_version_is_refused_unless_allowed(self) -> None:
+        self.assertEqual(self.upgrade("v1.0.0").returncode, 0)
+
+        for tag in ("v1.3.0", "v3.0.0"):
+            with self.subTest(tag=tag):
+                result = self.upgrade(tag)
+                dry = self.upgrade("--dry-run", tag)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotEqual(dry.returncode, 0)
+                self.assertIn("one minor version at a time", result.stderr)
+                self.assertIn("--allow-skip", result.stderr)
+                self.assertFalse((self.apps / tag).exists())
+                self.assertEqual(self.link("current"), "v1.0.0")
+
+        self.assertIn("the next one is v1.1.x", self.upgrade("v1.3.0").stderr)
+
+        allowed = self.upgrade("--allow-skip", "v1.3.0")
+
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(self.link("current"), "v1.3.0")
+
+    def test_the_next_minor_comes_from_the_tags_even_across_a_major(self) -> None:
+        # Tags are v1.0.0, v1.1.0, v1.3.0 and v3.0.0: there is no v1.2.x or v2.x.
+        self.assertEqual(self.upgrade("v1.1.0").returncode, 0)
+        self.assertEqual(self.upgrade("v1.3.0").returncode, 0, "v1.2.x does not exist, so v1.3.0 is next")
+        result = self.upgrade("v3.0.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.link("current"), "v3.0.0")
 
     def test_failed_clone_leaves_nothing_behind(self) -> None:
         result = self.upgrade("v9.9.9")

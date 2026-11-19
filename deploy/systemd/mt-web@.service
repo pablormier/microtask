@@ -1,7 +1,7 @@
 # Template unit: one dashboard per user. Start it with
 #   systemctl enable --now mt-web@alice
-# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the data-only
-# workspace /srv/mt/alice with the app in /opt/microtask/current.
+# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the
+# workspace folder /srv/mt/alice with the app in /opt/microtask/current.
 [Unit]
 Description=microtask dashboard for %i
 After=network.target

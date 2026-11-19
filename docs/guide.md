@@ -16,7 +16,7 @@ How to work with microtask day to day. For every option of a command, run
 
 ## Cards: tasks and notes
 
-Everything you capture is a **card**: one Markdown file in `cards/`. A card is
+Everything you capture is a **card**: one Markdown file in the workspace's `cards/` folder. A card is
 either a task (something to do) or a note (something to keep). Both share the
 same format, described in [Card files](cards.md), and you can switch a card's
 kind at any time with `mt convert REF task|note`.
@@ -220,9 +220,10 @@ overwrites newer changes.
 
 ## Workspaces
 
-A **workspace** is one folder (normally one Git repository) holding the app,
-your `cards/`, and settings. An installed `mt` always uses the workspace it
-lives in, regardless of your current directory. To work with another one:
+A **workspace** is one folder (normally one Git repository) holding your
+`cards/`, `drafts/`, and settings. By default it is `workspace/` inside the app
+folder, created by the installer or `./mt init`. An installed `mt` always uses that workspace,
+regardless of your current directory. To work with another one:
 
 ```sh
 mt repo add work "$HOME/work-tasks"   # short alias, stored on this machine
@@ -233,50 +234,50 @@ A project's cards can live in one of three places:
 
 - **Your workspace**, filed under the project with `--project myapp`. Nothing
   to set up, and you see them next to your own cards.
-- **A data-only workspace**: its own cards, settings, and Git repository, run
-  by the `mt` you already have. Use it to keep a project's cards apart from
+- **A second workspace folder**: its own cards, settings, and Git repository,
+  run by the `mt` you already have. Use it to keep a project's cards apart from
   yours, or to share them with other people.
-- **A full workspace**: a second copy of microtask with its own cards. Use it
-  when the project needs its own microtask version.
+- **A second copy of microtask** with its own workspace. Use it when the
+  project needs its own microtask version.
 
 Create the second or third kind outside the project. Plain `mt` keeps running
 your personal workspace:
 
 ```sh
-mt init ~/work/pkg-tasks --data                                   # data-only, offline, with Git
+mt init ~/work/pkg-tasks --data                                   # workspace folder, offline, with Git
 mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # and shares it with mt sync
-mt init ~/work/pkg-tasks                                          # full copy, downloads microtask
-mt init ~/work/pkg-tasks --local                                  # full copy of your mt, offline
+mt init ~/work/pkg-tasks                                          # second copy, downloads microtask
+mt init ~/work/pkg-tasks --local                                  # second copy of your mt, offline
 mt repo add pkg ~/work/pkg-tasks
 mt -R pkg add "First task"
 ```
 
-A data-only workspace is any folder with `cards/` and `mt-policy.yaml` and no
-`mt` of its own. Your own `mt update` keeps it current, since it has no
-application to update; `mt -R pkg update` is refused. Each machine that uses
-it needs `mt` and its own `mt repo add`. A full copy from the internet is
-ready for `mt update` itself;
-`--local` copies the app and your settings from the `mt` you run, never your
-cards, drafts, or local state, and has no Git until you add it.
+A workspace folder is any folder with `cards/` and `settings.yaml` and no
+`mt` of its own. Each machine that uses it needs `mt` and its own
+`mt repo add`. A second copy from the internet keeps its workspace in its own
+`workspace/` folder and updates with its own `mt update`. `--local` copies the
+app and your settings from the `mt` you run, never your cards, drafts, or local
+state, and has no Git until you add it.
 
-### A default data-only workspace
+### A default workspace folder
 
-If you use one data-only workspace most of the time, set `MT_WORKSPACE` in your
-shell config instead of typing `-R` on every command:
+If you use one workspace folder most of the time, set `MT_WORKSPACE` in your
+shell config instead of typing `-R` on every command. The installer does this
+when you choose a workspace outside the app folder:
 
 ```sh
-export MT_WORKSPACE="$HOME/Dropbox/todos"   # absolute path to a data-only workspace
+export MT_WORKSPACE="$HOME/Dropbox/todos"   # absolute path to a workspace folder
 mt list                                     # now lists that workspace
 ```
 
-The path must be absolute and must point at a data-only workspace; anything
-else is refused with an error. `-R` still wins, so `mt -R work list` works as
-before. Remove the line to go back to the workspace `mt` lives in.
+The path must be absolute and must point at a workspace folder that exists;
+anything else is refused with an error, and nothing is created. `-R` still
+wins, so `mt -R work list` works as before. Remove the line to go back to
+`workspace/` in the app folder.
 
-It applies to every `mt` you run, wherever you are. `./mt` inside a full
-workspace, and agents whose skills call plain `mt`, also use this workspace.
-`mt info` shows which workspace is active. With several workspaces in regular
-use, prefer `-R` and aliases.
+It applies to every `mt` you run, wherever you are, and to agents whose skills
+call plain `mt`. `mt info` shows which workspace is active. With several
+workspaces in regular use, prefer `-R` and aliases.
 
 ### Agents in another project
 
@@ -287,7 +288,7 @@ way as any other command:
 ```sh
 cd ~/code/myapp
 mt skills install --project myapp     # your workspace, limited to the project
-mt -R pkg skills install              # a data-only or full workspace
+mt -R pkg skills install              # another workspace
 ```
 
 This copies every skill into `.agents/skills/` and `.claude/skills/`, with each
@@ -301,9 +302,9 @@ are never changed.
 
 ## Settings
 
-Workspace settings live in `mt-policy.yaml` and are synced with your cards.
-Machine-specific overrides go in `mt-policy.local.yaml`, which is not synced.
-`mt policy` shows the effective values, including the defaults for new cards,
+Workspace settings live in `settings.yaml` and are synced with your cards.
+Machine-specific overrides go in `settings.local.yaml`, which is not synced.
+`mt settings` shows the effective values, including the defaults for new cards,
 the work-in-progress limit, and `rules.auto_sync`.
 
 For optional calendar context in focus and weekly planning, see

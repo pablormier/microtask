@@ -41,12 +41,12 @@ The app and the data are kept apart:
 /opt/microtask/v1.5.0/
 /opt/microtask/current    link to the active version
 /opt/microtask/previous   link to the version before it
-/srv/mt/alice/            alice's data-only workspace: cards, settings, Git
+/srv/mt/alice/            alice's workspace folder: cards, settings, Git
 /srv/mt/bob/
 ```
 
 - Every user runs the same app from `/opt/microtask/current`. A workspace in
-  `/srv/mt/NAME` holds cards, `mt-policy.yaml`, Git and `.mt/` state, and no app
+  `/srv/mt/NAME` holds cards, `settings.yaml`, Git and `.mt/` state, and no app
   files. The service `mt-web@NAME` runs
   `/opt/microtask/current/mt -R /srv/mt/NAME web` on a local port.
 - The service sees an empty `/srv/mt` with only its own workspace inside, so a
@@ -153,6 +153,31 @@ Upgrade every user at once to a release tag:
 ```sh
 sudo /opt/microtask/current/deploy/upgrade.sh v1.5.0
 ```
+
+Upgrade one minor version at a time, taking the newest patch of each, because a
+minor version can carry migrations that the next one removes. `upgrade.sh`
+refuses a TAG that skips a minor version after the current one. Pass
+`--allow-skip` only if you know the versions in between need nothing from you.
+
+Before upgrading to 0.2.0 from an earlier version, rename the settings file in
+every workspace. The settings file was called `mt-policy.yaml` and is now
+`settings.yaml`. For each user, run this as the service user:
+
+```sh
+sudo -u mt /opt/microtask/current/mt -R /srv/mt/NAME migrate --check
+sudo -u mt /opt/microtask/current/mt -R /srv/mt/NAME migrate
+```
+
+It renames `mt-policy.yaml` to `settings.yaml` (and `mt-policy.local.yaml` to
+`settings.local.yaml`) and, when the workspace is a Git repository, commits just
+the rename. Nothing is pushed. It refuses when the Git tree has uncommitted
+changes. If you skip this, `upgrade.sh` fails at the validation step for that
+workspace, names it, and leaves `current` unchanged. New workspaces made by
+`add-user.sh` already use `settings.yaml`.
+
+Each installed version folder gets a `.mt-hosted` file. It makes `mt update`
+point to `upgrade.sh`, and makes `mt` without a workspace point to `/srv/mt`
+(select one with `-R /srv/mt/NAME` or `MT_WORKSPACE`).
 
 The script does this in order:
 

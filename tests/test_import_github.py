@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from support import legacy_workspace
 import subprocess
 import tempfile
 import unittest
@@ -50,6 +51,7 @@ class ImportGithubTests(unittest.TestCase):
         self.root = temp / "repo"
         shutil.copytree(SOURCE_ROOT, self.root,
                         ignore=shutil.ignore_patterns(".git", ".mt", "examples", ".DS_Store"))
+        legacy_workspace(self.root)
         self.bin = temp / "bin"
         self.bin.mkdir()
         gh = self.bin / "gh"
@@ -89,7 +91,7 @@ class ImportGithubTests(unittest.TestCase):
         self.git(self.root, "init", "-b", "main")
         self.git(self.root, "config", "user.name", "GitHub Test")
         self.git(self.root, "config", "user.email", "github@example.test")
-        (self.root / "mt-policy.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("rules:\n  auto_sync: true\n", encoding="utf-8")
         self.git(self.root, "add", "-A")
         self.git(self.root, "commit", "-m", "base")
         self.git(self.root, "remote", "add", "origin", str(remote))
@@ -121,7 +123,7 @@ class ImportGithubTests(unittest.TestCase):
         self.assertIn("pass --repo OWNER/REPO", result.stderr)
 
     def test_auto_sync_without_git_keeps_issue_open_after_local_capture(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text(
+        (self.root / "settings.local.yaml").write_text(
             "rules:\n  auto_sync: true\n", encoding="utf-8"
         )
         result = self.run_mt(
@@ -139,7 +141,7 @@ class ImportGithubTests(unittest.TestCase):
         self.assertIn("git init", result.stderr)
 
     def test_import_creates_one_review_note_and_closes_after_durable_capture(self) -> None:
-        (self.root / "mt-policy.local.yaml").write_text("default_priority: high\n", encoding="utf-8")
+        (self.root / "settings.local.yaml").write_text("default_priority: high\n", encoding="utf-8")
         env = self.env.copy()
         expected = self.root / "cards" / "2026-10-10-093000-gh-11-call-dentist.md"
         env["GH_EXPECT_CAPTURE"] = str(expected)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,7 +26,7 @@ class KindHintTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.ws = Workspace.at(SOURCE_ROOT)
+        self.ws = Workspace.at(SOURCE_ROOT / "templates")
 
     def write(self, name: str, text: str) -> Path:
         path = self.root / name
@@ -71,11 +73,12 @@ class KindHintTests(unittest.TestCase):
 
     def test_validate_still_catches_a_malformed_note(self) -> None:
         (self.root / "cards").mkdir()
+        shutil.copy2(SOURCE_ROOT / "templates" / "settings.yaml", self.root / "settings.yaml")
         (self.root / "cards" / "good.md").write_text(TASK)
         (self.root / "cards" / "bad.md").write_text(NOTE.replace("priority: medium", "priority: nope"))
         result = subprocess.run(
             [sys.executable, str(SOURCE_ROOT / "scripts" / "validate"), "--data-root", str(self.root)],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, check=False, env={**os.environ, "MT_WORKSPACE": str(self.root)})
         self.assertEqual(result.returncode, 1)
         self.assertIn("bad.md", result.stderr)
         self.assertIn("priority", result.stderr)

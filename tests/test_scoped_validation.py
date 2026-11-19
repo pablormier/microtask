@@ -27,8 +27,8 @@ class ScopedValidationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         shutil.copytree(SOURCE / "scripts", self.root / "scripts")
         shutil.copy2(SOURCE / "mt", self.root / "mt")
-        self.root.joinpath("mt-policy.yaml").write_text(
-            SOURCE.joinpath("mt-policy.yaml").read_text().replace("demo_workspace: true", "demo_workspace: false"))
+        self.root.joinpath("settings.yaml").write_text(
+            SOURCE.joinpath("templates", "settings.yaml").read_text().replace("demo_workspace: true", "demo_workspace: false"))
         self.root.joinpath("cards").mkdir()
         self.path = "cards/target.md"
         self.before = task_file("target", "## Notes\n\nOriginal.").encode()

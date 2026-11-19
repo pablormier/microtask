@@ -263,7 +263,7 @@ def check_changes_request(root: Path, policy: dict, request: object) -> ChangesR
 
 
 def audit_workspace(root: Path, policy: dict) -> AuditReport:
-    """Validate every card and draft in root against policy."""
+    """Validate every card and draft in root against settings."""
     cards_root = root / "cards"
     errors: list[str] = []
     seen_ids: dict[str, Path] = {}
@@ -273,11 +273,11 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
     raw_doing_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
     if not isinstance(raw_doing_limit, str) or not raw_doing_limit.isdigit():
         doing_limit = 0
-        errors.append("policy rules.max_doing_tasks must be a positive integer")
+        errors.append("settings rules.max_doing_tasks must be a positive integer")
     else:
         doing_limit = int(raw_doing_limit)
         if doing_limit < 1:
-            errors.append("policy rules.max_doing_tasks must be a positive integer")
+            errors.append("settings rules.max_doing_tasks must be a positive integer")
 
     md_files: list[Path] = []
     if not cards_root.is_dir():

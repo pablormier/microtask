@@ -13,10 +13,15 @@
 #   --no-systemctl    do not run as the mt user, restart services, or chown
 #   --dry-run         print what would happen and change nothing
 #   --rollback        make the previous version current again
+#   --allow-skip      allow skipping a minor version (see below)
 #
 # Run it as root. Versions live in /opt/microtask/TAG. 'current' and 'previous'
 # are symlinks in that folder. Every workspace in /srv/mt is checked with the new
 # version before 'current' moves. Old version folders stay until you remove them.
+#
+# Go up one minor version at a time (v0.1.x, then v0.2.x, then v0.3.x), because a
+# minor version can carry migrations that the next one removes. --allow-skip
+# overrides the check.
 set -euo pipefail
 
 root="${MT_DEPLOY_ROOT:-}"
@@ -25,6 +30,7 @@ service_user="${MT_SERVICE_USER:-mt}"
 no_systemctl=""
 dry_run=""
 rollback=""
+allow_skip=""
 
 usage() {
   sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' >&2
@@ -43,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --no-systemctl) no_systemctl=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     --rollback) rollback=1; shift ;;
+    --allow-skip) allow_skip=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) usage; die "unknown option $1" ;;
     *) positional+=("$1"); shift ;;
@@ -128,6 +135,29 @@ if [[ -d "$apps/$tag" ]]; then
   die "$apps/$tag already exists. Remove it first, or run --rollback if it is the previous version"
 fi
 
+# Do not skip a minor version: a release may carry migrations that the next minor removes.
+# The allowed target is a patch of the current minor or of the next minor that has releases,
+# read from the source's tags, as 'mt update' does.
+version_pattern='^v?[0-9]+\.[0-9]+\.[0-9]+$'
+if [[ -z "$allow_skip" && "$current" =~ $version_pattern && "$tag" =~ $version_pattern ]]; then
+  tags="$(git ls-remote --tags --refs "$source_url" 2>/dev/null </dev/null | sed 's#.*refs/tags/##')" \
+    || die "could not list the release tags of $source_url to check the upgrade path; pass --allow-skip to skip the check"
+  verdict="$(printf '%s\n' "$tags" | python3 -c '
+import re, sys
+def minor(tag):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag.strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+current, target = minor(sys.argv[1]), minor(sys.argv[2])
+later = sorted({m for m in map(minor, sys.stdin) if m and m > current})
+allowed = later[0] if later else current
+if target > allowed:
+    print("v%d.%d" % allowed)
+' "$current" "$tag")"
+  if [[ -n "$verdict" ]]; then
+    die "$tag skips a minor version after $current; the next one is $verdict.x. Upgrade one minor version at a time, newest patch of each, or pass --allow-skip if you know what you are doing"
+  fi
+fi
+
 if [[ -n "$dry_run" ]]; then
   echo "would clone $tag from $source_url into $apps/$tag"
   echo "would check these workspaces with $tag: $(workspace_names | tr '\n' ' ')"
@@ -146,6 +176,10 @@ clone_args=(--quiet --branch "$tag" -c advice.detachedHead=false)
 git clone "${clone_args[@]}" "$source_url" "$tmp/app" 2>&1 </dev/null \
   || die "could not clone $tag from $source_url"
 [[ -x "$tmp/app/mt" ]] || die "$tag has no mt launcher"
+
+# Tell mt that this folder is a hosted version: it is updated with this script, and its
+# workspaces live in /srv/mt.
+echo "Installed by deploy/upgrade.sh" > "$tmp/app/.mt-hosted"
 
 # Compile now so the first start is fast and nothing writes into the folder later.
 python3 -m compileall -q "$tmp/app/scripts" "$tmp/app/tools" >/dev/null

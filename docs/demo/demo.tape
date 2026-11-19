@@ -76,7 +76,7 @@ Hide
 Type "clear"
 Enter
 Show
-Type "head -n 8 cards/*renew-passport.md"
+Type "head -n 8 workspace/cards/*renew-passport.md"
 Sleep 400ms
 Enter
 Sleep 4s

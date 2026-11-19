@@ -26,7 +26,7 @@ import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402, F401
 import store  # noqa: E402
 import transaction  # noqa: E402
-from workspace import Workspace  # noqa: E402
+from workspace import Workspace, missing_workspace_error  # noqa: E402
 
 try:
     from .web_actions import (
@@ -411,6 +411,10 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     # The process edge: `mt web` starts this script with the selected workspace in its environment.
     workspace = Workspace.resolve()
+    missing = missing_workspace_error(workspace.environ, app_root=workspace.app_root)
+    if missing:
+        print(f"error: {missing}", file=sys.stderr)
+        return 2
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
                            filters=board_filters(workspace, args), allow_hosts=args.allow_host)
 

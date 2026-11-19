@@ -10,7 +10,7 @@ import tty
 
 
 def display(value: object) -> str:
-    """Keep pasted content and policy labels from controlling the terminal."""
+    """Keep pasted content and settings labels from controlling the terminal."""
     return " ".join("".join(c for c in str(value) if c.isprintable() or c == "\n").split())
 
 

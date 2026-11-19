@@ -1,11 +1,11 @@
 # Capture and review a new card
 
-1. **Look for context.** Check `mt policy --json` for defaults and search with
+1. **Look for context.** Check `mt settings --json` for defaults and search with
    `mt search WORDS --all --compact`. If a matching card exists, show it before
    proposing a new one.
 
 2. **Fill in what the evidence supports.** Infer properties from the request,
-   the conversation, policy, and related cards. Reuse an existing project or
+   the conversation, settings, and related cards. Reuse an existing project or
    topic only when the connection is clear. Leave other optional fields unset;
    urgency alone is not a deadline. Mention any inference that matters and ask
    about real ambiguity.
