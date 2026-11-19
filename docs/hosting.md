@@ -1,30 +1,21 @@
-# Hosting for a few people
+# Hosting dashboards on a server
 
-This guide sets up microtask for people who will not install anything. Each
-person gets a private workspace and a web address, and signs in with their
-Google account. It suits a handful of users on one small server.
+This sets up microtask on a Linux server for people who will not install it.
+Each person gets a private workspace and their own web address, and signs in
+with their Google account.
 
-For one person who wants the dashboard on a phone, [Tailscale](mobile.md) is
-simpler. Run `mt web` on your machine and open it over your tailnet. You need
-no domain, proxy or certificates.
+To reach your own dashboard from your phone, [Tailscale](mobile.md#mt-web-over-tailscale)
+is simpler: no domain, proxy or certificates.
 
-Local installs are unaffected. Nothing here changes how `./mt` or `mt -R` work
-on your own machine.
-
-**Untested.** The scripts and tests in this repository were run on macOS only,
-with `--root` and `--no-systemctl`. Nothing here was run against a real Caddy,
-oauth2-proxy or systemd, and `upgrade.sh` has not run as the `mt` user with
-`runuser`. The Caddy syntax, the oauth2-proxy options and the systemd directives
-were written from memory. They have not been checked against the documentation
-or run. Before the first real user, run these:
+The scripts have been tested with `--root` and `--no-systemctl`, not yet on a
+real server with Caddy, oauth2-proxy and systemd. Before adding people, check
+the configuration and try two sign-ins: one as the owner, and one as another
+account that should get 403.
 
 ```sh
 caddy validate --config /etc/caddy/Caddyfile
 systemd-analyze verify /etc/systemd/system/mt-web@.service
 ```
-
-Then try one sign-in as the owner, and one as a second account that should get
-403. Fix whatever fails before you add more users.
 
 ## How it works
 
@@ -37,8 +28,8 @@ browser --> Caddy (HTTPS, one site per user) --> mt web on 127.0.0.1:810x
 The app and the data are kept apart:
 
 ```
-/opt/microtask/v1.4.0/    one read-only checkout per release, owned by root
-/opt/microtask/v1.5.0/
+/opt/microtask/v0.2.0/    one read-only checkout per release, owned by root
+/opt/microtask/v0.2.1/
 /opt/microtask/current    link to the active version
 /opt/microtask/previous   link to the version before it
 /srv/mt/alice/            alice's workspace folder: cards, settings, Git
@@ -85,16 +76,16 @@ Replace `mt.example.com` with your domain in every file below.
    sudo mkdir -p /srv/mt /etc/mt /etc/caddy/mt-users /etc/oauth2-proxy
    ```
 
-2. Install the first version. Pick a release tag, such as `v1.4.0`. There is no
+2. Install the first version. Pick a release tag, such as `v0.2.0`. There is no
    app on the server yet, so run the script from any checkout of the
    repository. This one can be deleted afterwards.
 
    ```sh
-   git clone --branch v1.4.0 https://github.com/pablormier/microtask.git /tmp/microtask-kit
-   sudo /tmp/microtask-kit/deploy/upgrade.sh v1.4.0
+   git clone --branch v0.2.0 https://github.com/pablormier/microtask.git /tmp/microtask-kit
+   sudo /tmp/microtask-kit/deploy/upgrade.sh v0.2.0
    ```
 
-   The script clones the tag into `/opt/microtask/v1.4.0`, makes it read-only
+   The script clones the tag into `/opt/microtask/v0.2.0`, makes it read-only
    and points `/opt/microtask/current` at it. With no workspaces yet there is
    nothing to check. From now on use the scripts in
    `/opt/microtask/current/deploy/`.
@@ -151,7 +142,7 @@ A new workspace has a Git repository with one commit, no `origin` remote, and
 Upgrade every user at once to a release tag:
 
 ```sh
-sudo /opt/microtask/current/deploy/upgrade.sh v1.5.0
+sudo /opt/microtask/current/deploy/upgrade.sh v0.2.1
 ```
 
 Upgrade one minor version at a time, taking the newest patch of each, because a
@@ -159,21 +150,24 @@ minor version can carry migrations that the next one removes. `upgrade.sh`
 refuses a TAG that skips a minor version after the current one. Pass
 `--allow-skip` only if you know the versions in between need nothing from you.
 
-Before upgrading to 0.2.0 from an earlier version, rename the settings file in
-every workspace. The settings file was called `mt-policy.yaml` and is now
-`settings.yaml`. For each user, run this as the service user:
+### From 0.1 to 0.2.0
+
+In 0.2.0 the settings file is called `settings.yaml` instead of
+`mt-policy.yaml`, and 0.2.0 refuses a workspace that still has the old name.
+The 0.1 version on the server cannot rename it, so use a copy of 0.2.0 for that
+step, and stop the dashboards while you do it:
 
 ```sh
-sudo -u mt /opt/microtask/current/mt -R /srv/mt/NAME migrate --check
-sudo -u mt /opt/microtask/current/mt -R /srv/mt/NAME migrate
+git clone --branch v0.2.0 https://github.com/pablormier/microtask.git /tmp/microtask-0.2.0
+sudo systemctl stop 'mt-web@*'
+sudo -u mt /tmp/microtask-0.2.0/mt -R /srv/mt/NAME migrate     # for each NAME in /srv/mt
+sudo /tmp/microtask-0.2.0/deploy/upgrade.sh v0.2.0
 ```
 
-It renames `mt-policy.yaml` to `settings.yaml` (and `mt-policy.local.yaml` to
-`settings.local.yaml`) and, when the workspace is a Git repository, commits just
-the rename. Nothing is pushed. It refuses when the Git tree has uncommitted
-changes. If you skip this, `upgrade.sh` fails at the validation step for that
-workspace, names it, and leaves `current` unchanged. New workspaces made by
-`add-user.sh` already use `settings.yaml`.
+`mt migrate` renames the settings files and, in a Git repository, commits only
+the rename. `upgrade.sh` then checks every workspace with 0.2.0, switches
+`current`, and starts the dashboards again. Delete `/tmp/microtask-0.2.0`
+afterwards.
 
 Each installed version folder gets a `.mt-hosted` file. It makes `mt update`
 point to `upgrade.sh`, and makes `mt` without a workspace point to `/srv/mt`
@@ -181,7 +175,7 @@ point to `upgrade.sh`, and makes `mt` without a workspace point to `/srv/mt`
 
 The script does this in order:
 
-1. Clones the tag into `/opt/microtask/v1.5.0`, compiles the Python files and
+1. Clones the tag into `/opt/microtask/v0.2.1`, compiles the Python files and
    makes the folder read-only for everyone except root. It builds the folder in
    a temporary directory and renames it into place, so a failed clone leaves
    nothing behind.
@@ -226,7 +220,7 @@ remove the versions that `current` and `previous` point to.
 
 ```sh
 readlink /opt/microtask/current /opt/microtask/previous
-sudo rm -rf /opt/microtask/v1.4.0
+sudo rm -rf /opt/microtask/v0.2.0
 ```
 
 ## Backups

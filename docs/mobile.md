@@ -1,33 +1,53 @@
 # Using microtask from your phone
 
-`microtask` stores your tasks and notes as plain Markdown files in a private
-Git repository. Because there is no central microtask server, you have four
-ways to use it from your phone, ordered from easiest setup to most capable:
+Your cards live in a private Git repository, so anything that can reach that
+repository can work with them. There are four ways to use microtask from your
+phone, from least to most setup:
 
-1. **[Claude or Codex Cloud mobile apps via GitHub](#claude-or-codex-cloud-mobile-apps-no-server)** *(easiest, recommended)*: link your private repo with zero server setup.
-2. **[ChatGPT GitHub connector + `mt import-github`](#chatgpt-github-connector--mt-import-github)**: fast issue-based capture from ChatGPT chat, imported locally later.
-3. **[`mt web` over Tailscale](#mt-web-over-tailscale)**: the responsive web board served privately from your own machine.
-4. **[Always-on Telegram bot with Claude Code](#telegram-bot-with-claude-code-on-a-raspberry-pi-or-vps)**: fast two-way chat, voice notes, direct `./mt` execution, and `mt sync` on a Raspberry Pi or small VPS.
-
-The first two options work on a clone of your private repository and expect
-the microtask app files in it. With the layout where the app and `workspace/`
-are separate, that repository holds only your cards, settings and drafts. If
-you rely on options 1 or 2, keep the app files in the repository as before (an
-old-style workspace), or add them yourself, until this guide covers the new
-layout. Options 3 and 4 run on a machine where microtask is installed.
+1. **[Claude or Codex cloud apps](#claude-or-codex-cloud-mobile-apps-no-server)**:
+   an agent in the cloud works on your private repository.
+2. **[ChatGPT with the GitHub connector](#chatgpt-github-connector--mt-import-github)**:
+   capture issues from ChatGPT and import them on your computer.
+3. **[`mt web` over Tailscale](#mt-web-over-tailscale)**: the dashboard from
+   your own machine, in your phone's browser.
+4. **[A Telegram bot with Claude Code](#telegram-bot-with-claude-code-on-a-raspberry-pi-or-vps)**:
+   chat and voice notes with an agent on a Raspberry Pi or small server.
 
 ---
 
 ## Claude or Codex Cloud mobile apps (no server)
 
-The easiest way to use `microtask` from your phone is to connect your **private
-GitHub repository** directly to:
+Connect your **private GitHub repository** to one of these apps:
 
 * **ChatGPT mobile app (Codex Cloud)** via the GitHub connector
 * **Claude mobile app** (Code tab / `claude.ai/code`) via the Claude GitHub App
 
-When you send a prompt from your phone, the service boots an isolated cloud
-container, clones your repo, reads [AGENTS.md](../AGENTS.md), and runs `./mt`.
+When you send a prompt from your phone, the service starts a container, clones
+your repository, and reads its `AGENTS.md`. Your private repository holds only
+your cards, so add an `AGENTS.md` to it that tells the agent to install
+microtask first:
+
+````markdown
+# Tasks
+
+This repository holds microtask cards. Before working with them, install
+microtask for this session:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash -s -- --yes --no-path --dir /tmp/microtask --workspace "$PWD"
+```
+
+Then read `/tmp/microtask/AGENTS.md` and follow it. Run every command from
+this repository's root as `/tmp/microtask/mt -R . COMMAND`.
+````
+
+Commit it once, from your computer:
+
+```sh
+mt run git add AGENTS.md
+mt run git commit -m "Add instructions for cloud agents"
+mt sync
+```
 
 **Trade-offs compared to a self-hosted bot:**
 
@@ -43,19 +63,18 @@ container, clones your repo, reads [AGENTS.md](../AGENTS.md), and runs `./mt`.
 
 ## ChatGPT GitHub connector + `mt import-github`
 
-If you want fast capture from the ChatGPT mobile app without waiting for a
-Codex Cloud container or merging pull requests, set up a dedicated **ChatGPT
-Project** with the **GitHub connector** enabled to file capture issues, then
-import them on your computer:
+For quick capture from the ChatGPT app, without a cloud container or pull
+requests, let a ChatGPT Project file GitHub issues, then import them on your
+computer:
 
 1. **Create a ChatGPT Project:** Enable the GitHub connector, link it to your
-   private repository containing your cards, and add these **Project
-   instructions** (replacing `<owner>/<repo>` with that repository):
+   private repository, and create a `microtask-capture` label there. Add these
+   **Project instructions**, replacing `<owner>/<repo>` with that repository:
 
    ```text
    Use the GitHub connector to create issues in `<owner>/<repo>` (unless the user specifies another repo).
-   Before creating an issue, read `.github/ISSUE_CAPTURE.md` and follow its rules, and check `.github/ISSUE_TEMPLATE/capture.yml` to confirm the capture label. Ignore local `mt` CLI instructions—you are only creating the GitHub issue for later import.
-   Use relevant skills in `.agents/skills/` to format content (for example, follow `mt-paper-review` for a paper link and put the review in the issue body instead of running `./mt`).
+   Before creating an issue, read https://github.com/pablormier/microtask/blob/main/.github/ISSUE_CAPTURE.md and follow its rules. Label every capture issue `microtask-capture`. You only create the GitHub issue; it is imported later.
+   For a paper link, follow https://github.com/pablormier/microtask/blob/main/.agents/skills/mt-paper-review/SKILL.md and put the review in the issue body.
    Always write the issue title and body in English, and ask the user to confirm the proposed title, body, and label before creating the issue.
    ```
 
@@ -67,13 +86,12 @@ import them on your computer:
    [GitHub CLI](https://cli.github.com/) `gh` authenticated for your repo):
 
    ```sh
-   ./mt import-github
+   mt import-github
    ```
 
-   This fetches all open `microtask-capture` issues, saves each one as a
-   validated note marked `needs_review` in `cards/`, closes the imported
-   issues, and leaves the notes ready to triage (`./mt list --needs-review` or
-   `/mt-triage`). See [.github/ISSUE_CAPTURE.md](../.github/ISSUE_CAPTURE.md)
+   This saves each open `microtask-capture` issue as a note marked
+   `needs_review`, then closes the issue. Triage the notes with
+   `mt list --needs-review` or the `mt-triage` skill. See [.github/ISSUE_CAPTURE.md](../.github/ISSUE_CAPTURE.md)
    for the full capture and triage rules.
 
 ---
@@ -94,8 +112,8 @@ To access it securely from your phone:
    ```
 
 2. Open `http://<YOUR_TAILSCALE_IP>:8080` in your phone's browser and use
-   **Add to Home Screen** for quick access. `mt web` automatically syncs edits
-   with `origin` in the background.
+   **Add to Home Screen** for quick access. With `rules.auto_sync: true`,
+   `mt web` syncs your edits with `origin` in the background.
 
 `mt web` answers only requests whose `Host` header is `localhost`, `127.0.0.1`,
 `[::1]` or the `--host` address, each with the server's port. Anything else gets
@@ -112,11 +130,10 @@ the backend address as `Host`.
 
 ## Telegram bot with Claude Code on a Raspberry Pi or VPS
 
-If you want instant two-way chat, voice notes, and direct `mt sync` without
-cloud container startup latency or PR merges, you can run Claude Code's
-official Telegram channel plugin on an always-on Linux machine (such as a
-Raspberry Pi or a \$4/mo VPS). Claude reads [AGENTS.md](../AGENTS.md) and
-`.agents/skills/`, runs `./mt`, and syncs via `mt sync`.
+Claude Code's Telegram plugin, running on an always-on Linux machine such as a
+Raspberry Pi or a small VPS, gives you chat and voice notes with an agent that
+answers right away and can run `mt sync` itself. Claude reads
+[AGENTS.md](../AGENTS.md) and the skills in the app folder and runs `./mt`.
 
 ### 1. Server prerequisites
 

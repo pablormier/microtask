@@ -1,6 +1,6 @@
 # Hosting kit
 
-Files for running microtask for a few people on one Linux server. The full
+Files for hosting microtask dashboards on a Linux server, one per person. The full
 guide is in [docs/hosting.md](../docs/hosting.md).
 
 - `systemd/mt-web@.service`: one dashboard per user

@@ -1,6 +1,6 @@
 # Dashboard JavaScript
 
-`tools/taskweb.py::load_js` defines script order and embeds the scripts in the
+`tools/web_assets.py::load_js` defines script order and embeds the scripts in the
 local server dashboard. JavaScript behavior
 tests use that same loader.
 
@@ -11,7 +11,7 @@ tests use that same loader.
 - `draft_store.js`: workspace draft persistence for new-card drafts,
   `content_hash` guards and per-ID autosave queues. Each instance owns
   its draft list; timers and pending requests stay private in its closure.
-- `capture_composer.js`: capture input, dirty/recovery state, validation and
+- `capture_composer.js`: capture input, dirty and conflict state, validation and
   save/discard workflows. It receives the shared draft store and narrow board
   adapters when an action runs.
 - `picker.js`: state and keyboard navigation for searchable option lists, shared
@@ -24,9 +24,20 @@ tests use that same loader.
 - `content_editor.js`: inline content input, local persistence, preview, save
   state and editor errors.
 - `filters_query.js`: toolbar filter facets, URL query sync, and collection query builder.
-- `draft_coordinator.js`: draft store wiring, editor context adapters, and draft recovery orchestration.
+- `draft_coordinator.js`: draft store wiring and the context objects passed to the composer and the card editor.
 - `card_detail.js`: card detail selection, history navigation, preview rendering, hover popovers, and dialog focus trapping.
-- `board.js`: Alpine `taskBoard()` component, lifecycle, polling, grouping, and payload application.
+- `editor_surface.js`: Zen mode, preview and @mention state shared by the
+  composer and the content editor.
+- `mention_autocomplete.js`: @reference and keyword autocomplete for card text.
+- `quick_search.js`: the quick search palette.
+- `attachments.js`: paste, drop and file-picker uploads, and inserting the
+  Markdown link.
+- `board_api.js`: the JSON request helper and the board's API actions,
+  including attachment uploads.
+- `board_views.js`: board grouping, formatting, and timer, deadline and focus
+  helpers.
+- `board.js`: Alpine `taskBoard()` component, lifecycle, polling, and payload
+  application. It assembles the API and view helpers.
 
 Keep policy and clock access at the component boundary. Metadata initialization
 and reset share `normalizeMetadataValue`; it copies tags so editors cannot
@@ -35,9 +46,9 @@ mutate the source card through a shared array.
 `createDraftStore` receives live workspace context, target lookup and capture
 metadata adapters. Its status, warning and save callbacks report persistence
 results; they do not open editors or apply card payloads. Editors use `schedule`,
-`save`, `flush`, `finish`, `discard` and `recover`; the board applies successful
+`save`, `flush`, `finish`, `discard` and `saveAsNew`; the board applies successful
 finish responses through `applyPayload` and owns selection reconciliation.
-`finishContentDraft` rebases pending properties only when their baseline matches
+`saveBodyKeepingProperties` rebases pending properties only when their baseline matches
 the server's saved properties; the content editor simply returns its save result. Keep
 draft storage and request bookkeeping out of the board. Store tests run without
 the DOM or Alpine; UI tests use the complete assembled scripts.

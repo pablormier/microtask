@@ -22,7 +22,7 @@ Prefer small, explicit code and fewer concepts.
   - `card_render.py`: card document rendering, body editing, metadata parsing/validation, and topic tree helpers.
   - `focus.py`: read-only focus ranking and context helpers.
   - `timer_ops.py`: timer lifecycle and time-session helpers.
-  - `operations.py`: the core operations API (`op_*`) — **the only write path** for cards, timers, focus, and drafts.
+  - `operations.py`: the core operations API (`op_*`), **the only write path** for cards, timers, focus, and drafts.
   - `cli.py`: CLI argument parsing, formatting, and interactive commands.
 - Do not spawn a subprocess unless it runs another program or another version
   (`git`, `gh`, the user's editor, browser, `mt update`, `install.sh`, or

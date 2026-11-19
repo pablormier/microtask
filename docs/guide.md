@@ -73,7 +73,7 @@ accept several values (`--status active --status doing`). The fields are
 `--kind`, `--status`, `--priority`, `--task-type`, `--project`, `--topic`, `--tag`,
 `--needs-review`, `--triage`, the date ranges `--created-*`, `--updated-*`,
 `--completed-*`, and `--due-*` (with `since` and `before`), `--due MODE`
-(`overdue`, `today`, `week`, `any`, `none`), `--archived`, and `--hidden`. `search`
+(`overdue`, `today`, `week`, `next` for overdue plus week, `any`, `none`), `--archived`, and `--hidden`. `search`
 also takes words, with `--and`, `--or`, or `--fuzzy`. Sorting,
 limits, and `--json` belong to `list` and `search`; `--full` prints whole cards
 as `mt read --json` does.
@@ -152,8 +152,8 @@ mt done @4e91a7c2 --note "Appointment booked"
 `mt web` opens a local dashboard in your browser until you press Ctrl+C. It
 shows a board you can group by status, priority, project, topic, tag, and more, plus Focus, Notes, Drafts,
 Archive, and Deadlines views. You can edit card content and properties, comment,
-and track time there. It edits the same files as the CLI, and nothing leaves
-your machine. `mt show REF` opens a read-only preview of a single card, as one
+and track time there. It edits the same files as the CLI and runs on your
+machine. `mt show REF` opens a read-only preview of a single card, as one
 self-contained HTML file that works offline. If you run `mt update` while a
 dashboard is open, the running server keeps using the code
 it started with and shows a notice on the board; restart `mt web` to pick up the
@@ -239,44 +239,30 @@ attachments with the cards. `mt validate` reports broken attachment links
 
 ## Workspaces
 
-A **workspace** is one folder (normally one Git repository) holding your
-`cards/`, `drafts/`, and settings. By default it is `workspace/` inside the app
-folder, created by the installer or `./mt init`. An installed `mt` always uses that workspace,
-regardless of your current directory. To work with another one:
+A **workspace** is the folder that holds your `cards/`, `drafts/`,
+`attachments/` and settings, usually as its own Git repository. Plain `mt`
+uses `workspace/` in the app folder, created by the installer or `./mt init`,
+from whatever folder you run it in.
+
+To keep a project's cards apart from yours, or to share them with other people,
+create a second workspace folder and give it a short name on this machine:
 
 ```sh
-mt repo add work "$HOME/work-tasks"   # short alias, stored on this machine
-mt -R work list                       # -R goes before the command
-```
-
-A project's cards can live in one of three places:
-
-- **Your workspace**, filed under the project with `--project myapp`. Nothing
-  to set up, and you see them next to your own cards.
-- **A second workspace folder**: its own cards, settings, and Git repository,
-  run by the `mt` you already have. Use it to keep a project's cards apart from
-  yours, or to share them with other people.
-- **A second copy of microtask** with its own workspace. Use it when the
-  project needs its own microtask version.
-
-Create the second or third kind outside the project. Plain `mt` keeps running
-your personal workspace:
-
-```sh
-mt init ~/work/pkg-tasks --data                                   # workspace folder, offline, with Git
-mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # and shares it with mt sync
-mt init ~/work/pkg-tasks                                          # second copy, downloads microtask
-mt init ~/work/pkg-tasks --local                                  # second copy of your mt, offline
+mt init ~/work/pkg-tasks --data                                   # with Git, no remote
+mt init ~/work/pkg-tasks git@github.com:YOU/pkg-tasks.git --data  # shared with mt sync
 mt repo add pkg ~/work/pkg-tasks
-mt -R pkg add "First task"
+mt -R pkg add "First task"                                        # -R goes before the command
 ```
 
-A workspace folder is any folder with `cards/` and `settings.yaml` and no
-`mt` of its own. Each machine that uses it needs `mt` and its own
-`mt repo add`. A second copy from the internet keeps its workspace in its own
-`workspace/` folder and updates with its own `mt update`. `--local` copies the
-app and your settings from the `mt` you run, never your cards, drafts, or local
-state, and has no Git until you add it.
+Your one `mt` runs every workspace folder, so `mt update` keeps them all
+current. Each machine that uses a folder needs `mt` and its own `mt repo add`.
+For cards that only need grouping, filing them in your own workspace with
+`--project NAME` is simpler.
+
+`mt init DIRECTORY` without `--data` installs a separate copy of microtask with
+its own workspace, for a project that needs to stay on its own version.
+`--local` makes that copy from your installed `mt` without downloading
+anything. See `mt init --help`.
 
 ### A default workspace folder
 
@@ -322,9 +308,10 @@ are never changed.
 ## Settings
 
 Workspace settings live in `settings.yaml` and are synced with your cards.
-Machine-specific overrides go in `settings.local.yaml`, which is not synced.
-`mt settings` shows the effective values, including the defaults for new cards,
-the work-in-progress limit, and `rules.auto_sync`.
+Overrides for one machine go in `settings.local.yaml`, which is not synced.
+`mt settings` shows the effective values, such as the defaults for new cards,
+the limit on tasks in progress, `rules.auto_sync`, and
+`rules.max_attachment_mb`.
 
 For optional calendar context in focus and weekly planning, see
 [Calendar setup](calendar.md). Your agent app supplies calendar access;
