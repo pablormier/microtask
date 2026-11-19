@@ -95,8 +95,6 @@ UNSYNCED_ACTIONS = {"/api/draft-save", "/api/draft-discard"}
 def item_by_ref(ws: Workspace, ref: object) -> dict | None:
     if not isinstance(ref, str) or not store.SHORT_REF_RE.fullmatch(ref):
         return None
-    store.pin_demo_state(ws)
-    store.maybe_seed_demo(ws)
     items = store.items_by_ref(ref, ws)
     item = items[0] if len(items) == 1 and f"@{items[0].short_ref}" == ref else None
     return task_to_dict(item, ws=ws, detail=False) if item else None

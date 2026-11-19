@@ -53,9 +53,7 @@ from store import (
     CardInputError,
     ReferenceIndex,
     _ws,
-    active_root,
     current_username,
-    demo_active,
     discover,
     done_window,
     is_due_value,
@@ -532,7 +530,7 @@ def _bulk_preview(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
-    base = active_root(resolved)
+    base = resolved.root
     matching = select_cards(discover(ws=resolved), query)
     if not matching:
         print("error: no cards match the bulk-edit selection", file=sys.stderr)
@@ -561,7 +559,7 @@ def _bulk_preview(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     plan = {
         "version": 1,
         "workspace": str(resolved.root.resolve()),
-        "data_root": "demo" if demo_active(resolved) else "workspace",
+        "data_root": "workspace",
         "assignments": assignments,
         "query": card_query.query_to_mapping(query),
         "selected": len(records),
@@ -610,11 +608,8 @@ def _read_bulk_plan(path_text: str, ws: Workspace | None = None, *, raw_text: st
         raise ValueError("bulk edit plan has invalid workspace metadata")
     if plan["workspace"] != str(resolved.root.resolve()):
         raise ValueError("bulk edit plan belongs to a different workspace")
-    if plan["data_root"] not in {"demo", "workspace"}:
+    if plan["data_root"] != "workspace":
         raise ValueError("bulk edit plan has an invalid data root")
-    expected_root = "demo" if demo_active(resolved) else "workspace"
-    if plan["data_root"] != expected_root:
-        raise ValueError("workspace data changed since preview; create a new bulk edit plan")
     assignments_raw = plan["assignments"]
     if not isinstance(assignments_raw, dict):
         raise ValueError("bulk edit plan assignments must be an object")

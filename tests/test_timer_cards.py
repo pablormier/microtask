@@ -31,6 +31,7 @@ import store  # noqa: E402
 import support  # noqa: E402
 import taskweb  # noqa: E402
 import transaction  # noqa: E402
+import workspace as workspace_module  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 SESSION = "0123456789abcdef0123456789abcdef"
@@ -298,17 +299,6 @@ class TimerCardTests(unittest.TestCase):
         self.assertEqual([entry["session_id"] for entry in self.entries(task)], [SESSION])
         self.assertNotIn("timer", store.Card.read(task).frontmatter)
 
-    def test_a_workspace_with_a_pending_timer_file_stays_out_of_demo_mode(self) -> None:
-        app = self.root.parent / "app"
-        (app / "examples").mkdir(parents=True)
-        (app / "settings.yaml").write_text((SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
-                                            encoding="utf-8")
-        ws = Workspace.at(app, app_root=app)
-        self.assertTrue(ws.pin_demo())
-        (app / ".mt").mkdir()
-        (app / ".mt" / "time-running").write_text("{}", encoding="utf-8")
-        self.assertFalse(Workspace.at(app, app_root=app).pin_demo())
-
     # Concurrency and atomicity
 
     def test_simultaneous_starts_by_one_person_leave_one_running_timer(self) -> None:
@@ -412,17 +402,14 @@ class TimerCardTests(unittest.TestCase):
         self.assertIn("was not imported", err.getvalue())
         self.assertEqual(json.loads((self.root / ".mt" / "time-running.migrated").read_text(encoding="utf-8")), legacy)
 
-    def test_a_demo_workspaces_old_timer_file_is_imported_onto_the_demo_card(self) -> None:
+    def test_a_seeded_demo_workspaces_old_timer_file_is_imported_onto_the_demo_card(self) -> None:
         app = self.root.parent / "app"
-        shutil.copytree(SOURCE_ROOT / "examples", app / "examples")
-        (app / "settings.yaml").write_text((SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
-                                            encoding="utf-8")
-        ws = Workspace.at(app, app_root=app, environ={**os.environ, "MT_USERNAME": "tester"})
-        self.assertTrue(ws.pin_demo())
-        ws.maybe_seed_demo()
+        ws = workspace_module.seed_demo_workspace(app, app_root=SOURCE_ROOT)
+        ws = Workspace.at(app, app_root=SOURCE_ROOT, environ={**os.environ, "MT_USERNAME": "tester"})
         card = next(card for card in store.discover("task", ws=ws) if card.frontmatter.get("status") != "done")
         epoch = int(datetime(2026, 6, 15, 9, 0, 0).timestamp())
-        state = app / ".mt" / "demo" / "time-running"
+        state = app / ".mt" / "time-running"
+        state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(json.dumps({store.card_task_id(card): {
             "session_id": SESSION, "start": store.local_stamp(epoch), "start_epoch": epoch, "by": "tester"}}),
             encoding="utf-8")

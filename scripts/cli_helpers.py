@@ -21,7 +21,6 @@ from store import (
     _resolve_unique_card,
     _ws,
     atomic_write,
-    demo_active,
 )
 from transaction import (
     _run_auto_sync,
@@ -358,12 +357,6 @@ def show_workspace(*, command: str | None = None, ws: Workspace | None = None) -
     print(f"Workspace: {resolved.root}", file=sys.stderr)
     if not resolved.in_app:
         print(f"Application: {resolved.app_root}", file=sys.stderr)
-    if demo_active(resolved) and command not in {"add", "note"}:
-        print(
-            "Demo mode: bundled example tasks and notes — every command works on them. "
-            'Create your first item (e.g. ./mt add "my task") to start your own workspace.',
-            file=sys.stderr,
-        )
 
 
 def allow_host_name(value: str) -> str:

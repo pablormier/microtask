@@ -14,7 +14,7 @@ Prefer small, explicit code and fewer concepts.
   headings, encode capture wrappers, or introduce alternate runtime
   representations.
 - Module ownership in `scripts/`:
-  - `workspace.py`: workspace resolution (`MT_WORKSPACE`, `workspace/`, an old-style root), creating a workspace from `templates/` (`mt init`, the installer), demo mode, and `Workspace`.
+  - `workspace.py`: workspace resolution (`MT_WORKSPACE`, `workspace/`, an old-style root), creating a workspace from `templates/` (`mt init`, the installer), demo seeding (`seed_demo_workspace`), and `Workspace`.
   - `update.py` and `migrate.py`: `mt update` (release tarballs, no Git) and `mt migrate` (old-style workspace into `workspace/`).
   - `store.py`: card reading/discovery, settings, timers, focus state, and typed `TaskError`s.
   - `validation.py`: card/workspace validation (`audit_workspace`, `check_changes`, and `format_audit_report`).

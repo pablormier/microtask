@@ -128,9 +128,9 @@ class ResolutionTests(unittest.TestCase):
         self.assertFalse((self.app / ".mt").exists())
         self.assertEqual(sorted(path.name for path in self.app.iterdir() if path.name.startswith(".mt")), [])
 
-    def test_a_new_workspace_shows_the_demo_until_the_first_card(self) -> None:
+    def test_a_new_workspace_starts_empty_until_the_first_card(self) -> None:
         self.assertEqual(self.init().returncode, 0)
-        self.assertGreater(len(self.titles()), 3)
+        self.assertEqual(self.titles(), [])
         self.assertEqual(self.mt("add", "Mine").returncode, 0)
         self.assertEqual(self.titles(), ["Mine"])
 

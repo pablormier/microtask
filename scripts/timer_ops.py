@@ -5,7 +5,6 @@ import card_format
 from store import (
     Card,
     _ws,
-    active_root,
     now_stamp,
     time_entry_from_timer,
     time_session_for,
@@ -57,7 +56,7 @@ def save_time_session(
     original = task.raw.encode("utf-8")
     updated = append_time_entry(task.raw, entry)
     updated = card_format.replace_property(updated, "updated", now_stamp())
-    base = active_root(resolved)
+    base = resolved.root
     relative = str(task.path.relative_to(base))
     try:
         transaction.apply_item_transaction(

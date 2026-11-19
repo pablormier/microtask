@@ -251,45 +251,6 @@ class AttachmentCoreTests(unittest.TestCase):
             ).stdout.strip()
             self.assertEqual(msg, "Update 2 attachments")
 
-    def test_demo_to_real_transition_preserves_composer_attachment(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "cards").mkdir(parents=True, exist_ok=True)
-            (root / "examples" / "cards").mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ROOT / "templates" / "settings.yaml", root / "settings.yaml")
-            ws = Workspace.at(root, app_root=root)
-            self.assertTrue(ws.demo_active())
-
-            # Demo card edit stays isolated under .mt/demo/attachments/.
-            demo_att = operations.op_store_attachment(
-                ws, PNG_1X1, filename="demo-shot.png", content_type="image/png", real=False, sync=False
-            )
-            self.assertTrue((ws.demo_root() / "attachments" / str(demo_att.receipt["filename"])).is_file())
-            self.assertFalse((root / "attachments" / str(demo_att.receipt["filename"])).exists())
-
-            # Capture composer upload goes to real attachments/ even while demo mode is active.
-            real_att = operations.op_store_attachment(
-                ws, PNG_1X1 + b"real", filename="first-card.png", content_type="image/png", real=True, sync=False
-            )
-            real_name = str(real_att.receipt["filename"])
-            self.assertTrue((root / "attachments" / real_name).is_file())
-            self.assertIsNotNone(attachments.resolve_attachment_path(ws.real_attachments_root(), real_name))
-
-            # Creating the first real card ends demo mode, and the attachment resolves in real attachments/.
-            with transaction.time_mutation_lock(ws):
-                operations.create_card(
-                    "task",
-                    f"First real card with {real_att.receipt['markdown']}",
-                    title="First real card",
-                    ws=ws,
-                )
-            ws_after = ws.for_operation()
-            self.assertFalse(ws_after.demo_active())
-            self.assertIsNotNone(attachments.resolve_attachment_path(ws_after.attachments_root(), real_name))
-            report = validation.audit_workspace(root, policy_parser.load_policy(root))
-            self.assertEqual(report.errors, [])
-            self.assertEqual(report.warnings, [])
-
     def test_content_disposition_ascii_and_unicode(self) -> None:
         ascii_header = attachments.content_disposition_attachment("report.zip")
         self.assertEqual(ascii_header, 'attachment; filename="report.zip"')

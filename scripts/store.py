@@ -160,37 +160,6 @@ def item_state_suffix(item: "Card") -> str:
 
 
 
-def real_cards_root(ws: Workspace | None = None) -> Path:
-    return _ws(ws).real_cards_root()
-
-
-
-def demo_root(ws: Workspace | None = None) -> Path:
-    return _ws(ws).demo_root()
-
-
-
-def active_root(ws: Workspace | None = None) -> Path:
-    return _ws(ws).active_root()
-
-
-
-def pin_demo_state(ws: Workspace | None = None) -> None:
-    """Pin the demo decision once per operation so mid-command mutations stay consistent."""
-    _ws(ws).pin_demo()
-
-
-
-def demo_active(ws: Workspace | None = None) -> bool:
-    return _ws(ws).demo_active()
-
-
-
-def maybe_seed_demo(ws: Workspace | None = None) -> None:
-    _ws(ws).maybe_seed_demo()
-
-
-
 def cards_root(ws: Workspace | None = None) -> Path:
     return _ws(ws).cards_root()
 
@@ -699,7 +668,7 @@ class CardInputError(InputError):
 
 def card_by_capture_id(capture_id: str, ws: Workspace | None = None) -> Card | None:
     # Search both kinds, including archived/hidden cards.
-    for card in read_cards(real_cards_root(ws), ws=ws):
+    for card in read_cards(cards_root(ws), ws=ws):
         if card.frontmatter.get("capture_id") == capture_id:
             return card
     return None

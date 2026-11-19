@@ -502,6 +502,7 @@ if [[ -n "$installed_now" ]]; then headline="installed"; else headline="is set u
 printf '\nmicrotask%s %s\n' "${version:+ $version}" "$headline"
 printf '  app:        %s\n' "$(shorten "$app_dir")"
 printf '  workspace:  %s\n' "$(shorten "$workspace_dir")"
+printf '  demo:       mt demo (try it with example cards)\n'
 printf '  update:     mt update\n'
 if [[ -n "$legacy_app" ]]; then
   printf 'This folder keeps your cards next to the application. Run mt migrate to move them into workspace/.\n'

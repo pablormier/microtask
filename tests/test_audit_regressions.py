@@ -35,7 +35,7 @@ class AuditRegressionTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.ws_dir = Path(self.tmp.name) / "ws"
         create_workspace(self.ws_dir)
-        self.ws = Workspace.at(self.ws_dir, demo=False)
+        self.ws = Workspace.at(self.ws_dir)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -71,7 +71,7 @@ class AuditRegressionTests(unittest.TestCase):
     def test_time_mutation_lock_is_reentrant_and_workspace_scoped(self) -> None:
         ws_b_dir = Path(self.tmp.name) / "ws_b"
         create_workspace(ws_b_dir)
-        ws_b = Workspace.at(ws_b_dir, demo=False)
+        ws_b = Workspace.at(ws_b_dir)
         with transaction.time_mutation_lock(self.ws):
             self.assertTrue(transaction._is_lock_held(self.ws))
             self.assertFalse(transaction._is_lock_held(ws_b))

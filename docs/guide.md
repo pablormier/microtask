@@ -159,17 +159,13 @@ dashboard is open, the running server keeps using the code
 it started with and shows a notice on the board; restart `mt web` to pick up the
 updated version.
 
-On a fresh empty installation, the demo opens on a protein structure ML research
-board. Open **Audit the benchmark split** to try its checklist and follow a
-reference to the split protocol. In **Notes**, look for the AlphaFold paper
-summary and the causal inference course tracker. **Deadlines** shows a mix of
-hard deadlines, a reminder, and a target. The demo sets those dates relative to
-the day it first seeds the cards and keeps them on reopen.
-
-Changes you make in the demo stay until the bundled examples change, for example
-after `mt update`. The next command then rebuilds the demo from the new examples,
-which discards your demo edits. To start the demo over yourself, delete
-`.mt/demo`.
+Run `mt demo` to open a temporary demo workspace seeded with a protein
+structure ML research board. Open **Audit the benchmark split** to try its
+checklist and follow a reference to the split protocol. In **Notes**, look for
+the AlphaFold paper summary and the causal inference course tracker.
+**Deadlines** shows a mix of hard deadlines, a reminder, and a target, with dates
+shifted relative to today. All demo changes are local and deleted automatically
+when you stop `mt demo`.
 
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where

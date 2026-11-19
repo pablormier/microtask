@@ -82,12 +82,14 @@ except ImportError:  # Direct script entry point or file-based test loader.
 
 
 class TaskWebServer(ThreadingHTTPServer):
-    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = ()):
+    def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = (),
+                 *, demo: bool = False):
         super().__init__(address, TaskWebHandler)
         self.allow_hosts = {name.lower() for name in allow_hosts}  # NAME or NAME:PORT, from --allow-host.
         self.requested_host = address[0]  # As given on the command line, which may be a name.
         self.token = token
         self.workspace = workspace
+        self.demo = bool(demo)
         # Parsed cards reused across requests; every read re-checks each file's stat signature.
         self.cache = store.CardCache()
         self.sync = BackgroundSync()
@@ -236,8 +238,6 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "attachment must not be empty"})
             return
         ws = self.server.workspace.for_operation()
-        store.pin_demo_state(ws)
-        store.maybe_seed_demo(ws)
         policy = store.policy(ws)
         max_bytes = attachments.max_attachment_bytes(policy)
         if length > max_bytes:
@@ -254,15 +254,12 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         raw_filename = self.headers.get("X-Filename", "")
         filename = unquote(raw_filename) if raw_filename else ""
         content_type = self.headers.get("Content-Type")
-        scope = (self.headers.get("X-Attachment-Scope") or "").strip().lower()
-        real_workspace = scope == "workspace"
         try:
             result = operations.op_store_attachment(
                 ws,
                 raw_bytes,
                 filename=filename,
                 content_type=content_type,
-                real=real_workspace,
                 sync=False,
             )
         except store.InputError as error:
@@ -292,13 +289,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if url.path.startswith("/attachments/"):
             rel = unquote(url.path[len("/attachments/"):])
             ws = self.server.workspace.for_operation()
-            store.pin_demo_state(ws)
-            store.maybe_seed_demo(ws)
             found = attachments.resolve_attachment_path(ws.attachments_root(), rel)
-            if found is None and ws.demo_active():
-                # Drafts/new cards created from the capture composer live in the real workspace
-                # even while demo mode is active, so serve real attachments too.
-                found = attachments.resolve_attachment_path(ws.real_attachments_root(), rel)
             if found is None:
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             else:
@@ -329,7 +320,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 include = params.pop("include", None)
                 ws = self.server.workspace.for_operation()
                 payload = dashboard_payload(ws, self.server.cache, api_token=self.server.token, include=include,
-                                            query=request_query(ws, params))
+                                            query=request_query(ws, params), demo=self.server.demo)
                 payload["sync_warning"] = self.server.sync.current_warning()
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
@@ -404,9 +395,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             self.server.sync.request(ws)
         if status == HTTPStatus.OK:
             # Actions return receipts; build the queried collection once, after success.
-            # A fresh handle: the write may have ended demo mode.
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
-                                           api_token=self.server.token, query=query, include=body.get("include")),
+                                           api_token=self.server.token, query=query, include=body.get("include"),
+                                           demo=self.server.demo),
                        "sync_warning": self.server.sync.current_warning(),
                        "restart_notice": self.server.restart_notice(),
                        **payload}
@@ -428,10 +419,10 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
 
 
 def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
-                    allow_hosts: Iterable[str] = ()) -> int:
+                    allow_hosts: Iterable[str] = (), demo: bool = False) -> int:
     token = secrets.token_urlsafe(24)
     try:
-        server = TaskWebServer((host, port), token, workspace, allow_hosts)
+        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
@@ -462,6 +453,7 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the local web dashboard.")
     cli_parser.add_web_arguments(parser)
+    parser.add_argument("--demo", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -474,7 +466,8 @@ def main(argv: list[str]) -> int:
         print(f"error: {missing}", file=sys.stderr)
         return 2
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
-                           filters=board_filters(workspace, args), allow_hosts=args.allow_host)
+                           filters=board_filters(workspace, args), allow_hosts=args.allow_host,
+                           demo=bool(args.demo))
 
 
 if __name__ == "__main__":

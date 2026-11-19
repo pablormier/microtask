@@ -8,6 +8,7 @@ import textwrap
 import card_format
 import card_query
 from cli_admin import (
+    command_demo,
     command_import_github,
     command_info,
     command_init,
@@ -194,6 +195,14 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     )
     add_web_arguments(web)
     web.set_defaults(func=command_web)
+
+    demo = sub.add_parser(
+        "demo", help="try microtask in a temporary demo workspace",
+        description="Create a temporary workspace seeded with bundled example cards and open the local "
+                    "web dashboard. All changes are deleted when you stop the server.",
+    )
+    add_web_arguments(demo)
+    demo.set_defaults(func=command_demo)
 
     imported = sub.add_parser("import-github", help="capture open labeled GitHub issues for later review")
     imported.add_argument("--repo", metavar="OWNER/REPO")

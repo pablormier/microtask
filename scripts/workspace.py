@@ -1,23 +1,17 @@
-"""Explicit workspace identity, roots, policy caching, and demo resolution."""
+"""Explicit workspace identity, roots, policy caching, and demo seeding."""
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, timedelta
-import fcntl
-import hashlib
 import os
 from pathlib import Path
 import re
-import shutil
-import tempfile
 
 import policy_parser
 
 
 APP_ROOT = policy_parser.APP_ROOT
 DEMO_DATE_ANCHOR = date(2026, 1, 5)
-# Records which examples/ content the demo was built from, so a changed set rebuilds it.
-DEMO_FINGERPRINT_FILE = ".examples-sha256"
 
 _DETERMINISTIC_POLICY_KEYS = {
     "statuses", "priorities", "types", "due_kinds", "suggested_topics", "suggested_tags",
@@ -25,7 +19,7 @@ _DETERMINISTIC_POLICY_KEYS = {
     "calendar", "lint",
 }
 _DETERMINISTIC_RULE_KEYS = {
-    "auto_sync", "done_window", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
+    "auto_sync", "done_window", "max_doing_tasks", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
     "allow_public_origin", "max_attachment_mb",
 }
@@ -182,25 +176,6 @@ def _example_files(examples: Path) -> list[tuple[Path, Path]]:
     return files
 
 
-def _examples_fingerprint(files: list[tuple[Path, Path]]) -> str:
-    digest = hashlib.sha256()
-    for relative, source in files:
-        content = source.read_bytes()
-        digest.update(f"{relative.as_posix()}\0{len(content)}\0".encode("utf-8"))
-        digest.update(content)
-    return digest.hexdigest()
-
-
-def _demo_fingerprint(demo: Path) -> str | None:
-    """The examples fingerprint the demo was built from; None for a missing or pre-fingerprint demo."""
-    if not (demo / "cards").is_dir():
-        return None
-    try:
-        return (demo / DEMO_FINGERPRINT_FILE).read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-
-
 def rebase_demo_dates(text: str) -> str:
     offset = (date.today() - DEMO_DATE_ANCHOR).days
     if offset == 0:
@@ -210,6 +185,32 @@ def rebase_demo_dates(text: str) -> str:
         lambda match: _shift_demo_date(match, offset),
         text,
     )
+
+
+_DEMO_UNSET_ENV = ("MT_WORKSPACE", "MT_PROJECT", "MT_TOPIC")
+
+
+def demo_environ() -> dict[str, str]:
+    """The shell environment without the variables that select a workspace or narrow its cards."""
+    return {key: value for key, value in os.environ.items() if key not in _DEMO_UNSET_ENV}
+
+
+def seed_demo_workspace(target: Path | str, *, app_root: Path = APP_ROOT) -> Workspace:
+    """Create a temporary demo workspace seeded from examples/ with auto_sync disabled."""
+    root = Path(target)
+    resolved_app = Path(app_root)
+    create_workspace(root, app_root=resolved_app)
+    (root / "attachments").mkdir(exist_ok=True)
+    # Keep demo sessions local-only regardless of template defaults.
+    (root / LOCAL_SETTINGS_FILE).write_text("rules:\n  auto_sync: false\n", encoding="utf-8")
+    for relative, source in _example_files(resolved_app / "examples"):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.suffix == ".md":
+            destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
+        else:
+            destination.write_bytes(source.read_bytes())
+    return Workspace.at(root, app_root=resolved_app, environ=demo_environ())
 
 
 def _stat_signature(path: Path) -> tuple[int, int, int, int] | None:
@@ -233,7 +234,7 @@ class PolicyCache:
 
 
 class Workspace:
-    """Explicit workspace context replacing module-level REPO_ROOT/_DEMO_STATE globals."""
+    """Explicit workspace context replacing module-level REPO_ROOT globals."""
 
     def __init__(
         self,
@@ -241,13 +242,11 @@ class Workspace:
         *,
         app_root: Path = APP_ROOT,
         environ: Mapping[str, str] | None = None,
-        demo: bool | None = None,
         policy_cache: PolicyCache | None = None,
     ) -> None:
         self.root = Path(root)
         self.app_root = Path(app_root)
         self.environ = dict(os.environ if environ is None else environ)
-        self._demo_state: bool | None = demo
         self._policy_cache = policy_cache if policy_cache is not None else PolicyCache()
 
     @classmethod
@@ -257,13 +256,11 @@ class Workspace:
         *,
         app_root: Path | None = None,
         environ: Mapping[str, str] | None = None,
-        demo: bool | None = None,
     ) -> Workspace:
         return cls(
             Path(path),
             app_root=APP_ROOT if app_root is None else Path(app_root),
             environ=environ,
-            demo=demo,
         )
 
     @classmethod
@@ -278,26 +275,13 @@ class Workspace:
         return cls(resolve_workspace_root(env, app_root=resolved_app), app_root=resolved_app, environ=env)
 
     def for_operation(self) -> Workspace:
-        """Return a fresh Workspace handle that resolves demo mode per operation and shares the policy cache."""
-        return Workspace(self.root, app_root=self.app_root, environ=self.environ, demo=None,
-                         policy_cache=self._policy_cache)
+        """Return a Workspace handle sharing the policy cache."""
+        return Workspace(self.root, app_root=self.app_root, environ=self.environ, policy_cache=self._policy_cache)
 
     @property
     def in_app(self) -> bool:
         """The workspace is the application's own: its workspace/ folder, or an old-style root."""
         return self.root.resolve() in (self.app_root.resolve(), default_workspace_path(self.app_root).resolve())
-
-    def real_cards_root(self) -> Path:
-        return self.root / "cards"
-
-    def real_attachments_root(self) -> Path:
-        return self.root / "attachments"
-
-    def demo_root(self) -> Path:
-        return self.root / ".mt" / "demo"
-
-    def is_empty(self) -> bool:
-        return not any(self.real_cards_root().glob("*.md"))
 
     def policy(self) -> dict:
         shared, local = policy_parser.settings_paths(self.root)
@@ -319,103 +303,18 @@ class Workspace:
     def open_statuses(self) -> list[str]:
         return [name for name in self.statuses() if name != "done"]
 
-    def pin_demo(self) -> bool:
-        """Pin the demo decision so mid-command mutations stay consistent.
-
-        A running timer lives on a real card, and a workspace with cards is not
-        empty, so only a legacy timer file not yet imported keeps it real.
-        """
-        enabled = self.policy().get("rules", {}).get("demo_workspace", True)
-        self._demo_state = bool(
-            enabled
-            and self.in_app
-            and (self.app_root / "examples").is_dir()
-            and self.is_empty()
-            and not self.real_legacy_timer_path().exists()
-        )
-        return self._demo_state
-
-    def demo_active(self) -> bool:
-        if self._demo_state is None:
-            return self.pin_demo()
-        return self._demo_state
-
-    def maybe_seed_demo(self) -> None:
-        """Build the demo from examples/, and rebuild it when examples/ has changed since.
-
-        Demo edits survive until the examples change (for example after `mt update`).
-        The new demo is built beside the old one and swapped in, under a demo-only lock:
-        callers may already hold the mutation lock, so taking it here could deadlock.
-        """
-        if not self.demo_active():
-            return
-        demo = self.demo_root()
-        examples = self.app_root / "examples"
-        files = _example_files(examples)
-        fingerprint = _examples_fingerprint(files)
-        if _demo_fingerprint(demo) == fingerprint:
-            return
-        demo.parent.mkdir(parents=True, exist_ok=True)
-        with (demo.parent / "demo.lock").open("a+") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                if _demo_fingerprint(demo) == fingerprint:
-                    return  # Another process rebuilt it while this one waited.
-                staging = Path(tempfile.mkdtemp(prefix="demo-new-", dir=demo.parent))
-                retired = None
-                try:
-                    for relative, source in files:
-                        destination = staging / relative
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        if source.suffix == ".md":
-                            text = rebase_demo_dates(source.read_text(encoding="utf-8"))
-                            destination.write_text(text, encoding="utf-8")
-                        else:
-                            # Attachments are copied byte for byte; only card text has its dates rebased.
-                            destination.write_bytes(source.read_bytes())
-                    (staging / "cards").mkdir(exist_ok=True)
-                    (staging / DEMO_FINGERPRINT_FILE).write_text(fingerprint + "\n", encoding="utf-8")
-                    if demo.exists():
-                        retired = Path(tempfile.mkdtemp(prefix="demo-old-", dir=demo.parent))
-                        os.replace(demo, retired / "demo")
-                    os.replace(staging, demo)
-                except BaseException:
-                    shutil.rmtree(staging, ignore_errors=True)
-                    if retired is not None and not demo.exists():
-                        os.replace(retired / "demo", demo)  # Put the previous demo back.
-                    raise
-                if retired is not None:
-                    shutil.rmtree(retired, ignore_errors=True)
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-    def active_root(self) -> Path:
-        return self.demo_root() if self.demo_active() else self.root
-
     def cards_root(self) -> Path:
-        if self.demo_active():
-            return self.demo_root() / "cards"
-        return self.real_cards_root()
+        return self.root / "cards"
 
     def attachments_root(self) -> Path:
-        if self.demo_active():
-            return self.demo_root() / "attachments"
-        return self.real_attachments_root()
+        return self.root / "attachments"
 
     def focus_state_path(self) -> Path:
-        if self.demo_active():
-            return self.demo_root() / "focus"
         return self.root / ".mt" / "focus"
 
-    def real_legacy_timer_path(self) -> Path:
-        """Where releases before timers moved onto cards kept real-workspace timers."""
-        return self.root / ".mt" / "time-running"
-
     def legacy_timer_path(self) -> Path:
-        """The old timer file for the active cards (demo mode kept its own); read once, then renamed."""
-        if self.demo_active():
-            return self.demo_root() / "time-running"
-        return self.real_legacy_timer_path()
+        """The old timer file before timers moved onto cards; read once, then renamed."""
+        return self.root / ".mt" / "time-running"
 
     def mutation_lock_path(self) -> Path:
         return self.root / ".mt" / "time-mutation.lock"

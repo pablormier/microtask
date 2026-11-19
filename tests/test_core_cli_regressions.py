@@ -752,7 +752,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
                     {relative: changed},
                     expected={relative: before},
                     source_root=self.root,
-                    ws=tasklib.Workspace.at(self.root, demo=False),
+                    ws=tasklib.Workspace.at(self.root),
                 )
         self.assertEqual(path.read_bytes(), before)
 
@@ -1299,7 +1299,7 @@ class BulkEditTests(unittest.TestCase):
         import cli_cards
         with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
             result = cli_cards._command_bulk_edit_apply(
-                arguments, ws=tasklib.Workspace.at(self.root, demo=False)
+                arguments, ws=tasklib.Workspace.at(self.root)
             )
         self.assertEqual(result, 1)
         self.assertEqual({path: path.read_bytes() for path in before}, before)

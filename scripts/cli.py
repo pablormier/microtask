@@ -36,7 +36,6 @@ from operations import capture_title, render_converted_note  # noqa: F401
 from store import (  # noqa: F401
     Card,
     ReferenceIndex,
-    demo_active,
     foreign_env,
     local_stamp,
     now_stamp,
@@ -57,7 +56,7 @@ from workspace import (  # noqa: F401
 )
 
 # Commands that work on the application or on other folders, so they run without a workspace.
-NO_WORKSPACE_COMMANDS = {"init", "migrate", "repo", "skills", "update"}
+NO_WORKSPACE_COMMANDS = {"demo", "init", "migrate", "repo", "skills", "update"}
 
 
 def main() -> int:
@@ -69,6 +68,7 @@ def main() -> int:
         arguments, repo_selector = consume_repo_selector(arguments)
         # 'mt migrate' is the one command that accepts a workspace folder still named mt-policy.yaml.
         migrating = bool(arguments) and arguments[0] == "migrate"
+        demo_cmd = bool(arguments) and arguments[0] == "demo" and repo_selector is None
         if repo_selector is not None:
             selected_root = resolve_repo_selector(repo_selector, allow_unmigrated=migrating)
             if selected_root != ws.root.resolve():
@@ -79,7 +79,7 @@ def main() -> int:
                 else:
                     executable, env = selected_root / "mt", foreign_env(ws)
                 os.execve(str(executable), [str(executable), *arguments], env)
-        error = None if migrating and is_unmigrated_workspace(ws.root) else workspace_error(ws)
+        error = None if (migrating and is_unmigrated_workspace(ws.root)) or demo_cmd else workspace_error(ws)
         if error:
             raise ValueError(error)
     except ValueError as error:
@@ -149,9 +149,6 @@ def _dispatch(root_parser, args, ws: Workspace) -> int:
         args.text = [args.file_text]
     if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
         root_parser.error("an empty body requires --title")
-    if args.command != "settings":
-        ws.pin_demo()
-        ws.maybe_seed_demo()
     if args.command in {
         "add", "note", "capture", "time", "focus", "list", "search", "read", "show", "edit", "bulk-edit",
         "comment", "move", "convert", "done", "delete", "topic", "sync", "validate", "draft",

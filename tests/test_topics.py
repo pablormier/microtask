@@ -272,7 +272,7 @@ class TopicCliTests(unittest.TestCase):
         arguments = argparse.Namespace(old="learning", new="study", dry_run=False, merge=False, as_json=False)
         with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
             self.assertEqual(
-                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root)),
                 1,
             )
         self.assertEqual({path: path.read_bytes() for path in cards}, before)
@@ -289,7 +289,7 @@ class TopicCliTests(unittest.TestCase):
 
         with patch.object(transaction, "apply_item_transaction", side_effect=concurrent):
             self.assertEqual(
-                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root, demo=False)),
+                tasklib.command_topic_rename(arguments, ws=tasklib.Workspace.at(self.root)),
                 1,
             )
         self.assertIn("edited meanwhile", cards[0].read_text())

@@ -1158,9 +1158,12 @@ view_labels:
     def test_demo_timer_uses_the_card_id_shown_in_the_dashboard(self) -> None:
         for path in [*self.tasks, self.note]:
             path.unlink()
-        shutil.copytree(SOURCE_ROOT / "examples", self.root / "examples")
+        if str(SOURCE_ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(SOURCE_ROOT / "scripts"))
+        import workspace as workspace_module
+        workspace_module.seed_demo_workspace(self.root, app_root=SOURCE_ROOT)
 
-        process, url = self.start_interactive_web()
+        process, url = self.start_interactive_web("--demo")
         try:
             payload = self.get_json(url + "api/items")
             card = self.get_card(url, next(item for item in payload["tasks"] if item["title"] == "Fix per-target metric aggregation"))

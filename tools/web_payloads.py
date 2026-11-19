@@ -153,15 +153,20 @@ def task_to_dict(
 
 
 def dashboard_detail(ws: Workspace, cache: store.CardCache, identity: str) -> dict | None:
-    store.pin_demo_state(ws)
-    store.maybe_seed_demo(ws)
     transaction.migrate_legacy_timers_if_pending(ws)
     items = store.discover(cache=cache, ws=ws)
     item = next((item for item in items if str(item.frontmatter.get("id") or item.path.stem) == identity), None)
     return task_to_dict(item, store.ReferenceIndex(items), ws=ws) if item else None
 
 
-def dashboard_meta(ws: Workspace, *, api_token: str = "", items: list[store.Card] | None = None, cfg: dict | None = None) -> dict:
+def dashboard_meta(
+    ws: Workspace,
+    *,
+    api_token: str = "",
+    items: list[store.Card] | None = None,
+    cfg: dict | None = None,
+    demo: bool = False,
+) -> dict:
     cfg = cfg if cfg is not None else store.policy(ws)
     default_status, default_priority, default_type = operations.task_defaults(cfg)
     statuses = list(cfg.get("statuses", {}))
@@ -225,7 +230,7 @@ def dashboard_meta(ws: Workspace, *, api_token: str = "", items: list[store.Card
         "show_deadline_progress": bool(rules.get("show_deadline_progress", True)),
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
         "api_token": api_token,
-        "demo": store.demo_active(ws),
+        "demo": bool(demo),
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
     }
@@ -275,15 +280,13 @@ def draft_list_payload(root: Path) -> list[dict]:
     return [draft_to_dict(draft) for draft in draft_store.list_drafts(root)]
 
 
-def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
+def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None, include: object = None, demo: bool = False) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
     ``include`` IDs (the open card and its navigation trail), which are echoed back.
     Workspace-wide figures are in ``meta``.
     """
-    store.pin_demo_state(ws)
-    store.maybe_seed_demo(ws)
     transaction.migrate_legacy_timers_if_pending(ws)
     cfg = store.policy(ws)
     query = query or card_query.DEFAULT
@@ -295,7 +298,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
-    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg)
+    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo)
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now), ws=ws)
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
@@ -338,8 +341,6 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
 
 def search_cards(ws: Workspace, cache: store.CardCache, query_text: str, *, limit: int = 12) -> dict:
     """Return ranked card summaries across the workspace for the quick-search palette."""
-    store.pin_demo_state(ws)
-    store.maybe_seed_demo(ws)
     cfg = store.policy(ws)
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
     cards = store.discover(cache=cache, ws=ws)

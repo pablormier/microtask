@@ -63,7 +63,7 @@ class TimeTrackingTests(unittest.TestCase):
 
     def timers(self) -> dict[str, dict]:
         """Running timers as the cards hold them."""
-        return transaction.read_time_timers(tasklib.Workspace.at(self.root, demo=False))
+        return transaction.read_time_timers(tasklib.Workspace.at(self.root))
 
     def set_timer(self, task: Path, **fields: object) -> None:
         """Change fields of a card's running timer in place, as a pull or an editor could."""
@@ -177,7 +177,7 @@ class TimeTrackingTests(unittest.TestCase):
         second = self.add_task("Switch rollback next")
         self.assertEqual(self.run_mt("time", "start", first.stem).returncode, 0)
         before = {p: p.read_bytes() for p in (first, second)}
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with mock.patch.object(transaction, "run_validator", return_value=True), \
              mock.patch.object(transaction, "validate_data_root", side_effect=ValueError("forced failure")):
             result = tasklib.command_time_start(argparse.Namespace(query=[second.stem]), ws=ws)
@@ -374,7 +374,6 @@ class TimeTrackingTests(unittest.TestCase):
         with mock.patch.object(store, "policy", return_value=effective_policy), mock.patch.object(
             tasklib, "validate_item_changes", side_effect=validate_while_locked
         ):
-            self.assertTrue(tasklib.demo_active(ws))
             with tasklib.time_mutation_lock(ws):
                 pass
             with transaction.sync_serialization_lock(ws):
@@ -383,7 +382,6 @@ class TimeTrackingTests(unittest.TestCase):
             created = tasklib.command_create(type("Args", (), {"text": ["First real task"]})(), ws=ws)
 
             self.assertEqual(created, 0)
-            self.assertFalse(tasklib.demo_active(ws))
             with tasklib.time_mutation_lock(ws):
                 pass
             with transaction.sync_serialization_lock(ws):
@@ -506,7 +504,7 @@ class TimeTrackingTests(unittest.TestCase):
             return 0
 
         args = argparse.Namespace(query=[task.stem], time_command="stop")
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with (
             mock.patch.object(store, "policy", return_value=effective_policy),
             mock.patch.object(transaction, "command_sync", side_effect=verify_sync) as sync,
@@ -600,7 +598,7 @@ class TimeTrackingTests(unittest.TestCase):
             (),
             {"query": ["Move during timer stop"], "destination": "waiting", "match_mode": "exact", "comments": []},
         )()
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with mock.patch.object(tasklib.card_format, "replace_property", side_effect=pause_after_status):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 move_future = executor.submit(tasklib.command_move, move_args, ws=ws)
@@ -634,7 +632,7 @@ class TimeTrackingTests(unittest.TestCase):
             return 0
 
         args = type("TimeAddArgs", (), {"query": "Add before sync", "duration": "5m"})()
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with mock.patch.object(store, "policy", return_value=effective_policy), mock.patch.object(
             transaction, "command_sync", side_effect=wait_for_sync
         ):

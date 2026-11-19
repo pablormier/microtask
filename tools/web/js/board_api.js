@@ -267,7 +267,6 @@ function createBoardApi() {
           getText: accessors.getText,
           setText: accessors.setText,
           apiToken: this.apiToken,
-          scope: target === "composer" ? "workspace" : "",
           notify: (msg, err) => this.notify(msg, err),
           nextTick: fn => this.$nextTick(fn),
         });

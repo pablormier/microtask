@@ -54,8 +54,8 @@ mt move @4e91a7c2 doing      # use the @reference that mt list prints
 mt done @4e91a7c2
 ```
 
-A new workspace starts with example cards so every command has something to
-work on. They disappear as soon as you create your first card.
+Run `mt demo` to try microtask with bundled example cards in a temporary
+workspace (deleted automatically when you stop it).
 
 To sync across machines, create an empty private repository (not a fork,
 which GitHub keeps public) and give its URL when the installer asks. On
@@ -157,7 +157,7 @@ installed, and stops when you press Ctrl+C.
 Start your agent inside the workspace from any directory with `mt run`:
 
 ```sh
-mt run claude      # or: mt run codex, mt run gemini
+mt run claude      # or: mt run codex, mt run agy
 ```
 
 Then ask in plain language:

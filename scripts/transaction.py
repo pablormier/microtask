@@ -23,7 +23,6 @@ import git_ops
 import store
 from store import (
     _ws,
-    active_root,
     cards_root,
     current_username,
     task_by_id,
@@ -171,7 +170,7 @@ def migrate_legacy_timers(ws: Workspace | None = None) -> None:
     except ValueError as error:  # Includes bad UTF-8 and bad JSON.
         print(f"warning: {path} is malformed ({error}); kept as {path.name}.migrated", file=sys.stderr)
         legacy = {}
-    base = active_root(resolved)
+    base = resolved.root
     for task_id, timer in legacy.items():
         problem = _legacy_timer_problem(task_id, timer)
         task = task_by_id(task_id, ws=resolved) if problem is None else None
@@ -224,7 +223,7 @@ def run_validator(ws: Workspace | None = None, *, err: TextIO | None = None) -> 
         for line in str(error).splitlines():
             print(f"  - {line}", file=err_stream)
         return False
-    report = validation.audit_workspace(active_root(resolved), effective_policy)
+    report = validation.audit_workspace(resolved.root, effective_policy)
     if report.errors:
         print(f"FAILED: {len(report.errors)} error(s):", file=err_stream)
         for error in report.errors:
@@ -272,7 +271,7 @@ def apply_item_transaction(
     """
     resolved = _ws(ws)
     deletions = set(deletions or ())
-    base = source_root or active_root(resolved)
+    base = source_root or resolved.root
     affected = set(changes) | deletions
     original: dict[str, bytes | None] = {}
     for relative in affected:
@@ -740,7 +739,7 @@ def validate_item_changes(changes: dict[str, bytes], *, deletions: set[str] | No
     for relative in set(changes) | deletions:
         if Path(relative).is_absolute() or ".." in Path(relative).parts or not re.fullmatch(r"cards/[^/]+\.md", relative):
             raise ValueError(f"invalid item path in item changes: {relative}")
-    base = source_root or active_root(resolved)
+    base = source_root or resolved.root
     report = validation.check_changes(base, store.policy(resolved), changes, deletions, previous)
     if report.errors:
         detail = "\n".join(

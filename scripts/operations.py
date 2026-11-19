@@ -68,8 +68,8 @@ from store import (
     ValidationError,
     _resolve_unique_card,
     _ws,
-    active_root,
     card_by_capture_id,
+    cards_root,
     clear_focus_task_id,
     current_username,
     discover,
@@ -85,8 +85,6 @@ from store import (
     parse_frontmatter,
     parse_time_argument,
     parse_yaml,
-    pin_demo_state,
-    real_cards_root,
     saved_receipt,
     select_cards,
     slugify,
@@ -167,7 +165,7 @@ def _commit_item_write(
     receipt_fn=None,
 ) -> WriteResult:
     _require_mutation_lock(resolved)
-    base = active_root(resolved)
+    base = resolved.root
     relative = str(item.path.relative_to(base))
     try:
         transaction.apply_item_transaction(
@@ -259,8 +257,8 @@ def create_card(
             raise CardInputError(
                 "conflict: capture ID already exists with different kind, title, body, created-at, or metadata"
             )
-    card_id = f"{unique_item_timestamp(real=True, ws=resolved)}-{slugify(title)}"
-    destination = real_cards_root(resolved) / f"{card_id}.md"
+    card_id = f"{unique_item_timestamp(ws=resolved)}-{slugify(title)}"
+    destination = cards_root(resolved) / f"{card_id}.md"
     if destination.exists():
         raise CardInputError(f"{kind} file already exists: {destination}")
     try:
@@ -286,7 +284,6 @@ def create_card(
         source_root=resolved.root,
         ws=resolved,
     )
-    pin_demo_state(resolved)
     return Card.read(destination), True
 
 
@@ -835,7 +832,7 @@ def _delete_locked(
         task_id = str(task.frontmatter.get("id") or task.path.stem)
         if task_id in timers:
             raise ConflictError("a task with a running timer cannot be deleted", exit_code=1)
-    base = active_root(resolved)
+    base = resolved.root
     relative = task.path.relative_to(base).as_posix()
     original = task.raw.encode("utf-8")
     try:
@@ -878,7 +875,7 @@ def _bulk_edit_locked(
     try:
         assignments = plan["assignments"]
         assert isinstance(assignments, dict)
-        base = active_root(resolved_ws)
+        base = resolved_ws.root
         current_items = select_cards(discover(ws=resolved_ws), _plan_query(plan, resolved_ws))
         current_members = {item.path.relative_to(base).as_posix() for item in current_items}
         planned_members = {
@@ -1024,7 +1021,7 @@ def _topic_rename_locked(
                 f"cannot rename: claimed by someone else: {', '.join(claimed)}. "
                 f"Release the claim or pass --by with the claiming username; nothing was changed"
             )
-        base = active_root(resolved)
+        base = resolved.root
         timestamp = now_stamp()
         changes: dict[str, bytes] = {}
         expected: dict[str, bytes | None] = {}
@@ -1682,7 +1679,6 @@ def _store_attachment_locked(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
-    real: bool = False,
 ) -> WriteResult:
     _require_mutation_lock(resolved)
     if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
@@ -1695,7 +1691,7 @@ def _store_attachment_locked(
         raise InputError(f"attachment exceeds max_attachment_mb ({limit_mb} MB)", exit_code=2)
 
     item = _resolve_unique_card(resolved, card_ref, match_mode=match_mode) if card_ref else None
-    target_dir = resolved.real_attachments_root() if real else resolved.attachments_root()
+    target_dir = resolved.attachments_root()
     if target_dir.is_symlink():
         raise ValidationError("attachments/ must not be a symbolic link")
     if target_dir.exists() and not target_dir.is_dir():
@@ -1801,7 +1797,6 @@ def op_store_attachment(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
-    real: bool = False,
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
@@ -1816,7 +1811,6 @@ def op_store_attachment(
             card_ref=card_ref,
             match_mode=match_mode,
             label=label,
-            real=real,
         ),
         sync=sync,
         quiet_sync=quiet_sync,

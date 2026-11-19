@@ -122,7 +122,7 @@ def issue_timestamp(value: str) -> tuple[str, str]:
 
 
 def real_workspace_items(ws: workspace.Workspace) -> list[store.Card]:
-    return store.read_cards(store.real_cards_root(ws), ws=ws)
+    return store.read_cards(ws.cards_root(), ws=ws)
 
 
 def existing_issues(repo: str, items: list[store.Card]) -> dict[int, list[store.Card]]:
@@ -225,8 +225,6 @@ def capture_issues(
             transaction.apply_item_transaction(
                 changes, expected=expected, source_root=resolved_ws.root, ws=resolved_ws
             )
-            # The first real capture leaves demo mode, like mt add and mt note.
-            store.pin_demo_state(resolved_ws)
         existing_numbers = [issue[0] for issue in issues if issue[0] in index]
         return imported_ids, imported_numbers, existing_numbers, index
 

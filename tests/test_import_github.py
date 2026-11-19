@@ -333,19 +333,6 @@ class ImportGithubTests(unittest.TestCase):
         self.assertFalse(list((self.root / ".mt" / "demo").rglob("*gh-11*.md")))
         self.assertEqual(json.loads(self.state_path.read_text())["issues"][0]["state"], "closed")
 
-    def test_empty_demo_enabled_import_keeps_demo_view_without_real_captures(self) -> None:
-        shutil.copytree(SOURCE_ROOT / "examples", self.root / "examples")
-        self.set_issues([])
-
-        result = self.run_mt("import-github", "--repo", "acme/tasks", "--json")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["imported_ids"], [])
-        self.assertFalse(list(card_files(self.root, "task")))
-        listed = self.run_mt("list", "--json")
-        self.assertEqual(listed.returncode, 0, listed.stderr)
-        self.assertIn("Re-run the benchmark baseline", {item["title"] for item in json.loads(listed.stdout)})
-
     def test_github_utc_timestamp_is_serialized_in_workspace_local_time(self) -> None:
         env = self.env.copy()
         env["TZ"] = "America/Los_Angeles"

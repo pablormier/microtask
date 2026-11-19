@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 
 import card_query
 from cli_helpers import (
@@ -27,8 +30,6 @@ import store
 import transaction
 from store import (
     _ws,
-    active_root,
-    demo_active,
     discover,
     foreign_env,
     workspace_env,
@@ -38,10 +39,12 @@ from workspace import (
     WORKSPACE_DIRECTORY,
     Workspace,
     create_workspace,
+    demo_environ,
     default_workspace_path,
     is_data_workspace,
     is_legacy_workspace,
     is_unmigrated_workspace,
+    seed_demo_workspace,
     unmigrated_message,
 )
 
@@ -265,8 +268,6 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     box_line(f"{total} card{'s' if total != 1 else ''}   ·   "
              f"{task_count} task{'s' if task_count != 1 else ''}   ·   "
              f"{notes_count} note{'s' if notes_count != 1 else ''}", "1")
-    if demo_active(resolved):
-        box_line("Demo workspace · bundled examples", "33")
     print(paint("╰" + "─" * (width - 2) + "╯", "36"))
 
     print()
@@ -462,7 +463,7 @@ def command_validate(args: argparse.Namespace, ws: Workspace | None = None) -> i
         for line in str(error).splitlines():
             print(f"  - {line}", file=sys.stderr)
         return 1
-    report = validation.audit_workspace(active_root(resolved), effective_policy)
+    report = validation.audit_workspace(resolved.root, effective_policy)
     code, stdout_lines, stderr_lines = validation.format_audit_report(report)
     for line in stderr_lines:
         print(line, file=sys.stderr)
@@ -553,6 +554,7 @@ def init_own_workspace(args: argparse.Namespace, ws: Workspace) -> int:
         print(f"error: could not create {target}: {error}", file=sys.stderr)
         return 1
     print(f"Created workspace: {target}")
+    print("Run 'mt demo' to try it with example cards.")
     return 0
 
 
@@ -630,3 +632,87 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     os.chdir(resolved.root)
     os.execve(sys.executable, command, workspace_env(resolved))
     return 0  # Not reached, except when tests replace os.execve.
+
+
+_DEMO_ORPHAN_SECONDS = 300
+
+
+def _sweep_stale_demo_dirs(demo_parent: Path) -> None:
+    """Remove leftover demo directories: unlocked ones, and ones with no lock file after a few minutes."""
+    if not demo_parent.is_dir():
+        return
+    for entry in demo_parent.iterdir():
+        if not entry.name.startswith("demo-") or entry.is_symlink() or not entry.is_dir():
+            continue
+        lock_path = entry / ".demo.lock"
+        if not lock_path.exists():
+            # A demo that died before taking its lock. A young folder may be one another
+            # process is creating right now.
+            try:
+                age = time.time() - entry.stat().st_mtime
+            except OSError:
+                continue
+            if age > _DEMO_ORPHAN_SECONDS:
+                shutil.rmtree(entry, ignore_errors=True)
+            continue
+        try:
+            with lock_path.open("a+") as lock_file:
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    continue
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
+
+
+def command_demo(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    """Start a temporary demo workspace seeded from examples/ and serve its dashboard."""
+    resolved = _ws(ws)
+    if not (resolved.app_root / "examples").is_dir():
+        print("error: bundled examples/ folder is missing", file=sys.stderr)
+        return 1
+    # Check the filter flags before creating anything. The demo's statuses and priorities come
+    # from the same template its workspace is created from.
+    template_ws = Workspace.at(resolved.app_root / "templates", app_root=resolved.app_root, environ=demo_environ())
+    if command_query(args, ws=template_ws) is None:
+        return 2
+    dir_name = f"microtask-demo-{os.getuid()}" if hasattr(os, "getuid") else "microtask-demo"
+    demo_parent = Path(tempfile.gettempdir()) / dir_name
+    demo_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = demo_parent.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or (hasattr(os, "getuid") and info.st_uid != os.getuid())
+        or info.st_mode & 0o077
+    ):
+        print(f"error: {demo_parent} is not a private folder owned by you; remove it and try again", file=sys.stderr)
+        return 1
+    _sweep_stale_demo_dirs(demo_parent)
+    demo_dir = Path(tempfile.mkdtemp(prefix="demo-", dir=demo_parent))
+    lock_file = (demo_dir / ".demo.lock").open("a+")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        demo_ws = seed_demo_workspace(demo_dir, app_root=resolved.app_root)
+        print(f"Demo workspace: {demo_dir}")
+        print(f"Try CLI commands in another terminal: {resolved.app_root / 'mt'} -R {demo_dir} list")
+        print("Press Ctrl-C to stop; all demo changes will be deleted on exit.")
+        sys.stdout.flush()
+        app_str = str(resolved.app_root)
+        if app_str not in sys.path:
+            sys.path.insert(0, app_str)
+        from tools import taskweb  # noqa: E402
+        return taskweb.serve_dashboard(
+            demo_ws,
+            args.host,
+            args.port,
+            no_open=args.no_open,
+            filters=taskweb.board_filters(demo_ws, args),
+            allow_hosts=getattr(args, "allow_host", None),
+            demo=True,
+        )
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        shutil.rmtree(demo_dir, ignore_errors=True)
+        lock_file.close()

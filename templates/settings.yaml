@@ -55,7 +55,6 @@ rules:
   max_doing_tasks: 5
   timer_warn_hours: 8 # warn about forgotten timers; never cap recorded time
   max_attachment_mb: 10 # maximum size in MB for files in attachments/
-  demo_workspace: true
   show_year_progress: true
   show_deadline_progress: true
   deadline_progress_start: created

@@ -30,12 +30,12 @@ from store import (
 from workspace import Workspace
 
 
-def unique_item_timestamp(*, real: bool = False, ws: Workspace | None = None) -> str:
+def unique_item_timestamp(*, ws: Workspace | None = None) -> str:
     resolved = _ws(ws)
     current = datetime.now().replace(microsecond=0)
     while True:
         timestamp = current.strftime("%Y-%m-%d-%H%M%S")
-        root = resolved.real_cards_root() if real else resolved.cards_root()
+        root = resolved.cards_root()
         if not any(path.name.startswith(f"{timestamp}-") for path in root.glob("*.md")):
             return timestamp
         current += timedelta(seconds=1)

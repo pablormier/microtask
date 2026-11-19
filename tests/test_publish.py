@@ -371,6 +371,8 @@ class SyncTests(unittest.TestCase):
         task.write_text(
             """---
 id: 2026-01-01-010101-remote-task
+kind: task
+title: Remote task
 status: inbox
 priority: medium
 type: task
@@ -443,7 +445,7 @@ Review remote task.
             return original_git_text(*arguments, **kwargs)
 
         original_validator = transaction.run_validator
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with (
             patch.object(transaction, "git_text", gated_git_text),
             patch.object(transaction, "run_validator", original_validator),
@@ -492,7 +494,7 @@ Review remote task.
         original_validator = transaction.run_validator
         stdout = io.StringIO()
         stderr = io.StringIO()
-        ws = tasklib.Workspace.at(self.root, demo=False)
+        ws = tasklib.Workspace.at(self.root)
         with (
             patch.object(transaction, "git_text", gated_git_text),
             patch.object(transaction, "run_validator", original_validator),
