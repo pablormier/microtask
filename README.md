@@ -4,13 +4,11 @@ A task and notes manager for you and your AI agents. Each task and note is a
 Markdown file in a folder you own, which you can keep in a private Git
 repository.
 
-<p align="center">
-  <img src="docs/images/demo.gif" width="720" alt="Adding a task with mt, listing active tasks, asking mt focus what to do next, completing the task, and printing its Markdown file">
-</p>
-
 You work with the `mt` command in a terminal. `mt web` opens a dashboard in
 your browser, served from your own machine. Your editor and your agents read
 and change the same files.
+
+![Microtask dashboard showing example tasks grouped by status](docs/images/board.webp)
 
 - Each card is one Markdown file, readable in any editor.
 - `mt` needs Bash and Python 3, which macOS and Linux already have. There is no
@@ -44,6 +42,10 @@ mt list
 mt move @4e91a7c2 doing      # use the @reference that mt list prints
 mt done @4e91a7c2
 ```
+
+<p align="center">
+  <img src="docs/images/demo.gif" width="720" alt="Adding and listing a task with mt, choosing it with mt focus, moving it to In progress, adding a comment, completing it, and viewing the Markdown file">
+</p>
 
 To try microtask with example cards first, run `mt demo`. It opens the
 dashboard on a temporary workspace and deletes it when you stop it.
@@ -119,7 +121,7 @@ checklists, code, math and images. See [Card files](docs/cards.md).
 `mt web` opens a board in your browser and stops when you press Ctrl+C. You can
 edit cards, comment, track time, and paste images there.
 
-![The microtask dashboard: a board of tasks grouped by status](docs/images/board.webp)
+![An open task showing its Markdown content, next action, and properties](docs/images/card.webp)
 
 ## Working with AI agents
 
@@ -133,12 +135,8 @@ mt run claude      # or: mt run codex, mt run agy
 Then ask in plain language:
 
 - *"Add a task to renew my passport before March, high priority."*
-- *"Triage my inbox."*
+- *"Triage my inbox. Show me the proposed changes before applying them."*
 - *"What should I work on next? Start it and keep notes in the card."*
-
-<p align="center">
-  <img src="docs/images/triage.gif" width="900" alt="Running mt run claude, asking Claude Code to triage the inbox, approving its proposed titles, statuses, priorities and dates, and listing the organized tasks">
-</p>
 
 The agent follows [AGENTS.md](AGENTS.md) and the
 [microtask skill](.agents/skills/microtask/SKILL.md). It shows new cards for

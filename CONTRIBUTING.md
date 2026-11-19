@@ -90,12 +90,15 @@ widths, including hover, focus, and disabled states; fix visual defects and
 save a screenshot. Passing markup or behavior tests alone does not establish
 visual correctness.
 
-## README demo
+## Documentation screenshots and demo
 
-`docs/images/demo.gif` is recorded with [VHS](https://github.com/charmbracelet/vhs)
-from `docs/demo/demo.tape`, against a throwaway copy of the example cards. After
-changing CLI output, re-record it from the repository root with
-`vhs docs/demo/demo.tape`.
+After a dashboard change, run `./mt demo` from the repository root and capture
+the board, an open task, and the Zen editor in Split view as WebP files in
+`docs/images/`. The demo uses the bundled example cards.
+
+After changing CLI output, re-record `docs/images/demo.gif` from the repository
+root with [VHS](https://github.com/charmbracelet/vhs) using
+`vhs docs/demo/demo.tape`. The tape creates its own temporary workspace.
 
 ## Skills
 

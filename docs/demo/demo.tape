@@ -7,7 +7,7 @@
 
 Output docs/images/demo.gif
 
-Require rsync
+Require python3
 
 Set Shell "bash"
 Set FontFamily "JetBrainsMono Nerd Font Mono"
@@ -26,19 +26,19 @@ Set Framerate 30
 Set PlaybackSpeed 1.0
 
 Hide
-Type "source docs/demo/setup.sh"
+Type "source docs/demo/setup.sh || exit"
 Enter
 Sleep 1s
 Show
 
 # Capture a task in one line
-Type `mt add "Renew passport" --priority high --status active`
+Type `mt add "Renew passport" --status active --priority high`
 Sleep 400ms
 Enter
 Sleep 1.2s
 
 # See what is on your plate
-Type "mt list --status active"
+Type "mt list"
 Sleep 400ms
 Enter
 Sleep 2.5s
@@ -62,7 +62,7 @@ Type "mt move passport doing"
 Sleep 300ms
 Enter
 Sleep 1s
-Type `mt comment passport -m "Appointment booked for Nov 20"`
+Type `mt comment passport -m "Picked up the new passport."`
 Sleep 300ms
 Enter
 Sleep 1s
@@ -76,7 +76,7 @@ Hide
 Type "clear"
 Enter
 Show
-Type "head -n 8 workspace/cards/*renew-passport.md"
+Type "head -n 10 workspace/cards/*renew-passport.md"
 Sleep 400ms
 Enter
 Sleep 4s

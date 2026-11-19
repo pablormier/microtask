@@ -200,15 +200,16 @@ mt list                               # only release cards
 unset MT_PROJECT
 ```
 
-![A task open in the dashboard, with its Markdown content and properties](images/card.webp)
-
 ## Drafts
 
 Drafts are unfinished new cards kept in `drafts/`. They stay out of lists,
 search, and focus until you create them. The capture composer saves drafts as
 you type (and can expand into a full-screen **Zen mode** with `Write`, `Split`,
-and `Preview` views via `⤢` or `Cmd/Ctrl+Shift+F`), and the CLI works on the
-same files:
+and `Preview` views via `⤢` or `Cmd/Ctrl+Shift+F`).
+
+![A note draft in Zen mode with Markdown on the left and a live preview on the right](images/zen.webp)
+
+The CLI works on the same drafts:
 
 ```sh
 mt draft list
