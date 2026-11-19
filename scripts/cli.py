@@ -52,6 +52,7 @@ from cli_cards import (  # noqa: F401
     _validate_capture_args,
     _validate_edit_args,
     command_add,
+    command_attach,
     command_bulk_edit,
     command_capture,
     command_comment,
@@ -211,7 +212,8 @@ def main() -> int:
         args.text = [args.file_text]
     if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
         root_parser.error("an empty body requires --title")
-    if args.command != "policy":
+    # These commands never read cards, so they must not seed the application's demo.
+    if args.command not in {"policy", "repo", "init"}:
         ws.pin_demo()
         ws.maybe_seed_demo()
     if args.command in {

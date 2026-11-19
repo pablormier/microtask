@@ -21,7 +21,7 @@ _DETERMINISTIC_POLICY_KEYS = {
 _DETERMINISTIC_RULE_KEYS = {
     "auto_sync", "done_window", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
-    "allow_public_origin",
+    "allow_public_origin", "max_attachment_mb",
 }
 
 
@@ -154,6 +154,9 @@ class Workspace:
     def real_cards_root(self) -> Path:
         return self.root / "cards"
 
+    def real_attachments_root(self) -> Path:
+        return self.root / "attachments"
+
     def demo_root(self) -> Path:
         return self.root / ".mt" / "demo"
 
@@ -212,11 +215,17 @@ class Workspace:
         if (self.demo_root() / "cards").is_dir():
             return
         examples = self.app_root / "examples"
-        for source in sorted(examples.rglob("*.md")):
+        for source in sorted(examples.rglob("*")):
             relative = source.relative_to(examples)
+            if not source.is_file() or any(part.startswith(".") for part in relative.parts):
+                continue
             destination = self.demo_root() / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
+            if source.suffix == ".md":
+                destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
+            else:
+                # Attachments are copied byte for byte; only card text has its dates rebased.
+                destination.write_bytes(source.read_bytes())
 
     def active_root(self) -> Path:
         return self.demo_root() if self.demo_active() else self.root
@@ -225,6 +234,11 @@ class Workspace:
         if self.demo_active():
             return self.demo_root() / "cards"
         return self.real_cards_root()
+
+    def attachments_root(self) -> Path:
+        if self.demo_active():
+            return self.demo_root() / "attachments"
+        return self.real_attachments_root()
 
     def focus_state_path(self) -> Path:
         if self.demo_active():

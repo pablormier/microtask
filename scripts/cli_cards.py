@@ -13,6 +13,7 @@ import sys
 import time as clock_time
 import uuid
 
+import attachments
 import card_format
 import card_query
 from cli_helpers import (
@@ -31,6 +32,7 @@ from operations import (
     _edit_locked,
     _move_locked,
     _plan_query,
+    _store_attachment_locked,
     capture_card,
     capture_title,
     card_text_option,
@@ -308,6 +310,38 @@ def command_comment(args: argparse.Namespace, ws: Workspace | None = None) -> in
             " ".join(args.query),
             args.comments,
             match_mode=args.match_mode,
+        ),
+        as_json=args.as_json,
+    )
+
+
+def command_attach(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    source = Path(args.source)
+    if not source.is_file():
+        print(f"error: attachment file not found: {args.source}", file=sys.stderr)
+        return 2
+    resolved_ws = _ws(ws)
+    try:
+        size = source.stat().st_size
+        policy = store.policy(resolved_ws)
+        if size > attachments.max_attachment_bytes(policy):
+            limit_mb = policy.get("rules", {}).get("max_attachment_mb", attachments.DEFAULT_MAX_ATTACHMENT_MB)
+            print(f"error: attachment exceeds max_attachment_mb ({limit_mb} MB)", file=sys.stderr)
+            return 2
+        data = source.read_bytes()
+    except OSError as error:
+        print(f"error: could not read attachment file: {error}", file=sys.stderr)
+        return 1
+    card_ref = " ".join(args.card).strip() if args.card else None
+    return _cli_run_write(
+        ws,
+        lambda resolved: _store_attachment_locked(
+            resolved,
+            data,
+            filename=source.name,
+            card_ref=card_ref or None,
+            match_mode=args.match_mode,
+            label=args.label,
         ),
         as_json=args.as_json,
     )

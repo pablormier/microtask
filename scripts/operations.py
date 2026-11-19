@@ -6,13 +6,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
 import sys
+import tempfile
 import time as clock_time
 import uuid
 
+import attachments
 import card_format
 import card_query
 import drafts as draft_store
@@ -1920,4 +1923,168 @@ def op_card_metadata(
         )
 
     return _run_write_operation(ws, _run, sync=sync)
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".mt-attach-", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _store_attachment_locked(
+    resolved: Workspace,
+    data: bytes,
+    *,
+    filename: str = "",
+    content_type: str | None = None,
+    card_ref: str | None = None,
+    match_mode: str = "exact",
+    label: str | None = None,
+    real: bool = False,
+) -> WriteResult:
+    _require_mutation_lock()
+    if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
+        raise InputError("attachment must not be empty", exit_code=2)
+    payload_bytes = bytes(data)
+    policy = store.policy(resolved)
+    max_bytes = attachments.max_attachment_bytes(policy)
+    if len(payload_bytes) > max_bytes:
+        limit_mb = policy.get("rules", {}).get("max_attachment_mb", attachments.DEFAULT_MAX_ATTACHMENT_MB)
+        raise InputError(f"attachment exceeds max_attachment_mb ({limit_mb} MB)", exit_code=2)
+
+    item = _resolve_unique_card(resolved, card_ref, match_mode=match_mode) if card_ref else None
+    target_dir = resolved.real_attachments_root() if real else resolved.attachments_root()
+    if target_dir.is_symlink():
+        raise ValidationError("attachments/ must not be a symbolic link")
+    if target_dir.exists() and not target_dir.is_dir():
+        raise ValidationError("attachments exists but is not a directory")
+
+    base_name = attachments.build_attachment_filename(payload_bytes, filename, content_type)
+    stored_name = base_name
+    target_path = target_dir / stored_name
+    deduplicated = False
+    file_changed = False
+
+    if target_path.exists():
+        if target_path.is_symlink() or not target_path.is_file():
+            raise ValidationError(f"invalid existing attachment path: attachments/{stored_name}")
+        if target_path.read_bytes() == payload_bytes:
+            deduplicated = True
+        else:
+            stem = Path(base_name).stem
+            suffix = Path(base_name).suffix
+            counter = 2
+            while True:
+                candidate = f"{stem}-{counter}{suffix}"
+                candidate_path = target_dir / candidate
+                if not candidate_path.exists():
+                    stored_name = candidate
+                    target_path = candidate_path
+                    break
+                if candidate_path.is_file() and not candidate_path.is_symlink() and candidate_path.read_bytes() == payload_bytes:
+                    stored_name = candidate
+                    target_path = candidate_path
+                    deduplicated = True
+                    break
+                counter += 1
+
+    if not deduplicated:
+        _atomic_write_bytes(target_path, payload_bytes)
+        file_changed = True
+
+    relative_path = f"../attachments/{stored_name}"
+    is_image = attachments.is_image_filename(stored_name)
+    if label is not None:
+        md_label = label
+    elif filename and not is_image:
+        md_label = Path(filename.replace("\\", "/")).name
+    else:
+        md_label = ""
+    markdown = attachments.markdown_link(relative_path, md_label, is_image=is_image)
+
+    receipt: dict[str, object] = {
+        "filename": stored_name,
+        "path": f"attachments/{stored_name}",
+        "relative_path": relative_path,
+        "url": f"/attachments/{stored_name}",
+        "markdown": markdown,
+        "size": len(payload_bytes),
+        "is_image": is_image,
+        "deduplicated": deduplicated,
+    }
+
+    if item is not None:
+        original = item.path.read_bytes()
+        properties = dict(item.frontmatter)
+        body = item.body
+        new_body = f"{body.rstrip()}\n\n{markdown}" if body.strip() else markdown
+        properties["updated"] = store.now_stamp()
+        raw = card_format.render_document(properties, new_body, expected_kind=item.kind)
+        card_result = _commit_item_write(
+            resolved,
+            item,
+            raw,
+            expected=original,
+            failure_prefix="attach failed",
+            summary=f"Attached {stored_name} to @{item.short_ref}",
+            receipt_fn=lambda saved, updated=True: {
+                **receipt,
+                "card": store.item_receipt(saved, updated=updated, ws=resolved),
+            },
+        )
+        return WriteResult(
+            card=card_result.card,
+            receipt=card_result.receipt,
+            message=card_result.message,
+            changed=True,
+        )
+
+    return WriteResult(
+        card=None,
+        receipt=receipt,
+        message=f"{markdown}",
+        changed=file_changed,
+    )
+
+
+def op_store_attachment(
+    ws: Workspace | None,
+    data: bytes,
+    *,
+    filename: str = "",
+    content_type: str | None = None,
+    card_ref: str | None = None,
+    match_mode: str = "exact",
+    label: str | None = None,
+    real: bool = False,
+    sync: bool = True,
+) -> WriteResult:
+    """Store an attachment in attachments/ and optionally append its Markdown link to a card."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _store_attachment_locked(
+            resolved,
+            data,
+            filename=filename,
+            content_type=content_type,
+            card_ref=card_ref,
+            match_mode=match_mode,
+            label=label,
+            real=real,
+        ),
+        sync=sync,
+    )
+
 

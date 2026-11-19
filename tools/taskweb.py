@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 APP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_ROOT / "scripts"))
 
+import attachments  # noqa: E402
 import card_format  # noqa: E402, F401
 import card_query  # noqa: E402
 import cli  # noqa: E402
@@ -245,6 +246,76 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_attachment_file(self, path: Path) -> None:
+        body = path.read_bytes()
+        etag = '"' + hashlib.sha256(body).hexdigest() + '"'
+        status = HTTPStatus.NOT_MODIFIED if self.headers.get("If-None-Match") == etag else HTTPStatus.OK
+        self.send_response(status.value)
+        self.send_header("Content-Type", attachments.guess_content_type(path))
+        self.send_header("ETag", etag)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "sandbox")
+        if attachments.should_force_download(path):
+            safe_name = path.name.replace('"', "").replace("\r", "").replace("\n", "")
+            self.send_header("Content-Disposition", f'attachment; filename="{safe_name}"')
+        if status is HTTPStatus.NOT_MODIFIED:
+            self.end_headers()
+            return
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_attachment_upload(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid content length"})
+            return
+        if length <= 0:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "attachment must not be empty"})
+            return
+        ws = self.server.workspace.for_operation()
+        policy = store.policy(ws)
+        max_bytes = attachments.max_attachment_bytes(policy)
+        if length > max_bytes:
+            limit_mb = policy.get("rules", {}).get("max_attachment_mb", attachments.DEFAULT_MAX_ATTACHMENT_MB)
+            self.send_json(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                {"error": f"attachment exceeds max_attachment_mb ({limit_mb} MB)"},
+            )
+            return
+        raw_bytes = self.rfile.read(length)
+        if len(raw_bytes) != length:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "incomplete attachment upload"})
+            return
+        raw_filename = self.headers.get("X-Filename", "")
+        filename = unquote(raw_filename) if raw_filename else ""
+        content_type = self.headers.get("Content-Type")
+        scope = (self.headers.get("X-Attachment-Scope") or "").strip().lower()
+        real_workspace = scope == "workspace"
+        try:
+            result = operations.op_store_attachment(
+                ws,
+                raw_bytes,
+                filename=filename,
+                content_type=content_type,
+                real=real_workspace,
+                sync=False,
+            )
+        except store.InputError as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
+            return
+        except store.TaskError as error:
+            self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
+            return
+        except OSError as error:
+            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": f"could not store attachment: {error}"})
+            return
+        if result.changed:
+            self.server.sync.request(ws)
+        self.send_json(HTTPStatus.OK, {"attachment": result.receipt})
+
     def do_GET(self) -> None:
         if self.reject_host():
             return
@@ -255,6 +326,19 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             else:
                 self.send_vendor_file(*found)
+            return
+        if url.path.startswith("/attachments/"):
+            rel = unquote(url.path[len("/attachments/"):])
+            ws = self.server.workspace.for_operation()
+            found = attachments.resolve_attachment_path(ws.attachments_root(), rel)
+            if found is None and ws.demo_active():
+                # Drafts/new cards created from the capture composer live in the real workspace
+                # even while demo mode is active, so serve real attachments too.
+                found = attachments.resolve_attachment_path(ws.real_attachments_root(), rel)
+            if found is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            else:
+                self.send_attachment_file(found)
             return
         if url.path in ("/", "/index.html"):
             page = build_html(bootstrap_config(self.server.workspace, self.server.token))
@@ -321,6 +405,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if self.headers.get("X-Microtask-Token") != self.server.token:
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
+            return
+        if urlsplit(self.path).path == "/api/attachments":
+            self.handle_attachment_upload()
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))

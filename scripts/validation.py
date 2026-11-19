@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+import attachments
 import card_format
 import card_linter
 import drafts as draft_store
@@ -79,7 +80,7 @@ def _check_item(
         )
     )
     if warnings is not None:
-        warnings.extend(card_linter.lint_item(rel, fm, body, policy))
+        warnings.extend(card_linter.lint_item(rel, fm, body, policy, attachments_root=data_root / "attachments"))
     if kind == "task":
         try:
             entries = card_format.time_log_entries(raw)
@@ -340,6 +341,34 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                 if message.startswith(prefix):
                     message = message[len(prefix):]
                 errors.append(f"{path.relative_to(root)}: {message}")
+
+    attachments_root = root / "attachments"
+    max_bytes = attachments.max_attachment_bytes(policy)
+    if attachments_root.is_symlink():
+        errors.append("attachments/ must not be a symbolic link")
+    elif attachments_root.exists() and not attachments_root.is_dir():
+        errors.append("attachments exists but is not a directory")
+    elif attachments_root.is_dir():
+        stack = [attachments_root]
+        while stack:
+            current_dir = stack.pop()
+            for entry in sorted(current_dir.iterdir()):
+                if entry.name.startswith("."):
+                    continue
+                rel_entry = entry.relative_to(root)
+                if entry.is_symlink():
+                    errors.append(f"symbolic link under attachments/: {rel_entry}")
+                elif entry.is_dir():
+                    stack.append(entry)
+                elif entry.is_file():
+                    size = entry.stat().st_size
+                    if size > max_bytes:
+                        limit_mb = policy.get("rules", {}).get("max_attachment_mb", attachments.DEFAULT_MAX_ATTACHMENT_MB)
+                        errors.append(
+                            f"{rel_entry}: attachment exceeds max_attachment_mb ({size} bytes > {limit_mb} MB)"
+                        )
+                else:
+                    errors.append(f"unexpected entry under attachments/: {rel_entry}")
 
     if not errors:
         warnings.extend(card_linter.lint_workspace(collected["topics"], policy))

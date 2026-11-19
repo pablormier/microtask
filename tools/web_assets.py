@@ -84,6 +84,7 @@ def load_css(web_dir: Path = WEB_DIR) -> str:
 def load_js(web_dir: Path = WEB_DIR) -> str:
     js_files = [
         "markdown.js",
+        "attachments.js",
         "card_helpers.js",
         "picker.js",
         "metadata_editor.js",

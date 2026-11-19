@@ -16,7 +16,7 @@ import git_ops
 ROOT = Path(__file__).resolve().parent.parent
 UPSTREAM = "refs/remotes/upstream/main"
 WORKSPACE_FILES = {"mt-policy.yaml", "mt-policy.local.yaml"}
-WORKSPACE_PREFIXES = ("cards/", "drafts/", ".mt/")
+WORKSPACE_PREFIXES = ("cards/", "drafts/", "attachments/", ".mt/")
 # Hosting files for the server operator; `mt update` never installs or changes them.
 NOT_INSTALLED_PREFIXES = ("deploy/",)
 

@@ -196,8 +196,16 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
 .mt-task-checkbox { cursor: pointer; }
 .mt-task-checkbox:disabled { cursor: default; }
 .mt-preview a { display: inline; }
+.mt-preview a.mt-image-link { display: inline-block; max-width: 100%; }
 .mt-preview table { display: block; overflow-x: auto; }
-.mt-preview img { max-width: 100%; }
+.mt-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--mt-radius-sm, 6px);
+  border: 1px solid var(--mt-border);
+  margin: 8px 0;
+}
 .mt-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -331,6 +339,23 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   align-items: end;
 }
 .mt-comment-composer textarea.mt-field { min-height: 2.35rem; }
+.mt-comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.mt-attach-input { display: none; }
+.mt-editor-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+textarea.mt-field.is-drag-over {
+  border-color: var(--mt-accent);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--mt-accent) 6%, var(--mt-surface));
+}
 /* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
   .mt-detail-backdrop { padding: 12px; place-items: start stretch; }

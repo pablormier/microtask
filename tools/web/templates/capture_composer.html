@@ -81,15 +81,34 @@
               </div>
               <div class="mt-composer-body-label-row">
                 <label for="mt-composer-body" x-show="!captureComposer.zen" x-text="captureComposer.draft?.kind === 'task' ? 'Description' : 'Note'"></label>
-                <button type="button" class="mt-button mt-button-compact mt-button-quiet mt-composer-template" @click="captureComposer.applyMeetingTemplate(captureContext())"
-                        x-show="captureComposer.draft && captureComposer.draft?.kind === 'note'" :disabled="captureComposer.saving">Insert meeting template</button>
+                <div class="mt-composer-body-actions">
+                  <input type="file" multiple class="mt-attach-input" x-ref="composerAttachInput"
+                         @change="handleAttachmentPick('composer', $event, $refs.composerBody)"
+                         :disabled="captureComposer.saving || attachmentUploading">
+                  <button type="button" class="mt-button mt-button-compact mt-button-quiet"
+                          aria-label="Attach file" title="Attach file or paste image"
+                          :disabled="captureComposer.saving || attachmentUploading"
+                          @click="$refs.composerAttachInput.click()">
+                    <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                    <span>Attach</span>
+                  </button>
+                  <button type="button" class="mt-button mt-button-compact mt-button-quiet mt-composer-template" @click="captureComposer.applyMeetingTemplate(captureContext())"
+                          x-show="captureComposer.draft && captureComposer.draft?.kind === 'note'" :disabled="captureComposer.saving">Insert meeting template</button>
+                </div>
               </div>
               <div class="mt-zen-workspace" :class="{ 'is-zen': captureComposer.zen, 'is-split': captureComposer.zen && captureComposer.zenView === 'split', 'is-preview': captureComposer.zen && captureComposer.zenView === 'preview' }">
                 <div class="mt-zen-editor-pane mt-editor-surface-host" x-show="!captureComposer.zen || captureComposer.zenView !== 'preview'"
                      x-effect="captureComposer.syncSurface(captureContext(), $el)">
                   <textarea id="mt-composer-body" x-ref="composerBody" class="mt-field mt-composer-body" x-model="captureComposer.draft.body"
+                            :class="{ 'is-drag-over': attachmentDragTarget === 'composer' }"
                             x-show="!captureComposer.isCustomMounted()"
                             @input="captureComposer.persist(captureContext()); captureComposer.schedulePreview(); captureComposer.updateMention(captureContext(), $el)"
+                            @paste="handleAttachmentPaste('composer', $event, $el)"
+                            @dragover="handleAttachmentDragOver('composer', $event)"
+                            @dragleave="handleAttachmentDragLeave('composer')"
+                            @drop="handleAttachmentDrop('composer', $event, $el)"
                             @click="captureComposer.updateMention(captureContext(), $el)"
                             @keydown="captureComposer.handleMentionKeydown(captureContext(), $event, $el)"
                             @keyup="captureComposer.handleMentionKeyup(captureContext(), $event, $el)"

@@ -94,6 +94,8 @@ function taskBoard() {
     moveDestination: "",
     contentEditor: createContentEditor(),
     commentText: "",
+    attachmentDragTarget: "",
+    attachmentUploading: false,
     actionMessage: "",
     actionError: false,
     toast: null,
@@ -1150,6 +1152,94 @@ function taskBoard() {
       this.apiPost("/api/comment", { ref: this.selected.ref, message }).then(payload => {
         if (payload) this.commentText = "";
       });
+    },
+
+    _attachmentTargetAccessors(target) {
+      if (target === "content") {
+        return {
+          getText: () => this.contentEditor.text,
+          setText: next => {
+            this.contentEditor.text = next;
+            this.contentEditor.persist(this.contentContext());
+            this.contentEditor.schedulePreview(this.contentContext());
+          },
+        };
+      }
+      if (target === "composer") {
+        return {
+          getText: () => (this.captureComposer.draft ? this.captureComposer.draft.body : ""),
+          setText: next => {
+            if (!this.captureComposer.draft) return;
+            this.captureComposer.draft.body = next;
+            this.captureComposer.persist(this.captureContext());
+            this.captureComposer.schedulePreview(this.captureContext());
+          },
+        };
+      }
+      if (target === "comment") {
+        return {
+          getText: () => this.commentText,
+          setText: next => { this.commentText = next; },
+        };
+      }
+      return null;
+    },
+
+    async uploadAttachmentsForTarget(target, files, textarea) {
+      const accessors = this._attachmentTargetAccessors(target);
+      if (!accessors || !files || !files.length) return;
+      this.attachmentUploading = true;
+      try {
+        await uploadAndInsertAttachments({
+          files,
+          textarea,
+          getText: accessors.getText,
+          setText: accessors.setText,
+          apiToken: this.apiToken,
+          scope: target === "composer" ? "workspace" : "",
+          notify: (msg, err) => this.notify(msg, err),
+          nextTick: fn => this.$nextTick(fn),
+        });
+      } finally {
+        this.attachmentUploading = false;
+      }
+    },
+
+    handleAttachmentPaste(target, event, textarea) {
+      const files = extractClipboardFiles(event);
+      if (!files.length) return;
+      event.preventDefault();
+      this.uploadAttachmentsForTarget(target, files, textarea);
+    },
+
+    handleAttachmentDragOver(target, event) {
+      const types = event && event.dataTransfer && event.dataTransfer.types;
+      if (types && Array.from(types).includes("Files")) {
+        event.preventDefault();
+        this.attachmentDragTarget = target;
+      }
+    },
+
+    handleAttachmentDragLeave(target) {
+      if (this.attachmentDragTarget === target) {
+        this.attachmentDragTarget = "";
+      }
+    },
+
+    handleAttachmentDrop(target, event, textarea) {
+      this.attachmentDragTarget = "";
+      const files = extractDropFiles(event);
+      if (!files.length) return;
+      event.preventDefault();
+      this.uploadAttachmentsForTarget(target, files, textarea);
+    },
+
+    handleAttachmentPick(target, event, textarea) {
+      const input = event && event.target;
+      const files = input && input.files ? Array.from(input.files) : [];
+      if (input) input.value = "";
+      if (!files.length) return;
+      this.uploadAttachmentsForTarget(target, files, textarea);
     },
 
     doneSelected() {

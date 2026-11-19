@@ -72,6 +72,18 @@ class DemoWorkspaceTests(unittest.TestCase):
         reopened = self.run_mt("read", title, "--json")
         self.assertEqual(json.loads(reopened.stdout)["properties"]["due"], "2030-01-05")
 
+    def test_demo_seeds_example_attachments_unchanged(self) -> None:
+        validated = self.run_mt("validate")
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertNotIn("broken attachment link", validated.stdout + validated.stderr)
+        examples = self.root / "examples" / "attachments"
+        sources = sorted(path for path in examples.iterdir() if not path.name.startswith("."))
+        self.assertTrue(sources)
+        for source in sources:
+            with self.subTest(attachment=source.name):
+                seeded = self.root / ".mt" / "demo" / "attachments" / source.name
+                self.assertEqual(seeded.read_bytes(), source.read_bytes())
+
     def test_demo_has_resolved_task_and_note_reference_trails(self) -> None:
         result = self.run_mt("list", "--all", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)
