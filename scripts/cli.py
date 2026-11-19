@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import inspect
 import os
+from pathlib import Path
+import shlex
 import subprocess  # noqa: F401 - exposed for tests patching cli.subprocess
 import sys
 
@@ -50,6 +52,7 @@ from transaction import (  # noqa: F401
 )
 from workspace import (  # noqa: F401
     Workspace,
+    enclosing_workspace,
     is_data_workspace,
     is_unmigrated_workspace,
     missing_workspace_error,
@@ -57,12 +60,15 @@ from workspace import (  # noqa: F401
 
 # Commands that work on the application or on other folders, so they run without a workspace.
 NO_WORKSPACE_COMMANDS = {"demo", "init", "migrate", "repo", "skills", "update"}
+# Preserve an explicit selection when the launcher executes mt again.
+_EXPLICIT_APP = "_MT_EXPLICIT_APP"
 
 
 def main() -> int:
     arguments = sys.argv[1:]
     if arguments == ["help"]:
         arguments = ["--help"]
+    explicit_app = os.environ.pop(_EXPLICIT_APP, None)
     ws = Workspace.resolve()
     try:
         arguments, repo_selector = consume_repo_selector(arguments)
@@ -71,13 +77,13 @@ def main() -> int:
         demo_cmd = bool(arguments) and arguments[0] == "demo" and repo_selector is None
         if repo_selector is not None:
             selected_root = resolve_repo_selector(repo_selector, allow_unmigrated=migrating)
-            if selected_root != ws.root.resolve():
+            if selected_root != ws.root:
                 if is_data_workspace(selected_root) or (migrating and is_unmigrated_workspace(selected_root)):
-                    # Restart this application on the selected data, so every root is set at import.
                     executable = ws.app_root / "mt"
-                    env = {**os.environ, "MT_WORKSPACE": str(selected_root)}
+                    env = {**ws.environ, "MT_WORKSPACE": str(selected_root)}
                 else:
                     executable, env = selected_root / "mt", foreign_env(ws)
+                env[_EXPLICIT_APP] = str(executable.parent.resolve())
                 os.execve(str(executable), [str(executable), *arguments], env)
         error = None if (migrating and is_unmigrated_workspace(ws.root)) or demo_cmd else workspace_error(ws)
         if error:
@@ -90,6 +96,9 @@ def main() -> int:
     if getattr(args, "workspace_repo", None) is not None:
         root_parser.error("-R / --repo must come before the command")
     try:
+        needs_workspace = args.command not in {"demo", "init", "repo", "update"}
+        if needs_workspace and repo_selector is None and explicit_app != str(ws.app_root.resolve()):
+            ws = select_enclosing_workspace(ws)
         return _dispatch(root_parser, args, ws)
     except OSError as error:
         print(f"error: {error}", file=sys.stderr)
@@ -97,6 +106,20 @@ def main() -> int:
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
+
+
+def select_enclosing_workspace(ws: Workspace) -> Workspace:
+    current = enclosing_workspace(Path.cwd())
+    if current is None or current == ws.root.resolve():
+        return ws
+    configured = ws.environ.get("MT_WORKSPACE")
+    if configured:
+        raise ValueError(f"current workspace is {current}, but MT_WORKSPACE selects {configured}. "
+                         f"Select this workspace explicitly with mt -R {shlex.quote(str(current))} COMMAND")
+    if not is_data_workspace(current):
+        raise ValueError(f"current workspace is {current}. "
+                         f"Select it explicitly with mt -R {shlex.quote(str(current))} COMMAND")
+    return Workspace.resolve({**ws.environ, "MT_WORKSPACE": str(current)}, app_root=ws.app_root)
 
 
 def _dispatch(root_parser, args, ws: Workspace) -> int:

@@ -5,8 +5,9 @@ Before 1.0 a minor version can break things and carry migration code that the ne
 removes, so an update never skips a minor version: it installs the newest patch of the
 current minor, or else the newest patch of the next minor, and asks you to run it again.
 Releases are downloaded as tarballs, so no Git is needed. Only the application's
-top-level entries are replaced. The workspace is never touched, whether it lives in
-workspace/ or in the folder MT_WORKSPACE names.
+top-level entries are replaced. The workspace's cards and settings are never touched,
+whether it lives in workspace/ or in the folder MT_WORKSPACE names; only the agent skill
+copies it already has are refreshed, as Git-ignored files.
 """
 from __future__ import annotations
 
@@ -345,6 +346,17 @@ def write_version(tag: str, release_entries: list[str]) -> None:
     write_file("VERSION", tag + "\n")
 
 
+def has_workspace_skills(root: Path) -> bool:
+    """The workspace holds skill copies that microtask installed."""
+    for target in (".agents/skills", ".claude/skills"):
+        try:
+            if "installed-by: microtask" in (root / target / "microtask" / "SKILL.md").read_text(encoding="utf-8"):
+                return True
+        except (OSError, UnicodeError):
+            continue
+    return False
+
+
 def run_mt(*arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([str(ROOT / "mt"), *arguments], cwd=ROOT, text=True, capture_output=True, check=False)
 
@@ -431,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
                 rollback(backup, undo)
                 raise
             validation = run_mt("validate")
+            root = workspace_module.resolve_workspace_root(app_root=ROOT)
+            skills = (run_mt("-R", str(root), "skills", "install", "--workspace")
+                      if has_workspace_skills(root) else None)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
             lock.close()
@@ -443,7 +458,13 @@ def main(argv: list[str] | None = None) -> int:
             print((validation.stderr.strip() or validation.stdout.strip()), file=sys.stderr)
         else:
             print("Workspace checked with the new version.")
-        print("Your workspace was not changed. If the web dashboard is running, restart it.")
+        if skills is not None and skills.returncode:
+            print("warning: the workspace's agent skills could not be refreshed; run "
+                  "'mt skills install --workspace' in the workspace:", file=sys.stderr)
+            print((skills.stderr.strip() or skills.stdout.strip()), file=sys.stderr)
+        elif skills is not None:
+            print("Refreshed the workspace's agent skills.")
+        print("Your cards and settings were not changed. If the web dashboard is running, restart it.")
         if following:
             print(f"A newer release exists: {following}. If the new version asks you to run 'mt migrate', "
                   f"do that first.")

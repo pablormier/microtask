@@ -92,6 +92,8 @@ def main() -> int:
                         help="maximum allowed wall-clock seconds (defaults to 60s for full suite)")
     args = parser.parse_args()
     close_stdin()
+    for variable in ("MT_WORKSPACE", "MT_PROJECT", "MT_TOPIC"):
+        os.environ.pop(variable, None)
 
     compileall.compile_dir(ROOT / "scripts", quiet=1)
     compileall.compile_dir(ROOT / "tools", quiet=1)

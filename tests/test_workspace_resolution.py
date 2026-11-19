@@ -30,8 +30,9 @@ class ResolutionTests(unittest.TestCase):
         self.env.update({"HOME": str(self.root), "MT_USERNAME": "tester"})
         self.default = self.app / "workspace"
 
-    def mt(self, *arguments: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([str(self.app / "mt"), *arguments], cwd=self.root, env=env or self.env, text=True,
+    def mt(self, *arguments: str, env: dict[str, str] | None = None,
+           cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([str(self.app / "mt"), *arguments], cwd=cwd or self.root, env=env or self.env, text=True,
                               capture_output=True, check=False, stdin=subprocess.DEVNULL)
 
     def data_workspace(self, name: str) -> Path:
@@ -82,11 +83,41 @@ class ResolutionTests(unittest.TestCase):
         self.assertTrue((self.default / "cards").is_dir())
         self.assertTrue((self.default / "drafts").is_dir())
         self.assertFalse((self.default / "mt").exists())
+        for target in (".agents/skills", ".claude/skills"):
+            text = (self.default / target / "microtask/SKILL.md").read_text()
+            self.assertIn("Run microtask commands as `mt COMMAND`", text)
+            self.assertNotIn(str(self.default), text)
         self.assertEqual(self.mt("validate").returncode, 0)
 
         second = self.init()
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertIn(f"Workspace already exists: {self.default}", second.stdout)
+
+    def test_enclosing_workspace_and_shell_default_must_agree_unless_the_selection_is_explicit(self) -> None:
+        work = self.data_workspace("work vault")
+        other = self.data_workspace("shell default")
+        env = {**self.env, "MT_WORKSPACE": str(other)}
+        subfolder = work / "cards"
+
+        automatic = self.mt("list", "--json", cwd=subfolder)
+        self.assertEqual(automatic.returncode, 0, automatic.stderr)
+        self.assertIn(f"Workspace: {work}\n", automatic.stderr)
+        outside = self.mt("list", "--json", env=env)
+        self.assertEqual(outside.returncode, 0, outside.stderr)
+        self.assertIn(f"Workspace: {other}\n", outside.stderr)
+
+        for command in (("list", "--json"), ("add", "Misrouted task")):
+            result = self.mt(*command, cwd=subfolder, env=env)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(str(work), result.stderr)
+            self.assertIn(str(other), result.stderr)
+        self.assertFalse(list(subfolder.glob("*.md")))
+        self.assertFalse(list((other / "cards").glob("*.md")))
+
+        for selected in (work, other):
+            explicit = self.mt("-R", str(selected), "list", "--json", cwd=subfolder, env=env)
+            self.assertEqual(explicit.returncode, 0, explicit.stderr)
+            self.assertIn(f"Workspace: {selected}\n", explicit.stderr)
 
     def test_mt_init_works_in_a_git_clone(self) -> None:
         (self.app / ".git").mkdir()

@@ -132,18 +132,22 @@ agent's `mt` then works on that workspace:
 mt run claude      # or: mt run codex, mt run agy
 ```
 
+New workspaces get the bundled skills during setup, and `mt update` keeps them
+current. To add them to an existing workspace, run `mt skills install --workspace`
+in it.
+
 Then ask in plain language:
 
 - *"Add a task to renew my passport before March, high priority."*
 - *"Triage my inbox. Show me the proposed changes before applying them."*
 - *"What should I work on next? Start it and keep notes in the card."*
 
-The agent follows [AGENTS.md](AGENTS.md) and the
+The agent follows the workspace instructions and the installed
 [microtask skill](.agents/skills/microtask/SKILL.md). It shows new cards for
 your approval before creating them, claims a task before working on it, and
-asks before completing or deleting anything. Codex and Cursor read `AGENTS.md`
-on their own; `CLAUDE.md` and `GEMINI.md` point Claude Code and Gemini CLI to
-it.
+asks before completing or deleting anything. Coding agents such as Codex and
+Antigravity read `AGENTS.md` directly. The workspace's `CLAUDE.md` imports it
+for Claude Code.
 
 Skills in [`.agents/skills`](.agents/skills) cover common workflows:
 

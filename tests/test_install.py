@@ -1,4 +1,6 @@
 """install.sh: release download, workspace creation, shell config, and origin handling."""
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess
@@ -100,6 +102,8 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((workspace / "cards").is_dir())
         self.assertTrue((workspace / "settings.yaml").is_file())
         self.assertIn(".mt/", (workspace / ".gitignore").read_text())
+        for target in (".agents/skills", ".claude/skills"):
+            self.assertTrue((workspace / target / "microtask/SKILL.md").is_file())
         self.assertIn(f"microtask {TAG} installed", result.stdout)
         self.assertIn("  app:        ~/microtask", result.stdout)
         self.assertIn("  workspace:  ~/microtask/workspace", result.stdout)

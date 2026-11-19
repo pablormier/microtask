@@ -54,6 +54,15 @@ def is_unmigrated_workspace(path: Path) -> bool:
             and not (path / SETTINGS_FILE).exists() and not (path / "mt").exists())
 
 
+def enclosing_workspace(path: Path) -> Path | None:
+    """Find the nearest workspace containing PATH, including one that needs migration."""
+    path = path.resolve()
+    for parent in (path, *path.parents):
+        if is_data_workspace(parent) or is_legacy_workspace(parent) or is_unmigrated_workspace(parent):
+            return parent
+    return None
+
+
 def unmigrated_message(path: Path, command: str) -> str:
     """Tell the user to run 'mt migrate'; command is the form that selects this folder."""
     return (f"the workspace {path} still uses {OLD_SETTINGS_FILE}, which is now {SETTINGS_FILE}. "
@@ -130,10 +139,20 @@ def create_workspace(path: Path, app_root: Path = APP_ROOT, *, policy: Path | No
     if policy is None or not Path(policy).is_file():
         policy = templates / "settings.yaml"
     for name, source in (("settings.yaml", policy),
-                         (WORKSPACE_GITIGNORE, templates / "workspace.gitignore"),
-                         *((name, templates / f"workspace-{name}") for name in AGENT_FILES)):
+                         (WORKSPACE_GITIGNORE, templates / "workspace.gitignore")):
         if not (path / name).exists():
             (path / name).write_bytes(Path(source).read_bytes())
+    add_agent_files(path, app_root)
+
+
+def add_agent_files(path: Path, app_root: Path = APP_ROOT) -> list[str]:
+    """Add the agent instruction files a workspace is missing, never overwriting one; return their names."""
+    added = []
+    for name in AGENT_FILES:
+        if not (Path(path) / name).exists():
+            (Path(path) / name).write_bytes((app_root / "templates" / f"workspace-{name}").read_bytes())
+            added.append(name)
+    return added
 
 
 def missing_workspace_error(

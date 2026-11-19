@@ -189,6 +189,21 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(snapshot(elsewhere), before)
         self.assertEqual(snapshot(self.workspace), inside)
 
+    def test_the_workspace_skill_copies_are_refreshed_and_cards_are_untouched(self) -> None:
+        env = {**self.env, "MT_WORKSPACE": str(self.workspace)}
+        subprocess.run([str(self.app / "mt"), "skills", "install", "--workspace"], check=True,
+                       capture_output=True, env=env, stdin=subprocess.DEVNULL)
+        skill = self.workspace / ".agents" / "skills" / "microtask" / "SKILL.md"
+        skill.write_text(skill.read_text() + "stale\n")
+        cards = snapshot(self.workspace / "cards")
+
+        result = self.update(env=env)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Refreshed the workspace's agent skills.", result.stdout)
+        self.assertNotIn("stale", skill.read_text())
+        self.assertEqual(snapshot(self.workspace / "cards"), cards)
+
     def test_problems_in_the_workspace_are_reported_but_do_not_undo_the_update(self) -> None:
         (self.workspace / "cards" / "bad.md").write_text("not a card\n")
 

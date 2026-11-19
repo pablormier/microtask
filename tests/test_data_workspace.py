@@ -175,6 +175,13 @@ class DataWorkspaceInitTests(unittest.TestCase):
                          (self.app / "settings.yaml").read_text(encoding="utf-8"))
         self.assertIn(".mt/", (data / ".gitignore").read_text(encoding="utf-8"))
         self.assertEqual(self.git(data, "status", "--porcelain", "--untracked-files=all"), "")
+        for target in (".agents/skills", ".claude/skills"):
+            skill = data / target / "microtask/SKILL.md"
+            text = skill.read_text(encoding="utf-8")
+            self.assertIn("Run microtask commands as `mt COMMAND`", text)
+            self.assertNotIn(str(data), text)
+            self.assertTrue((skill.parent / "references/calendar.md").is_file())
+            self.assertNotIn(str(skill.relative_to(data)), self.git(data, "ls-files"))
         self.assertEqual(self.git(data, "remote", "get-url", "origin").strip(), str(origin))
 
         self.mt("-R", str(data), "add", "Project task")

@@ -196,6 +196,10 @@ class RepositorySelectorTests(unittest.TestCase):
             self.assertFalse((destination / private).exists(), private)
             self.assertFalse((workspace / private).exists(), private)
         self.assertTrue((destination / ".agents/skills/microtask/SKILL.md").is_file())
+        for target in (".agents/skills", ".claude/skills"):
+            skill = workspace / target / "microtask/SKILL.md"
+            self.assertIn("Run microtask commands as `mt COMMAND`", skill.read_text())
+            self.assertNotIn(str(workspace), skill.read_text())
         self.assertEqual((workspace / "settings.yaml").read_text(), (source / "settings.yaml").read_text())
         self.assertTrue(os.access(destination / "mt", os.X_OK))
         self.assertNotIn("SECRET-7f3a", "".join(p.read_text(errors="ignore") for p in destination.rglob("*") if p.is_file()))

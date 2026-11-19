@@ -38,6 +38,7 @@ import validation
 from workspace import (
     WORKSPACE_DIRECTORY,
     Workspace,
+    add_agent_files,
     create_workspace,
     demo_environ,
     default_workspace_path,
@@ -81,6 +82,8 @@ def skill_sources(ws: Workspace | None = None) -> list[Path]:
 
 
 def installed_by_microtask(folder: Path) -> bool:
+    if folder.is_symlink():
+        return False
     try:
         text = (folder / "SKILL.md").read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -92,13 +95,12 @@ def installed_by_microtask(folder: Path) -> bool:
 def render_skill_file(text: str, invocation: str, alias: str | None, *, scoped: bool, skill_md: bool) -> str:
     """Point a skill's commands at this workspace and mark the copy as installed by microtask."""
     text = SKILL_COMMAND.sub(lambda _: invocation, text)
-    check = ("Each command prints `Workspace:` and `Scope:` lines on stderr; stop and ask if either is "
-             "missing or wrong." if scoped else
-             "Each command prints a `Workspace:` line on stderr; stop and ask if it is missing or wrong.")
+    check = ("Check the `Workspace:` and `Scope:` lines when printed; stop and ask if either is wrong."
+             if scoped else "Check the `Workspace:` line when printed; stop and ask if it is wrong.")
     missing = (f"If `mt` is not found, or the alias `{alias}` is unknown, ask the user to install microtask "
                f"or run `mt repo add {alias} PATH`." if alias else
                "If `mt` is not found, ask the user to install microtask.")
-    block = f"Run every command as `{invocation} COMMAND`. {check} {missing}"
+    block = f"Run microtask commands as `{invocation} COMMAND`. {check} {missing}"
     text = SKILL_WORKSPACE_BLOCK.sub(lambda _: block, text)
     if skill_md:
         match = re.match(r"---\n(.*?\n)?---\n", text, re.DOTALL)
@@ -124,27 +126,43 @@ def skills_invocation(project: str | None, topic: str | None, ws: Workspace | No
     return " ".join([*scope, mt]), alias, local
 
 
-def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    resolved = _ws(ws)
-    project_dir = Path(args.dir).expanduser().resolve()
-    if not project_dir.is_dir():
-        print(f"error: project directory does not exist: {project_dir}", file=sys.stderr)
-        return 2
-    sources = skill_sources(resolved)
+def workspace_skill_invocation(project: str | None = None, topic: str | None = None) -> str:
+    """Plain mt: inside a workspace it selects that workspace, so the copies name no path."""
+    scope = [f"MT_PROJECT={shlex.quote(project)}"] if project else []
+    scope += [f"MT_TOPIC={shlex.quote(topic)}"] if topic else []
+    return " ".join([*scope, "mt"])
+
+
+def install_skills(
+    target_dir: Path,
+    ws: Workspace,
+    invocation: str,
+    *,
+    alias: str | None = None,
+    scoped: bool = False,
+    local_workspace: bool = False,
+) -> set[str]:
+    sources = skill_sources(ws)
     if not sources:
-        print(f"error: no skills found in {resolved.app_root / '.agents' / 'skills'}", file=sys.stderr)
-        return 1
+        raise ValueError(f"no skills found in {ws.app_root / '.agents' / 'skills'}")
+    bases = [target_dir / target for target in SKILL_TARGETS]
+    if local_workspace:
+        check_workspace_skill_paths(bases)
     names = {source.name for source in sources}
-    conflicts = [project_dir / target / name for target in SKILL_TARGETS for name in sorted(names)
-                 if (project_dir / target / name).exists()
-                 and not installed_by_microtask(project_dir / target / name)]
+    conflicts = [base / name for base in bases for name in sorted(names)
+                 if ((base / name).exists() or (base / name).is_symlink())
+                 and not installed_by_microtask(base / name)]
     if conflicts:
-        print("error: these skills already exist and were not installed by microtask; rename or remove them:",
-              file=sys.stderr)
-        for path in conflicts:
-            print(f"  {path}", file=sys.stderr)
-        return 1
-    invocation, alias, local = skills_invocation(args.project, args.topic, ws=resolved)
+        paths = "\n".join(f"  {path}" for path in conflicts)
+        raise ValueError(f"these skills already exist and were not installed by microtask; "
+                         f"rename or remove them:\n{paths}")
+    if local_workspace:
+        paths = [str((base / name).relative_to(target_dir)) for base in bases for name in sorted(names)]
+        tracked = git_ops.run_git(target_dir, "ls-files", "--", *paths)
+        if tracked.returncode == 0 and tracked.stdout:
+            raise ValueError("workspace skill copies are generated and ignored by Git, so they cannot replace "
+                             "Git-tracked files:\n"
+                             + tracked.stdout.rstrip())
     # Render everything first, so a broken skill stops the install before any file changes.
     rendered: dict[str, list[tuple[Path, bytes | None]]] = {}
     for source in sources:
@@ -158,15 +176,13 @@ def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None
                 if path.suffix == ".md":
                     try:
                         content = render_skill_file(content.decode("utf-8"), invocation, alias,
-                                                    scoped=bool(args.project or args.topic),
+                                                    scoped=scoped,
                                                     skill_md=path == source / "SKILL.md").encode("utf-8")
                     except (UnicodeError, ValueError) as error:
-                        print(f"error: {path}: {error}", file=sys.stderr)
-                        return 1
+                        raise ValueError(f"{path}: {error}") from error
             files.append((path.relative_to(source), content))
         rendered[source.name] = files
-    for target in SKILL_TARGETS:
-        base = project_dir / target
+    for base in bases:
         base.mkdir(parents=True, exist_ok=True)
         for stale in sorted(base.iterdir()):
             if stale.name not in names and installed_by_microtask(stale):
@@ -180,6 +196,8 @@ def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None
                         destination.mkdir(exist_ok=True)
                     else:
                         destination.write_bytes(content)
+                if local_workspace:
+                    (staging / ".gitignore").write_text("*\n", encoding="utf-8")
                 staging.chmod(0o755)
                 current = base / name
                 if current.exists():
@@ -187,21 +205,56 @@ def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None
                 os.rename(staging, current)
             finally:
                 shutil.rmtree(staging, ignore_errors=True)
-    print(f"Installed {len(sources)} skills in {', '.join(str(project_dir / target) for target in SKILL_TARGETS)}:")
+    return names
+
+
+def check_workspace_skill_paths(bases: list[Path]) -> None:
+    for base in bases:
+        for path in (base.parent, base):
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise ValueError(f"workspace skill directory must be a real directory: {path}")
+
+
+def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    resolved = _ws(ws)
+    scoped = bool(args.project or args.topic)
+    workspace_dir = resolved.root.resolve()
+    project_dir = workspace_dir if args.workspace else Path(args.dir).expanduser().resolve()
+    local_workspace = args.workspace or (project_dir == workspace_dir and is_data_workspace(project_dir))
+    if local_workspace:
+        if not (is_data_workspace(project_dir) or is_legacy_workspace(project_dir)):
+            raise ValueError(f"no workspace at {project_dir}; run 'mt init' or select one with -R")
+        invocation = workspace_skill_invocation(args.project, args.topic)
+        alias, local = None, False
+    else:
+        if not project_dir.is_dir():
+            raise ValueError(f"project directory does not exist: {project_dir}")
+        invocation, alias, local = skills_invocation(args.project, args.topic, ws=resolved)
+    names = install_skills(project_dir, resolved, invocation, alias=alias, scoped=scoped,
+                           local_workspace=local_workspace)
+    print(f"Installed {len(names)} skills in {', '.join(str(project_dir / target) for target in SKILL_TARGETS)}:")
     print(f"  {', '.join(sorted(names))}")
-    print(f"They run `{invocation} COMMAND`. Run this again after mt update to refresh them.")
+    print(f"They run `{invocation} COMMAND`. "
+          + ("mt update refreshes them; in a Git clone, run this again after git pull." if local_workspace
+             else "Run this again after mt update to refresh them."))
+    if local_workspace:
+        added = add_agent_files(project_dir, resolved.app_root)
+        if added:
+            print(f"Added {' and '.join(added)}, which tell agents how to use this workspace.")
     if local:
         print("warning: the skills name a folder on this machine, so do not commit them. To share them, give "
               f"the workspace an alias with mt repo add NAME {shlex.quote(str(resolved.root))} and install again "
               "with mt -R NAME skills install.", file=sys.stderr)
-    if resolved.in_app and not (args.project or args.topic):
+    if resolved.in_app and not (scoped or local_workspace):
         print("note: agents will see every card in this workspace; add --project or --topic to limit them.",
               file=sys.stderr)
     return 0
 
 
-def command_skills_uninstall(args: argparse.Namespace) -> int:
-    project_dir = Path(args.dir).expanduser().resolve()
+def command_skills_uninstall(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    project_dir = _ws(ws).root.resolve() if args.workspace else Path(args.dir).expanduser().resolve()
+    if args.workspace or is_data_workspace(project_dir):
+        check_workspace_skill_paths([project_dir / target for target in SKILL_TARGETS])
     removed = 0
     for target in SKILL_TARGETS:
         base = project_dir / target
@@ -490,9 +543,10 @@ def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | N
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     try:
         create_workspace(staging, resolved.app_root, policy=resolved.root / "settings.yaml")
+        install_skills(staging, resolved, workspace_skill_invocation(), local_workspace=True)
         staging.chmod(0o755)
         os.rename(staging, destination)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"error: could not create {destination}: {error}", file=sys.stderr)
         return 1
@@ -550,6 +604,7 @@ def init_own_workspace(args: argparse.Namespace, ws: Workspace) -> int:
         return 1
     try:
         create_workspace(target, ws.app_root)
+        install_skills(target, ws, workspace_skill_invocation(), local_workspace=True)
     except OSError as error:
         print(f"error: could not create {target}: {error}", file=sys.stderr)
         return 1
@@ -590,9 +645,11 @@ def command_init(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
     try:
         copy_application(staging, examples=True, ws=resolved)
+        install_skills(staging / WORKSPACE_DIRECTORY, resolved,
+                       workspace_skill_invocation(), local_workspace=True)
         staging.chmod(0o755)
         os.rename(staging, destination)
-    except OSError as error:
+    except (OSError, ValueError) as error:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"error: could not create {destination}: {error}", file=sys.stderr)
         return 1

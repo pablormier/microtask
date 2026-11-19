@@ -281,9 +281,21 @@ anything else is refused with an error, and nothing is created. `-R` still
 wins, so `mt -R work list` works as before. Remove the line to go back to
 `workspace/` in the app folder.
 
-It applies to every `mt` you run, wherever you are, and to agents whose skills
-call plain `mt`. `mt info` shows which workspace is active. With several
-workspaces in regular use, prefer `-R` and aliases.
+Inside a workspace or one of its subfolders, bare `mt` uses that workspace
+when `MT_WORKSPACE` is unset. If `MT_WORKSPACE` names a different workspace,
+`mt` stops and shows both paths. Use `-R PATH_OR_NAME` to select the workspace
+explicitly. Outside a workspace, `MT_WORKSPACE` sets the default.
+
+### Agent skills in a workspace
+
+New workspaces get the bundled skills in `.agents/skills/` and
+`.claude/skills/`, plus an `AGENTS.md` and `CLAUDE.md` for agents started
+there. The skills run plain `mt`, which selects the workspace they are in, so
+they keep working after you move the workspace or sync it to another machine.
+They are ignored by Git. To add them to an existing workspace, along with any
+missing `AGENTS.md` or `CLAUDE.md`, run `mt skills install --workspace` in it,
+or `mt -R NAME skills install --workspace` from anywhere. `mt update` refreshes
+them; in a Git clone of the app, run the install again after `git pull`.
 
 ### Agents in another project
 

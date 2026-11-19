@@ -121,6 +121,32 @@ class SkillsTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in (self.project / ".agents" / "skills").iterdir()), ["microtask"])
         self.assertFalse((self.project / ".claude" / "skills" / "extra").exists())
 
+    def test_install_and_uninstall_workspace_skills_from_another_directory(self) -> None:
+        data = self.home / "work vault"
+        self.mt("init", str(data), "--data")
+        self.mt("-R", str(data), "skills", "uninstall", "--workspace")
+        self.assertFalse((data / ".agents").exists())
+        (data / "AGENTS.md").unlink()
+        (data / "CLAUDE.md").write_text("my own\n")
+        result = self.mt("-R", str(data), "skills", "install", "--workspace")
+        self.assertIn("Added AGENTS.md,", result.stdout)
+        self.assertIn("microtask workspace", (data / "AGENTS.md").read_text())
+        self.assertEqual((data / "CLAUDE.md").read_text(), "my own\n")
+        self.mt("-R", str(data), "skills", "install", "--dir", str(data))
+        for target in TARGETS:
+            skill = data / target / "microtask/SKILL.md"
+            self.assertIn("Run microtask commands as `mt COMMAND`", skill.read_text())
+            self.assertNotIn(str(data), skill.read_text())
+            self.assertTrue((skill.parent / ".gitignore").is_file())
+            self.assertFalse((self.project / target / "microtask").exists())
+
+        tracked = data / ".claude/skills/microtask/SKILL.md"
+        subprocess.run(["git", "add", "-f", str(tracked)], cwd=data, env=self.env, check=True)
+        before = tracked.read_bytes()
+        result = self.mt("-R", str(data), "skills", "install", "--workspace", "--project", "changed", ok=False)
+        self.assertIn("Git-tracked files", result.stderr)
+        self.assertEqual(tracked.read_bytes(), before)
+
 
     def test_a_skill_the_marker_cannot_go_into_stops_the_install(self) -> None:
         extra = self.app / ".agents" / "skills" / "extra" / "SKILL.md"

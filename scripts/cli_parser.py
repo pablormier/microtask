@@ -88,7 +88,7 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
                     "never your cards, drafts, or local state. --data creates only a workspace folder: cards, "
                     "your settings, and a Git repository (with ORIGIN-URL as origin), but no application; "
                     "this mt runs it through -R, so one mt update covers it. An existing workspace is left "
-                    "unchanged; any other existing path is refused.",
+                    "unchanged; any other existing path is refused. New workspaces get local agent skills.",
     )
     init.add_argument("directory", nargs="?", metavar="DIRECTORY",
                       help="folder to create; omit it to create this app's workspace/")
@@ -102,11 +102,12 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     init.set_defaults(func=command_init)
 
     skills = sub.add_parser(
-        "skills", help="install microtask's agent skills into a project",
+        "skills", help="install microtask's agent skills into a project or workspace",
         description="Copy every skill this mt ships into a project's .agents/skills and .claude/skills, with "
                     "their commands pointed at the selected workspace: plain mt for the mt on PATH, mt -R ALIAS "
                     "for a workspace with an alias, otherwise its path. Folders already there that microtask "
-                    "did not install are never changed. Examples: mt skills install --project myapp, "
+                    "did not install are never changed. Use --workspace to install local skills in the "
+                    "selected workspace. Examples: mt skills install --project myapp, "
                     "mt -R pkg skills install, mt skills uninstall",
     )
     skills_sub = skills.add_subparsers(dest="skills_command", required=True)
@@ -115,11 +116,13 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
     skills_install.add_argument("--project", help="scope every command the skills run to this project (MT_PROJECT)")
     skills_install.add_argument("--topic", metavar="PATH",
                                 help="scope every command the skills run to this topic (MT_TOPIC)")
-    skills_install.add_argument("--dir", default=".", help="project folder (default: current folder)")
     skills_install.set_defaults(func=command_skills_install)
     skills_uninstall = skills_sub.add_parser("uninstall", help="remove the skills microtask installed")
-    skills_uninstall.add_argument("--dir", default=".", help="project folder (default: current folder)")
     skills_uninstall.set_defaults(func=command_skills_uninstall)
+    for action in (skills_install, skills_uninstall):
+        target = action.add_mutually_exclusive_group()
+        target.add_argument("--dir", default=".", help="project folder (default: current folder)")
+        target.add_argument("--workspace", action="store_true", help="use the selected workspace folder")
 
     run = sub.add_parser(
         "run",

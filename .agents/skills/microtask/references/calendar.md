@@ -84,13 +84,12 @@ discover IDs through the available integration, and clarify ambiguous selections
 before saving. Edit only the requested settings in the selected workspace's
 local file, preserve unrelated YAML, and validate afterward. Read the existing
 settings files for this edit; ordinary planning uses the merged CLI output.
-For another workspace, use `mt -R PATH_OR_NAME` for the commands below and edit
-that workspace's local settings. Do not edit the bundled skills for personal
-calendar preferences.
+Use the same workspace for the commands below and for the local settings edit.
+Do not edit the bundled skills for personal calendar preferences.
 
 ## Verify
 
-Run these from the app folder:
+Check the effective settings and validate the workspace.
 
 ```sh
 ./mt settings --json

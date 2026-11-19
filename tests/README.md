@@ -44,8 +44,11 @@ Run the parallel suite (with the 60s time budget) or `unittest discover`:
 
 ```sh
 python3 tests/run.py
-python3 -m unittest discover -s tests -v
+env -u MT_WORKSPACE -u MT_PROJECT -u MT_TOPIC python3 -m unittest discover -s tests -v
 ```
+
+The parallel runner clears inherited workspace and scope settings so the tests
+use their temporary workspaces.
 
 CLI tests start `./mt` without input. With no text, `mt add` and `mt note` read
 the card body from stdin whenever it is not a terminal, so a test that inherits

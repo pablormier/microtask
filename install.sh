@@ -395,6 +395,12 @@ if [[ -z "$workspace_ready" ]]; then
       fi
     fi
   fi
+  # The downloaded release may predate vault-local skills.
+  if [[ "$("$app_dir/mt" -R "$workspace_dir" skills install --help 2>/dev/null)" == *--workspace* ]]; then
+    if ! "$app_dir/mt" -R "$workspace_dir" skills install --workspace; then
+      echo "warning: agent skills could not be installed. Run 'mt skills install --workspace' in the workspace to retry." >&2
+    fi
+  fi
 fi
 
 # Shell config: the file each shell reads.
@@ -492,7 +498,7 @@ if [[ -n "$workspace_line" && -n "$save_workspace" && -n "$shell_rc" ]]; then
   workspace_saved=1
 fi
 
-if ! MT_WORKSPACE="$workspace_dir" "$app_dir/mt" validate >/dev/null 2>&1; then
+if ! (cd "$workspace_dir" && MT_WORKSPACE="$workspace_dir" "$app_dir/mt" validate) >/dev/null 2>&1; then
   echo "warning: validation reported problems; run '$app_dir/mt validate' for details" >&2
 fi
 
