@@ -122,6 +122,9 @@ Skills in [`.agents/skills`](.agents/skills) cover the common workflows:
   for the time and energy you have, and gives a small first step.
 - **[mt-paper-review](.agents/skills/mt-paper-review/SKILL.md)** reads a paper
   with you, journal-club style, and saves the review as a note.
+- **[mt-interview-prep](.agents/skills/mt-interview-prep/SKILL.md)** prepares
+  a fair, practical interview for a candidate, from a quick agenda to a full
+  kit, and adds it to the interview card.
 - **[mt-weekly](.agents/skills/mt-weekly/SKILL.md)** summarizes the week's
   work in a few points you can paste into a status update.
 

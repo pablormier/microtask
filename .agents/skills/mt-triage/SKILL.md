@@ -46,6 +46,8 @@ written from the full capture.
   with [mt-paper-review](../mt-paper-review/SKILL.md) before clearing
   `needs_review`; in batch mode, propose a follow-up task if verification is
   needed.
+- Interviewing a candidate: a task; offer to prepare it with
+  [mt-interview-prep](../mt-interview-prep/SKILL.md).
 - Meeting notes: keep the note and propose a task for each agreed action,
   linking back to it. Don't infer owners or deadlines from discussion.
 - Duplicate, obsolete, or already done: explain the evidence and propose what

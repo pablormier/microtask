@@ -20,6 +20,9 @@
    without adding sections the content doesn't need. Keep priority unassigned
    unless the user gave one or approved it.
 
+   For a card about interviewing someone, offer interview preparation with
+   [mt-interview-prep](../../mt-interview-prep/SKILL.md).
+
 4. **Wait for agreement.** Asking to capture something is not agreement to a
    proposal the user hasn't seen. Show revisions again before creating. Skip
    this step only when the user asked for immediate creation.
