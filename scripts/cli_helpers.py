@@ -40,43 +40,57 @@ REPO_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TIME_QUERY_DEFAULTS = {"archived": "include", "hidden": "include"}
 
 
+def supports_color(stream=None) -> bool:
+    target = sys.stdout if stream is None else stream
+    return bool(hasattr(target, "isatty") and target.isatty() and not os.environ.get("NO_COLOR"))
+
+
+def emit_json(payload: object, *, indent: int | None = None) -> None:
+    print(json.dumps(payload, ensure_ascii=False, indent=indent))
+
+
+def command_query(args: argparse.Namespace, ws: Workspace | None = None) -> card_query.Query | None:
+    """The validated query a command's selection flags describe, or None after printing the error."""
+    resolved = _ws(ws)
+    try:
+        query = card_query.query_from_args(args, env=resolved.environ)
+        card_query.validate(
+            query,
+            statuses=store.statuses(resolved),
+            priorities=list(store.policy(resolved).get("priorities", {})),
+        )
+    except card_query.QueryError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return None
+    return query
+
+
 def _cli_print_error(error: TaskError) -> int:
     text = str(error)
     print(f"error: {text}" if error.prefixed else text, file=sys.stderr)
     return error.exit_code
 
 
-def _cli_run_write(
-    ws: Workspace | None,
-    operation,
-    *,
-    as_json: bool = False,
-    sync: bool = True,
-) -> int:
-    resolved = _ws(ws)
-    try:
-        with time_mutation_lock(resolved):
-            result = operation(resolved)
-    except TaskError as error:
-        if sync and error.sync_needed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-            if as_json:
-                run_auto_sync_for_receipt(ws=resolved)
-            else:
-                _run_auto_sync(ws=resolved)
-        return _cli_print_error(error)
+def _cli_emit_write_result(result, *, as_json: bool = False) -> int:
     if as_json:
         payload = dict(result.receipt)
-        if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-            sync_error = run_auto_sync_for_receipt(ws=resolved)
-            if sync_error:
-                payload["sync_error"] = sync_error
-        print(json.dumps(payload, ensure_ascii=False))
+        if result.sync_error:
+            payload["sync_error"] = result.sync_error
+        emit_json(payload)
         return 0
     if result.message:
         print(result.message)
-    if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
-        return _run_auto_sync(ws=resolved)
-    return 0
+    if result.sync_error:
+        print(f"warning: {result.sync_error}", file=sys.stderr)
+    return result.sync_exit_code
+
+
+def _cli_call_op(op_call, *, as_json: bool = False) -> int:
+    try:
+        result = op_call()
+    except TaskError as error:
+        return _cli_print_error(error)
+    return _cli_emit_write_result(result, as_json=as_json)
 
 
 def open_in_browser(url: str) -> None:
@@ -184,13 +198,23 @@ def consume_repo_selector(arguments: list[str]) -> tuple[list[str], str | None]:
     if arguments[0] in {"-R", "--repo"}:
         if len(arguments) == 1:
             raise ValueError(f"{arguments[0]} requires a repository path or alias")
-        return arguments[2:], arguments[1]
-    if arguments[0].startswith("--repo="):
+        rest, value = arguments[2:], arguments[1]
+    elif arguments[0].startswith("--repo="):
         value = arguments[0].partition("=")[2]
         if not value:
             raise ValueError("--repo requires a repository path or alias")
-        return arguments[1:], value
-    return arguments, None
+        rest = arguments[1:]
+    elif arguments[0].startswith("-R") and len(arguments[0]) > 2:
+        rest, value = arguments[1:], arguments[0][2:]
+    else:
+        return arguments, None
+    if rest and (
+        rest[0] in {"-R", "--repo"}
+        or rest[0].startswith("--repo=")
+        or (rest[0].startswith("-R") and len(rest[0]) > 2)
+    ):
+        raise ValueError("-R / --repo may only be passed once")
+    return rest, value
 
 
 def editor_recovery_directory(ws: Workspace | None = None) -> Path:
@@ -200,14 +224,11 @@ def editor_recovery_directory(ws: Workspace | None = None) -> Path:
 
 
 def create_editor_recovery_copy(
-    item_id: str, contents: bytes, *, metadata: dict[str, object] | None = None, ws: Workspace | None = None,
+    item_id: str, contents: bytes, *, ws: Workspace | None = None,
 ) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", item_id).strip("-") or "item"
     path = editor_recovery_directory(ws) / f"{safe_id}-edit-{uuid.uuid4().hex}.md"
     atomic_write(path, contents)
-    if metadata is not None:
-        sidecar = path.with_suffix(".meta.json")
-        atomic_write(sidecar, (json.dumps({"version": 1, **metadata}, ensure_ascii=False) + "\n").encode("utf-8"))
     return path
 
 

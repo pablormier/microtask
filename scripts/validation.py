@@ -45,7 +45,12 @@ def _check_item(
 ) -> tuple[str | None, str | None]:
     """Validate one card; return its (kind, status), or (None, None) when unreadable."""
     rel = path.relative_to(data_root)
-    raw = path.read_bytes().decode("utf-8") if raw is None else raw
+    if raw is None:
+        try:
+            raw = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            errors.append(f"{rel}: cannot read card: {error}")
+            return None, None
     if raw.strip() == "":
         errors.append(f"{rel}: file is empty")
         return None, None
@@ -121,23 +126,24 @@ def _item_identity(
     *,
     data_root: Path,
     strict_time: bool = False,
+    fm: dict | None = None,
+    check_time: bool = True,
 ) -> tuple[dict[str, set[str]], bool]:
     """Only the values that can introduce cross-card conflicts."""
-    fm_text, _body = card_format.parse_frontmatter(raw or "")
-    fm = card_format.parse_yaml(fm_text) if fm_text is not None else {}
-    capture = fm.get("capture_id")
     if raw is None:
         return {"id": set(), "capture_id": set(), "time session id": set()}, False
-    try:
-        sessions = (
-            {str(entry["session_id"]) for entry in card_format.time_log_entries(raw)}
-            if fm.get("kind") == "task"
-            else set()
-        )
-    except ValueError as error:
-        if strict_time:
-            raise ValueError(f"{path.relative_to(data_root)}: cannot check time-session uniqueness: {error}") from error
-        sessions = set()  # The changed card's validators report malformed time logs.
+    if fm is None:
+        fm_text, _body = card_format.parse_frontmatter(raw)
+        fm = card_format.parse_yaml(fm_text) if fm_text is not None else {}
+    capture = fm.get("capture_id")
+    sessions: set[str] = set()
+    if check_time and fm.get("kind") == "task":
+        try:
+            sessions = {str(entry["session_id"]) for entry in card_format.time_log_entries(raw)}
+        except ValueError as error:
+            if strict_time:
+                raise ValueError(f"{path.relative_to(data_root)}: cannot check time-session uniqueness: {error}") from error
+            sessions = set()  # The changed card's validators report malformed time logs.
     return {
         "id": {str(fm["id"])} if fm.get("id") else set(),
         "capture_id": {capture} if isinstance(capture, str) else set(),
@@ -225,10 +231,12 @@ def check_changes(
         if need_topic_scan and isinstance(fm.get("topic"), str):
             other_topics.append(fm["topic"])
         identity, _ = _item_identity(
-            raw if added["time session id"] else ("---\n" + fm_text + "\n---\n"),
+            raw,
             path,
             data_root=root,
             strict_time=bool(added["time session id"]),
+            fm=fm,
+            check_time=bool(added["time session id"]),
         )
         for key, values in added.items():
             for value in values & identity[key]:
@@ -280,15 +288,19 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
             errors.append("settings rules.max_doing_tasks must be a positive integer")
 
     md_files: list[Path] = []
-    if not cards_root.is_dir():
+    if cards_root.is_symlink():
+        errors.append("cards/ must not be a symbolic link")
+    elif not cards_root.is_dir():
         errors.append("cards/ must exist as a directory")
     else:
         for entry in sorted(cards_root.iterdir()):
             if entry.name.startswith("."):
                 continue
-            if entry.is_dir():
+            if entry.is_symlink():
+                errors.append(f"symbolic link under cards/: {entry.name}")
+            elif entry.is_dir():
                 errors.append(f"unexpected directory under cards/: {entry.name}/")
-            elif entry.suffix != ".md":
+            elif not entry.is_file() or entry.suffix != ".md":
                 errors.append(f"unexpected file under cards/: {entry.name}")
             else:
                 md_files.append(entry)
@@ -350,6 +362,19 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
         note_count=kind_counts["note"],
         draft_count=len(draft_files),
     )
+
+
+def format_audit_report(report: AuditReport) -> tuple[int, list[str], list[str]]:
+    """Return (exit_code, stdout_lines, stderr_lines) for an AuditReport."""
+    if report.errors:
+        stderr_lines = [f"FAILED: {len(report.errors)} error(s):", *(f"  - {error}" for error in report.errors)]
+        return 1, [], stderr_lines
+    stderr_lines = [f"WARNING: {warning}" for warning in report.warnings]
+    stdout_lines = [
+        f"OK: validated {report.task_count} task file(s), {report.note_count} note file(s), "
+        f"and {report.draft_count} draft file(s)."
+    ]
+    return 0, stdout_lines, stderr_lines
 
 
 def audit(root: Path, policy: dict) -> list[str]:

@@ -6,6 +6,8 @@ from datetime import date, timedelta
 import os
 from pathlib import Path
 import re
+import shutil
+import uuid
 
 import policy_parser
 
@@ -100,7 +102,9 @@ def workspace_error(
     if not Path(value).is_absolute():
         return f"MT_WORKSPACE must be an absolute path: {value}"
     root = resolve_workspace_root(env, app_root=app_root)
-    if root == app_root or is_data_workspace(root):
+    root_resolved = root.resolve()
+    app_resolved = app_root.resolve()
+    if (root_resolved == app_resolved and is_legacy_workspace(app_resolved)) or is_data_workspace(root):
         return None
     if is_unmigrated_workspace(root):
         return unmigrated_message(root, f"MT_WORKSPACE={root} {app_root / 'mt'} migrate")
@@ -154,16 +158,21 @@ def missing_workspace_error(
     return f"no workspace yet. Run '{Path(app_root) / 'mt'} init' to create one in {default}"
 
 
+def _shift_demo_date(match: re.Match[str], offset: int) -> str:
+    try:
+        shifted = date(int(match.group(1)), int(match.group(2)), int(match.group(3))) + timedelta(days=offset)
+    except ValueError:
+        return match.group(0)
+    return shifted.isoformat() + (match.group(4) or "")
+
+
 def rebase_demo_dates(text: str) -> str:
     offset = (date.today() - DEMO_DATE_ANCHOR).days
     if offset == 0:
         return text
     return re.sub(
         r"\b(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}:\d{2})?\b",
-        lambda match: (
-            date(int(match.group(1)), int(match.group(2)), int(match.group(3))) + timedelta(days=offset)
-        ).isoformat()
-        + (match.group(4) or ""),
+        lambda match: _shift_demo_date(match, offset),
         text,
     )
 
@@ -241,7 +250,7 @@ class Workspace:
     @property
     def in_app(self) -> bool:
         """The workspace is the application's own: its workspace/ folder, or an old-style root."""
-        return self.root in (self.app_root, default_workspace_path(self.app_root))
+        return self.root.resolve() in (self.app_root.resolve(), default_workspace_path(self.app_root).resolve())
 
     def real_cards_root(self) -> Path:
         return self.root / "cards"
@@ -288,9 +297,6 @@ class Workspace:
         )
         return self._demo_state
 
-    def reset_demo(self) -> None:
-        self._demo_state = None
-
     def demo_active(self) -> bool:
         if self._demo_state is None:
             return self.pin_demo()
@@ -299,14 +305,31 @@ class Workspace:
     def maybe_seed_demo(self) -> None:
         if not self.demo_active():
             return
-        if (self.demo_root() / "cards").is_dir():
+        demo = self.demo_root()
+        if (demo / "cards").is_dir():
             return
         examples = self.app_root / "examples"
-        for source in sorted(examples.rglob("*.md")):
-            relative = source.relative_to(examples)
-            destination = self.demo_root() / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
+        demo.parent.mkdir(parents=True, exist_ok=True)
+        staging = demo.parent / f".demo.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        try:
+            staging.mkdir(parents=True, exist_ok=True)
+            for source in sorted(examples.rglob("*.md")):
+                relative = source.relative_to(examples)
+                destination = staging / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
+            if (demo / "cards").is_dir():
+                return
+            if demo.exists():
+                shutil.rmtree(demo)
+            try:
+                os.replace(staging, demo)
+            except OSError:
+                if not (demo / "cards").is_dir():
+                    raise
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
 
     def active_root(self) -> Path:
         return self.demo_root() if self.demo_active() else self.root

@@ -64,14 +64,6 @@ function createCaptureComposer() {
         "T" + pad(date.getHours()) + ":" + pad(date.getMinutes()) + ":" + pad(date.getSeconds());
     },
 
-    dateLabel() {
-      const created = this.draft && this.draft.created;
-      if (!created) return "just now";
-      const date = new Date(created);
-      if (Number.isNaN(date.getTime())) return created;
-      return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-    },
-
     newTaskOptions(ctx) {
       // A board filtered to one project or topic files new cards there too.
       const scope = ctx.scopeDefaults || {};

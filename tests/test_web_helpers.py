@@ -79,3 +79,19 @@ assert.deepEqual(
   ['Learning', 'Learning/Rust', 'Learning/Rust/Async', 'Learning/Go', 'Work']
 );
 """)
+
+
+class TemplateMethodTests(unittest.TestCase):
+    def test_every_method_a_template_calls_is_defined_in_the_dashboard_js(self) -> None:
+        import re
+        web = Path(__file__).resolve().parents[1] / "tools" / "web"
+        markup = "\n".join(path.read_text(encoding="utf-8")
+                           for path in [web / "index.html", *sorted((web / "templates").rglob("*.html"))])
+        expressions = re.findall(r'(?:@[\w.:-]+|x-[\w:.-]+|:[\w-]+)="([^"]*)"', markup)
+        called = {name for expression in expressions for name in re.findall(r"\b([A-Za-z_]\w*)\(", expression)}
+        script = "\n".join(path.read_text(encoding="utf-8") for path in sorted((web / "js").glob("*.js")))
+        defined = set(re.findall(r"\b([A-Za-z_]\w*)\s*(?:\(|:\s*(?:async\s*)?function|=\s*(?:async\s*)?\()", script))
+        browser = {"ResizeObserver", "blur", "disconnect", "observe", "requestSubmit", "translateY",
+                   "String", "Number", "Boolean", "Array", "Object", "Math", "Date", "JSON", "Set", "Map"}
+        self.assertEqual(sorted(called - defined - browser), [])
+

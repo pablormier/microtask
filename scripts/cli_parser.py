@@ -47,7 +47,6 @@ from cli_drafts import (
     command_draft_edit,
     command_draft_list,
     command_draft_read,
-    command_draft_recover,
     command_draft_save,
 )
 from cli_helpers import (
@@ -215,7 +214,7 @@ def _register_draft_parsers(sub: argparse._SubParsersAction) -> None:
     draft_create.add_argument("--created-at", help="local ISO timestamp for a new task or note draft")
     draft_create.add_argument("--file", metavar="PATH", help="initial Markdown body; - reads stdin")
     draft_create.add_argument("--json", dest="as_json", action="store_true", help="print the saved draft as JSON")
-    draft_create.set_defaults(func=command_draft_create, section_text="")
+    draft_create.set_defaults(func=command_draft_create, file_text="")
     draft_read = draft_sub.add_parser("read", help="print one draft body or its JSON record")
     draft_read.add_argument("draft_id")
     draft_read.add_argument("--json", dest="as_json", action="store_true", help="print metadata and body as JSON")
@@ -237,9 +236,6 @@ def _register_draft_parsers(sub: argparse._SubParsersAction) -> None:
     draft_save.add_argument("--expected-hash", required=True, help="content hash returned by draft read/list")
     draft_save.add_argument("--json", dest="as_json", action="store_true", help="print the card receipt as JSON")
     draft_save.set_defaults(func=command_draft_save)
-    draft_recover = draft_sub.add_parser("recover", help="import editor recovery copies from .mt/recovery/edit")
-    draft_recover.add_argument("--json", dest="as_json", action="store_true", help="print imported draft records as JSON")
-    draft_recover.set_defaults(func=command_draft_recover)
 
 
 def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
@@ -396,7 +392,7 @@ def _register_topic_parsers(sub: argparse._SubParsersAction) -> None:
 
 
 def _add_query_output_arguments(parser: argparse.ArgumentParser, what: str) -> None:
-    parser.add_argument("--json", action="store_true", help=f"print matching {what} as a JSON array")
+    parser.add_argument("--json", dest="as_json", action="store_true", help=f"print matching {what} as a JSON array")
     output = parser.add_mutually_exclusive_group()
     output.add_argument("--compact", action="store_true",
                         help="print minimal-field JSON records, one per line")
@@ -416,7 +412,7 @@ def _register_query_parsers(sub: argparse._SubParsersAction) -> None:
     focus.add_argument("--set", dest="set_query", help="task query to pin as manual focus")
     focus.add_argument("-n", "--next", action="store_true", help="cycle to the next ranked local focus task")
     focus.add_argument("--clear", action="store_true", help="clear the local focus selection")
-    focus.add_argument("--json", action="store_true", help="print selection, ordered candidates, and nearby deadline alerts as JSON")
+    focus.add_argument("--json", dest="as_json", action="store_true", help="print selection, ordered candidates, and nearby deadline alerts as JSON")
     focus.add_argument("--by", help="choose tasks available to this identity; does not claim work")
     focus.description = ("Show the task to focus on next among open tasks. Selection filters narrow the "
                          "candidates; --status further limits the open statuses. Setting or clearing the "
@@ -570,6 +566,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
         "--apply", dest="apply_plan", metavar="PLAN.json",
         help="apply a saved JSON preview after verifying selection membership and every card hash; - reads stdin",
     )
+    bulk_edit.add_argument("--by", metavar="USERNAME", help="username of the claimant; needed for status changes or archiving claimed tasks")
     bulk_edit.add_argument(
         "--json", dest="as_json", action="store_true",
         help="emit the hash-guarded preview as JSON, or a saved receipt with --apply",

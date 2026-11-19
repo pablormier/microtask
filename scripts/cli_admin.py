@@ -16,6 +16,7 @@ import textwrap
 import card_query
 from cli_helpers import (
     REPO_ALIAS_RE,
+    command_query,
     load_repo_aliases,
     show_workspace,
     validate_repo_workspace,
@@ -27,7 +28,6 @@ import transaction
 from store import (
     _ws,
     active_root,
-    command_query,
     demo_active,
     discover,
     foreign_env,
@@ -124,6 +124,9 @@ def skills_invocation(project: str | None, topic: str | None, ws: Workspace | No
 def command_skills_install(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
     project_dir = Path(args.dir).expanduser().resolve()
+    if not project_dir.is_dir():
+        print(f"error: project directory does not exist: {project_dir}", file=sys.stderr)
+        return 2
     sources = skill_sources(resolved)
     if not sources:
         print(f"error: no skills found in {resolved.app_root / '.agents' / 'skills'}", file=sys.stderr)
@@ -460,21 +463,15 @@ def command_validate(args: argparse.Namespace, ws: Workspace | None = None) -> i
             print(f"  - {line}", file=sys.stderr)
         return 1
     report = validation.audit_workspace(active_root(resolved), effective_policy)
-    if report.errors:
-        print(f"FAILED: {len(report.errors)} error(s):", file=sys.stderr)
-        for error in report.errors:
-            print(f"  - {error}", file=sys.stderr)
-        return 1
-    for warning in report.warnings:
-        print(f"WARNING: {warning}", file=sys.stderr)
-    if resolved.root == resolved.app_root and not resolved.environ.get("MT_WORKSPACE"):
+    code, stdout_lines, stderr_lines = validation.format_audit_report(report)
+    for line in stderr_lines:
+        print(line, file=sys.stderr)
+    if code == 0 and resolved.root == resolved.app_root and not resolved.environ.get("MT_WORKSPACE"):
         print("note: your cards sit next to the application code. Run 'mt migrate' to move them into "
               "workspace/, so 'mt update' works without Git.", file=sys.stderr)
-    print(
-        f"OK: validated {report.task_count} task file(s), {report.note_count} note file(s), "
-        f"and {report.draft_count} draft file(s)."
-    )
-    return 0
+    for line in stdout_lines:
+        print(line)
+    return code
 
 
 def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | None = None) -> int:
@@ -624,7 +621,7 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         if value is True:
             command.append(flag)
         else:
-            command.extend(arg for item in (value if isinstance(value, list) else [value]) for arg in (flag, item))
+            command.extend(f"{flag}={item}" for item in (value if isinstance(value, list) else [value]))
     # Become the dashboard instead of waiting on it as a child: a supervisor's SIGTERM (for
     # example `docker stop`) then reaches the server itself, which closes and finishes a running
     # sync. Ctrl-C and the exit code behave as before.

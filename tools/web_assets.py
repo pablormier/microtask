@@ -85,6 +85,8 @@ def load_js(web_dir: Path = WEB_DIR) -> str:
     js_files = [
         "markdown.js",
         "card_helpers.js",
+        "board_api.js",
+        "board_views.js",
         "picker.js",
         "metadata_editor.js",
         "draft_store.js",
@@ -212,13 +214,13 @@ def safe_json(value: object) -> str:
     )
 
 
-def build_html(config: dict, *, web_dir: Path = WEB_DIR) -> str:
+def build_html_with_nonce(config: dict, *, web_dir: Path = WEB_DIR) -> tuple[str, str]:
     nonce = secrets.token_urlsafe(18)
     template = load_template(web_dir)
     css = load_css(web_dir)
     js = load_js(web_dir)
 
-    page = fill_placeholders(template, {
+    replacements = {
         "{pico_css}": PICO_CSS,
         "{katex_css}": KATEX_CSS,
         "{alpine_js}": ALPINE_JS,
@@ -229,9 +231,16 @@ def build_html(config: dict, *, web_dir: Path = WEB_DIR) -> str:
         "{dashboard_css}": css,
         "{nonce}": nonce,
         "{app_script}": js,
-    })
-    pending = ("{config_json}",)
-    leftover = [m for m in re.findall(r"\{[a-z_]+\}", page) if m not in pending]
-    if leftover:
-        raise ValueError(f"unreplaced placeholders in dashboard HTML: {leftover}")
-    return fill_placeholders(page, {"{config_json}": safe_json(config)})
+    }
+    pending = {"{config_json}"}
+    template_placeholders = set(re.findall(r"\{[a-z_]+\}", template))
+    unknown = sorted(template_placeholders - set(replacements) - pending)
+    if unknown:
+        raise ValueError(f"unreplaced placeholders in dashboard HTML: {unknown}")
+    page = fill_placeholders(template, replacements)
+    return fill_placeholders(page, {"{config_json}": safe_json(config)}), nonce
+
+
+def build_html(config: dict, *, web_dir: Path = WEB_DIR) -> str:
+    page, _nonce = build_html_with_nonce(config, web_dir=web_dir)
+    return page

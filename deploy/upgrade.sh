@@ -83,10 +83,11 @@ link_target() {
 # relative, so it does not depend on --root. os.replace works the same on Linux
 # and macOS, where 'mv -T' does not exist.
 set_link() {
-  local name="$1" target="$2"
-  rm -f "$apps/.$name.new"
-  ln -s "$target" "$apps/.$name.new"
-  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "$apps/.$name.new" "$apps/$name"
+  local name="$1" target="$2" tmp_link
+  tmp_link="$(mktemp "$apps/.$name.XXXXXX")"
+  rm -f "$tmp_link"
+  ln -s "$target" "$tmp_link"
+  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2])' "$tmp_link" "$apps/$name"
 }
 
 workspace_names() {
@@ -100,14 +101,34 @@ workspace_names() {
 
 restart_services() {
   local name
+  local failed_services=()
   [[ -z "$no_systemctl" ]] || return 0
-  for name in $(workspace_names); do
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
     if systemctl is-enabled --quiet "mt-web@$name" 2>/dev/null; then
       echo "restarting mt-web@$name"
-      systemctl restart "mt-web@$name"
+      if ! systemctl restart "mt-web@$name"; then
+        failed_services+=("mt-web@$name")
+      fi
     fi
-  done
+  done < <(workspace_names)
+  if [[ ${#failed_services[@]} -gt 0 ]]; then
+    die "failed to restart service(s): ${failed_services[*]}"
+  fi
 }
+
+lock_dir=""
+tmp=""
+cleanup_upgrade() {
+  [[ -z "$tmp" ]] || rm -rf "$tmp"
+  [[ -z "$lock_dir" ]] || rmdir "$lock_dir" 2>/dev/null || true
+}
+if [[ -z "$dry_run" ]]; then
+  mkdir -p "$apps"
+  lock_dir="$apps/.upgrade.lock"
+  mkdir "$lock_dir" 2>/dev/null || die "another upgrade.sh run holds $lock_dir"
+  trap cleanup_upgrade EXIT
+fi
 
 current="$(link_target current)"
 previous="$(link_target previous)"
@@ -147,13 +168,20 @@ import re, sys
 def minor(tag):
     match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag.strip())
     return (int(match.group(1)), int(match.group(2))) if match else None
+def version(tag):
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
 current, target = minor(sys.argv[1]), minor(sys.argv[2])
+if version(sys.argv[2]) < version(sys.argv[1]):
+    print("downgrade")
+    sys.exit(0)
 later = sorted({m for m in map(minor, sys.stdin) if m and m > current})
 allowed = later[0] if later else current
 if target > allowed:
     print("v%d.%d" % allowed)
 ' "$current" "$tag")"
-  if [[ -n "$verdict" ]]; then
+  if [[ "$verdict" == "downgrade" ]]; then
+    die "$tag is older than $current; use --rollback to revert to the previous version, or pass --allow-skip to downgrade"
+  elif [[ -n "$verdict" ]]; then
     die "$tag skips a minor version after $current; the next one is $verdict.x. Upgrade one minor version at a time, newest patch of each, or pass --allow-skip if you know what you are doing"
   fi
 fi
@@ -168,7 +196,6 @@ fi
 mkdir -p "$apps"
 chmod 755 "$apps"
 tmp="$(mktemp -d "$apps/.new-$tag.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT
 
 echo "cloning $tag"
 clone_args=(--quiet --branch "$tag" -c advice.detachedHead=false)
@@ -188,12 +215,13 @@ chmod -R go-w,a+rX "$tmp/app"
 
 mv "$tmp/app" "$apps/$tag"
 rmdir "$tmp"
-trap - EXIT
+tmp=""
 echo "installed $apps/$tag"
 
 # Check every workspace with the new version before switching.
 failed=()
-for name in $(workspace_names); do
+while IFS= read -r name; do
+  [[ -n "$name" ]] || continue
   ws="$workspaces/$name"
   if [[ -z "$no_systemctl" ]]; then
     if command -v runuser >/dev/null 2>&1; then
@@ -212,7 +240,7 @@ for name in $(workspace_names); do
     printf '%s\n' "$output" | sed 's/^/  /' >&2
     failed+=("$name")
   fi
-done
+done < <(workspace_names)
 if [[ ${#failed[@]} -gt 0 ]]; then
   echo "error: ${failed[*]} did not validate with $tag. 'current' is unchanged and nothing was restarted." >&2
   echo "The new version stays in $apps/$tag. Remove it by hand when you no longer need it." >&2

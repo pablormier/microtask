@@ -58,7 +58,7 @@ def lifecycle_errors(ctx: CheckContext) -> list[str]:
     if ctx.kind != "task":
         return []
     errors = []
-    if "completed" in ctx.fm and ctx.fm["status"] != "done":
+    if ctx.fm.get("completed") is not None and ctx.fm["status"] != "done":
         errors.append(f"{ctx.rel}: completed is only valid for done tasks")
     if ctx.fm.get("claimed_by") is not None and ctx.fm["status"] != "doing":
         errors.append(f"{ctx.rel}: a claimed task must have status doing")

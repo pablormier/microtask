@@ -212,7 +212,6 @@ same files:
 ```sh
 mt draft list
 mt draft create note --title "Meeting follow-up" --file notes.md
-mt draft recover          # recover editor copies left behind by a crash
 ```
 
 Saving a draft checks its revision so another tab or the CLI never silently

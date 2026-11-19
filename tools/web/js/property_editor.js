@@ -49,9 +49,11 @@ function createPropertyEditor() {
       const oldForm = this.form || {};
       let oldBaseline = {};
       try { oldBaseline = JSON.parse(this.baseline || "{}"); } catch (_) {}
+      let prevComparable = {};
+      try { prevComparable = JSON.parse(this.comparable(oldForm)); } catch (_) {}
       const form = this.values(task, defaults);
       for (const field of Object.keys(form)) {
-        if (JSON.stringify(oldForm[field]) !== JSON.stringify(oldBaseline[field])) form[field] = oldForm[field];
+        if (JSON.stringify(prevComparable[field]) !== JSON.stringify(oldBaseline[field])) form[field] = oldForm[field];
       }
       this.form = form;
       this.baseline = this.comparable(this.values(task, defaults));

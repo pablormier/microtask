@@ -99,7 +99,15 @@ def release_tags() -> dict[tuple[int, int, int], str]:
             if version and TAG_PATTERN.fullmatch(tag):
                 found.setdefault(version, tag)
         match = re.search(r'<([^>]+)>\s*;\s*rel="next"', link)
-        url = match.group(1) if match else None
+        if match:
+            next_url = match.group(1)
+            parsed_next = urllib.parse.urlparse(next_url)
+            parsed_base = urllib.parse.urlparse(url)
+            if parsed_next.scheme != parsed_base.scheme or parsed_next.scheme not in {"http", "https"} or parsed_next.netloc != parsed_base.netloc:
+                raise UpdateError(f"refusing to follow untrusted pagination URL: {next_url}")
+            url = next_url
+        else:
+            url = None
     if not found:
         raise UpdateError("no releases found; set MT_RELEASE_TAG=vX.Y.Z to choose one")
     return found
@@ -131,7 +139,8 @@ def plan_target(version: str) -> tuple[str | None, str, str | None, str | None]:
     override = os.environ.get("MT_RELEASE_TAG")
     if override:
         tag = check_tag(override)
-        return (None if tag == version else tag), tag, None, None
+        same = (parse_version(tag) == parse_version(version)) if parse_version(version) is not None else (tag == version)
+        return (None if same else tag), tag, None, None
     releases = release_tags()
     latest = releases[max(releases)]
     current = parse_version(version)
@@ -218,8 +227,13 @@ def tree_digest(path: Path) -> str:
                     continue
                 file = Path(current) / name
                 digest.update(str(file.relative_to(path)).encode() + b"\0")
-                digest.update(b"x" if os.access(file, os.X_OK) else b"-")
-                digest.update(file.read_bytes())
+                if file.is_symlink():
+                    digest.update(b"L" + os.readlink(file).encode("utf-8", errors="surrogateescape"))
+                else:
+                    digest.update(b"x" if os.access(file, os.X_OK) else b"-")
+                    digest.update(file.read_bytes())
+    elif path.is_symlink():
+        digest.update(b"L" + os.readlink(path).encode("utf-8", errors="surrogateescape"))
     else:
         digest.update(b"x" if os.access(path, os.X_OK) else b"-")
         digest.update(path.read_bytes())
@@ -316,10 +330,14 @@ def rollback(backup: Path, undo: list[tuple[str, str]]) -> None:
 
 def write_file(name: str, text: str) -> None:
     handle, temporary = tempfile.mkstemp(prefix=f".{name}.", dir=ROOT)
-    with os.fdopen(handle, "w", encoding="utf-8") as output:
-        output.write(text)
-    os.chmod(temporary, 0o644)
-    os.replace(temporary, ROOT / name)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as output:
+            output.write(text)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, ROOT / name)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def write_version(tag: str, release_entries: list[str]) -> None:
@@ -403,16 +421,19 @@ def main(argv: list[str] | None = None) -> int:
             changes = plan(new_root)
             backup = scratch / "old"
             undo = swap(new_root, changes, backup)
-            check = run_mt("help")
-            if check.returncode:
+            try:
+                check = run_mt("help")
+                if check.returncode:
+                    detail = check.stderr.strip() or check.stdout.strip()
+                    raise UpdateError(f"the new version did not start, so nothing was changed: {detail}")
+                write_version(tag, release_entries)
+            except BaseException:
                 rollback(backup, undo)
-                detail = check.stderr.strip() or check.stdout.strip()
-                raise UpdateError(f"the new version did not start, so nothing was changed: {detail}")
-            write_version(tag, release_entries)
+                raise
             validation = run_mt("validate")
         finally:
-            lock.close()
             shutil.rmtree(scratch, ignore_errors=True)
+            lock.close()
         print(f"Updated microtask: {version} -> {tag}")
         for label in ("added", "removed", "replaced"):
             if changes[label]:

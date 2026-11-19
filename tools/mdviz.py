@@ -7,9 +7,11 @@ import base64
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import sys
 import tempfile
 
@@ -18,7 +20,7 @@ sys.path.insert(0, str(APP_ROOT / "scripts"))
 sys.path.insert(0, str(APP_ROOT / "tools"))
 
 import card_format  # noqa: E402
-import cli  # noqa: E402
+import cli_helpers  # noqa: E402
 import web_assets  # noqa: E402
 
 
@@ -147,19 +149,19 @@ def render_metadata(properties: dict[str, object], *, is_card: bool) -> str:
     return result
 
 
-def safe_json(value: object) -> str:
-    return (
-        json.dumps(value, ensure_ascii=False)
-        .replace("<", "\\u003c")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
-    )
+safe_json = web_assets.safe_json
 
 
 def default_output_path(source: Path) -> Path:
     digest = hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:8]
     name = source.stem or "markdown"
-    return Path(tempfile.gettempdir()) / f"{name}-{digest}.mdviz.html"
+    # One private folder per user, so a preview of the same file reuses one path.
+    folder = Path(tempfile.gettempdir()) / f"mt-mdviz-{os.getuid()}"
+    folder.mkdir(mode=0o700, exist_ok=True)
+    info = folder.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise OSError(f"{folder} is not a private folder owned by you; pass --out")
+    return folder / f"{name}-{digest}.mdviz.html"
 
 
 def build_html(source: Path, text: str) -> str:
@@ -208,14 +210,14 @@ def main(argv: list[str]) -> int:
     except (OSError, UnicodeDecodeError) as error:
         print(f"error: failed to read Markdown: {error}", file=sys.stderr)
         return 1
-    output = args.out or default_output_path(source)
     try:
+        output = args.out or default_output_path(source)
         output.write_text(build_html(source, text), encoding="utf-8")
     except (OSError, ValueError) as error:
         print(f"error: failed to write preview: {error}", file=sys.stderr)
         return 1
     if not args.no_open:
-        cli.open_in_browser(output.resolve().as_uri())
+        cli_helpers.open_in_browser(output.resolve().as_uri())
     print(output)
     return 0
 

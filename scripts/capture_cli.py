@@ -69,7 +69,7 @@ def read_text(label: str = "Text") -> str:
             print("> ", end="", flush=True)
             chunk = os.read(descriptor, 65536)
             chunks.append(chunk)
-            if not chunk.endswith(b"\n"):
+            if not chunk or (len(chunk) < 65536 and not chunk.endswith(b"\n")):
                 print()
                 # A newline submits a line rather than becoming a compulsory
                 # trailing newline in the saved body. Interior blank lines stay.

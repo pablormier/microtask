@@ -66,14 +66,7 @@ def unlock(handle) -> None:
     handle.close()
 
 
-def atomic_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary.write_bytes(content)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic_write = card_format.atomic_write
 
 
 def serialize(metadata: dict[str, object], body: str) -> bytes:
@@ -102,7 +95,7 @@ def read_path(path: Path) -> dict[str, object]:
         )
     if mode != "new":
         raise ValueError(f"{path}: malformed draft mode; expected new")
-    if not isinstance(metadata.get("title"), str) or any(char in metadata["title"] for char in "\r\n"):
+    if not isinstance(metadata.get("title"), str) or any(char in metadata["title"] for char in "\r\n\x00"):
         raise ValueError(f"malformed draft title: {path}")
     for field in ("created", "updated"):
         value = metadata.get(field)
@@ -135,6 +128,8 @@ def list_drafts(root: Path) -> list[dict[str, object]]:
     for path in sorted(directory.glob("*.md")):
         try:
             items.append(read_path(path))
+        except FileNotFoundError:
+            continue
         except RetiredDraftError as error:
             print(f"warning: skipping {error}", file=sys.stderr)
     return items
@@ -190,18 +185,22 @@ def save(
             created = str(previous.get("created") or now)
 
         title = fields.get("title", previous.get("title", "") if previous else "")
-        if not isinstance(title, str) or any(char in title for char in "\r\n"):
+        if not isinstance(title, str) or any(char in title for char in "\r\n\x00"):
             raise ValueError("draft title must be single-line text")
         capture_id = fields.get("capture_id", previous.get("capture_id") if previous else None)
-        created_value = fields.get("created", previous.get("created") if previous else now)
         try:
             parsed_capture_id = uuid.UUID(capture_id) if isinstance(capture_id, str) else None
         except ValueError:
             parsed_capture_id = None
         if parsed_capture_id is None or str(parsed_capture_id) != capture_id.lower():
             raise ValueError("new note draft capture ID must be a canonical UUID")
-        if not isinstance(created_value, str) or not card_format.is_timestamp(created_value):
+        if not card_format.is_timestamp(created):
             raise ValueError("new capture draft created time must be a valid local ISO timestamp with seconds")
+        if not isinstance(now, str) or not card_format.is_timestamp(now):
+            raise ValueError("draft updated time must be a valid local ISO timestamp with seconds")
+        origin = fields.get("origin", previous.get("origin") if previous else None)
+        if origin is not None and not isinstance(origin, str):
+            raise ValueError("draft origin must be text or null")
         metadata: dict[str, object] = {
             "id": draft_id,
             "kind": kind,
@@ -209,8 +208,8 @@ def save(
             "created": created,
             "updated": now,
             "title": title,
-            "capture_id": fields.get("capture_id", previous.get("capture_id") if previous else None),
-            "origin": fields.get("origin", previous.get("origin") if previous else None),
+            "capture_id": capture_id,
+            "origin": origin,
         }
         for field in ("status", "priority", "type", "project", "topic", "tags", "due", "due_kind", "instructions"):
             if field in fields:
@@ -225,9 +224,12 @@ def save(
                 instructions.encode("utf-8")
             except UnicodeEncodeError as error:
                 raise ValueError("draft instructions must be valid UTF-8") from error
-        if previous and not fields.get("title") and "title" not in fields:
-            metadata["title"] = previous.get("title", "")
-        atomic_write(path, serialize(metadata, body))
+        serialized = serialize(metadata, body)
+        frontmatter, _ = card_format.parse_frontmatter(serialized.decode("utf-8"))
+        if frontmatter is None:
+            raise ValueError("malformed draft frontmatter")
+        card_format.parse_yaml(frontmatter)
+        atomic_write(path, serialized)
         return read_path(path)
     finally:
         unlock(lock_handle)

@@ -152,6 +152,11 @@ def backticked_references(markdown: str) -> list[str]:
         if char == "\\":
             index += 2
             continue
+        if char == "<":
+            html = HTML_RE.match(text, index)
+            if html:
+                index = html.end()
+                continue
         if char == "`":
             index, inner = _inline_code_span(text, index)
             candidate = inner.strip()

@@ -277,7 +277,7 @@ class TriageCheckTests(unittest.TestCase):
         result = self.policy_json()
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("duplicate settings status ID 'review'", result.stderr)
+        self.assertIn("duplicate settings key 'review'", result.stderr)
 
     def test_status_ids_must_be_safe_slugs_and_notes_is_reserved(self) -> None:
         self.policy().write_text(

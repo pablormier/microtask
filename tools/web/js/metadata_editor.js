@@ -13,13 +13,10 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     disabled: false,
     fieldErrors: fieldErrors && typeof fieldErrors === "object" ? fieldErrors : {},
     value,
-    tagsText: formatMetadataTags(value.tags),
     dateValue: due.slice(0, 10),
     timeValue: due.includes("T") ? due.split("T")[1].slice(0, 5) : "",
     dateFocused: false,
     timeFocused: false,
-    tagsEdited: false,
-    dueEdited: false,
     priorities: config.task_priorities || {},
     types: config.task_types || {},
     dueKinds: config.task_due_kinds || {},
@@ -34,11 +31,8 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     replaceValue(next) {
       this.value = normalizeMetadataValue(next, config);
       const due = String(this.value.due || "");
-      this.tagsText = formatMetadataTags(this.value.tags);
       this.dateValue = due.slice(0, 10);
       this.timeValue = due.includes("T") ? due.split("T")[1].slice(0, 5) : "";
-      this.tagsEdited = false;
-      this.dueEdited = false;
     },
     syncIdentity(identity, sourceValue, errors) {
       const nextIdentity = String(identity || "");
@@ -48,12 +42,7 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
       }
       this.fieldErrors = errors && typeof errors === "object" ? errors : {};
     },
-    syncTags() {
-      this.tagsEdited = true;
-      this.value.tags = parseMetadataTags(this.tagsText);
-    },
     syncDue() {
-      this.dueEdited = true;
       if (!this.dateValue) {
         this.timeValue = "";
         this.value.due = null;
@@ -89,7 +78,8 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
     pickerMatch(field, text) {
       if (field === "topic") {
         const path = normalizeTopicPath(text).toLowerCase();
-        return path ? this.topicTree.find(node => node.path.toLowerCase() === path) : null;
+        const node = path ? this.topicTree.find(node => node.path.toLowerCase() === path) : null;
+        return node ? { kind: "option", name: node.path, label: node.path } : null;
       }
       const lower = String(text || "").trim().toLowerCase();
       return lower ? this.pickerChoices(field).find(choice => choice.name.toLowerCase() === lower) : null;
@@ -153,14 +143,10 @@ function cardMetadataEditor(initial, createMode, prefix, config, fieldErrors, ki
       if (!tag || this.value.tags.some(existing => existing.toLowerCase() === tag.toLowerCase())) return;
       const canonical = (this.pickerMatch("tags", tag) || { name: tag }).name;
       this.value.tags = [...this.value.tags, canonical];
-      this.tagsText = formatMetadataTags(this.value.tags);
-      this.tagsEdited = true;
       this.emitChange();
     },
     removeTag(tag) {
       this.value.tags = this.value.tags.filter(existing => existing !== tag);
-      this.tagsText = formatMetadataTags(this.value.tags);
-      this.tagsEdited = true;
       this.emitChange();
     },
   };

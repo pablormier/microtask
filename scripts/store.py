@@ -1,7 +1,6 @@
 """Card store, lookups, cache, and error types for microtask."""
 from __future__ import annotations
 
-import argparse
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
@@ -10,14 +9,12 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import sys
 import threading
 import time as clock_time
 
 import card_format
 import card_query
 import card_references
-import drafts as draft_store
 import workspace
 from card_format import CLAIM_FIELDS, parse_frontmatter, parse_yaml, time_entries_from
 from workspace import Workspace
@@ -43,7 +40,7 @@ RESTART_COMMANDS = {
     "default": "mt read {ref}",
 }
 VAGUE_RESTART_PATTERN = r"^(plan|research|work on|continue|figure out)\b"
-atomic_write = draft_store.atomic_write
+atomic_write = card_format.atomic_write
 is_timestamp = card_format.is_timestamp
 is_due_value = card_format.is_metadata_time
 time_log_entries = card_format.time_log_entries
@@ -406,12 +403,6 @@ def running_timer_cards(ws: Workspace | None = None) -> list[tuple[Card, dict[st
 
 
 
-def running_timers(ws: Workspace | None = None) -> dict[str, dict[str, object]]:
-    """Running timers by task id, read from the cards (several per person is normal)."""
-    return {card_task_id(card): timer for card, timer in running_timer_cards(ws)}
-
-
-
 def timer_session_saved(task: Card | None, timer: dict[str, object]) -> bool:
     """Whether the card already holds this timer's session, e.g. after a manual merge."""
     if task is None:
@@ -484,6 +475,15 @@ class CardCache:
 
 
 
+def _validate_task_status(card: Card, allowed: set[str]) -> None:
+    status = card.frontmatter.get("status")
+    if card.is_task and (not isinstance(status, str) or status not in allowed):
+        raise ValueError(
+            f"{card.path}: invalid or missing task status {status!r}; "
+            "custom status IDs must be defined in settings.yaml"
+        )
+
+
 def read_cards(
     root: Path, kind: str | None = None, *, cache: CardCache | None = None, ws: Workspace | None = None,
 ) -> list[Card]:
@@ -496,26 +496,34 @@ def read_cards(
     allowed = set(statuses(ws))
     cards = []
     listed = sorted(root.glob("*.md"))
-    skipped = False
     with cache.lock if cache is not None else nullcontext():
         read = cache.read if cache is not None else Card.read
         for path in listed:
             if kind is not None:
-                hint = card_kind_hint(path)
-                if hint is not None and hint != kind:
-                    skipped = True
-                    continue
-            card = read(path)
+                cached = None
+                if cache is not None:
+                    try:
+                        stat = path.stat()
+                        signature = (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size, stat.st_ino)
+                        entry = cache.entries.get(path)
+                        if entry is not None and entry[0] == signature:
+                            cached = entry[1]
+                    except OSError:
+                        cached = None
+                if cached is not None:
+                    card = cached
+                else:
+                    hint = card_kind_hint(path)
+                    if hint is not None and hint != kind:
+                        continue
+                    card = read(path)
+            else:
+                card = read(path)
             if kind is not None and card.kind != kind:
                 continue
-            status = card.frontmatter.get("status")
-            if card.is_task and (not isinstance(status, str) or status not in allowed):
-                raise ValueError(
-                    f"{card.path}: invalid or missing task status {status!r}; "
-                    "custom status IDs must be defined in settings.yaml"
-                )
+            _validate_task_status(card, allowed)
             cards.append(card)
-        if cache is not None and not skipped:
+        if cache is not None:
             cache.prune(root, set(listed))
     return cards
 
@@ -626,17 +634,12 @@ def item_compact_json_record(item: Card) -> dict[str, object]:
 
 def _markdown_headings(body: str) -> list[str]:
     """Extract ATX headings outside fenced code blocks."""
+    fenced = card_format.fenced_line_numbers(body)
     headings: list[str] = []
-    fence: str | None = None
-    for line in body.splitlines():
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            marker = stripped[:3]
-            fence = None if fence == marker else (fence or marker)
+    for number, line in enumerate(body.splitlines()):
+        if number in fenced:
             continue
-        if fence is not None:
-            continue
-        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", stripped)
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line.lstrip())
         if match:
             title = re.sub(r"\s+#+\s*$", "", match.group(2)).strip()
             if title:
@@ -713,8 +716,12 @@ def items_by_ref(ref: str, ws: Workspace | None = None) -> list[Card]:
     if not SHORT_REF_RE.fullmatch(ref):
         raise ValueError("short reference must be @ followed by 3 to 8 hexadecimal characters")
     root = cards_root(ws)
-    return [Card.read(path) for path in (sorted(root.glob("*.md")) if root.is_dir() else [])
-            if hashlib.sha256(path.stem.encode()).hexdigest()[:8].startswith(ref[1:].lower())]
+    allowed = set(statuses(ws))
+    cards = [Card.read(path) for path in (sorted(root.glob("*.md")) if root.is_dir() else [])
+             if hashlib.sha256(path.stem.encode()).hexdigest()[:8].startswith(ref[1:].lower())]
+    for card in cards:
+        _validate_task_status(card, allowed)
+    return cards
 
 
 
@@ -792,23 +799,6 @@ def item_read_record(task: Card, ws: Workspace | None = None) -> dict[str, objec
 
 
 
-def command_query(args: argparse.Namespace, ws: Workspace | None = None) -> card_query.Query | None:
-    """The validated query a command's selection flags describe, or None after printing the error."""
-    resolved = _ws(ws)
-    try:
-        query = card_query.query_from_args(args, env=resolved.environ)
-        card_query.validate(
-            query,
-            statuses=statuses(resolved),
-            priorities=list(policy(resolved).get("priorities", {})),
-        )
-    except card_query.QueryError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return None
-    return query
-
-
-
 def select_cards(cards: list[Card], query: card_query.Query, *, done_cutoff: str | None = None) -> list[Card]:
     return card_query.select(cards, query, now=datetime.now(), done_cutoff=done_cutoff)
 
@@ -848,7 +838,3 @@ def session_entries(task: Card, window: tuple[str | None, str | None]) -> list[d
     since, before = window
     return [entry for entry in time_entries_from(task.frontmatter)
             if (not since or str(entry["start"])[:10] >= since) and (not before or str(entry["start"])[:10] < before)]
-
-
-Task = Card
-Note = Card

@@ -291,7 +291,7 @@ raise SystemExit(taskweb.serve_dashboard(taskweb.Workspace.resolve(), "127.0.0.1
         self.assertEqual(after["id"], before["id"])
 
         status, _ = web_actions.handle_card_edit(
-            self.ws, {"ref": ref}, {"expected_hash": hashlib.sha256(card.path.read_bytes()).hexdigest(), "body": "Again\n"}, "t")
+            self.ws, {"ref": ref}, {"expected_hash": hashlib.sha256(card.path.read_bytes()).hexdigest(), "body": "Again\n"})
         self.assertEqual(status, 200)
         after = card_format.parse_document(card.path.read_text(encoding="utf-8"))[0]
         self.assertEqual(after["timer"], before["timer"])

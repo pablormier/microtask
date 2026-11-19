@@ -70,7 +70,8 @@ class SettingsRenameTests(unittest.TestCase):
 
     def listing(self, folder: Path) -> list[str]:
         return sorted(str(path.relative_to(folder)) for path in folder.rglob("*")
-                      if ".git" not in path.relative_to(folder).parts)
+                      if ".git" not in path.relative_to(folder).parts
+                      and "__pycache__" not in path.relative_to(folder).parts)
 
     # The command
 

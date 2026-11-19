@@ -17,9 +17,12 @@ Prefer small, explicit code and fewer concepts.
   - `workspace.py`: workspace resolution (`MT_WORKSPACE`, `workspace/`, an old-style root), creating a workspace from `templates/` (`mt init`, the installer), demo mode, and `Workspace`.
   - `update.py` and `migrate.py`: `mt update` (release tarballs, no Git) and `mt migrate` (old-style workspace into `workspace/`).
   - `store.py`: card reading/discovery, settings, timers, focus state, and typed `TaskError`s.
-  - `validation.py`: card/workspace validation (`audit_workspace` and scoped write validation).
+  - `validation.py`: card/workspace validation (`audit_workspace`, `check_changes`, and `format_audit_report`).
   - `transaction.py`: file locking (`time_mutation_lock`), atomic multi-file writes, and `mt sync`.
-  - `operations.py`: the core operations API — **the only write path** for cards and timers.
+  - `card_render.py`: card document rendering, body editing, metadata parsing/validation, and topic tree helpers.
+  - `focus.py`: read-only focus ranking and context helpers.
+  - `timer_ops.py`: timer lifecycle and time-session helpers.
+  - `operations.py`: the core operations API (`op_*`) — **the only write path** for cards, timers, focus, and drafts.
   - `cli.py`: CLI argument parsing, formatting, and interactive commands.
 - Do not spawn a subprocess unless it runs another program or another version
   (`git`, `gh`, the user's editor, browser, `mt update`, `install.sh`, or
@@ -36,7 +39,7 @@ Prefer small, explicit code and fewer concepts.
   bundled the same way under `tools/web/vendor`, each with its license and a
   `VENDOR.json` provenance record, so the dashboard works offline. Do not
   require a system YAML package, pip installation, or compiled extension.
-- Preserve `scripts/validate` as the trust boundary.
+- Keep `scripts/validate` working on its own. It shares its checks and output with `mt validate`.
 - Routine card operations must be possible from `mt help`, `mt settings`,
   `mt read`, and CLI diagnostics. If an agent needs to read source to perform
   one, treat that as a help gap and fix the help.
@@ -110,3 +113,14 @@ imports. Do not add symlinks: the installer and `mt update` accept regular files
 
 Do not stage or commit card data by hand; `mt sync` owns the workspace's Git
 operations, and `mt migrate` makes one commit there.
+
+## Later cleanups
+
+These wait until after 0.2.0, so that 0.1.x installs can still update and
+existing scripts keep working:
+
+- Rename `policy` to `settings` inside the code (`policy_parser.py`,
+  `PolicyCache`, `store.policy()`, and the JS `*Policy` names).
+- Remove `mt update --force`, which now does nothing.
+- Decide whether to retire `scripts/validate`, and give every `--json` output
+  the same shape.

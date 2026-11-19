@@ -64,7 +64,7 @@ class TimerCardTests(unittest.TestCase):
         return f"@{store.Card.read(path).short_ref}"
 
     def timers(self) -> dict[str, dict]:
-        return store.running_timers(self.ws)
+        return transaction.read_time_timers(self.ws)
 
     def put_timer(self, path: Path, by: str = "tester", session_id: str = SESSION,
                   start_epoch: int | None = None) -> dict:

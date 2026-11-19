@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [
     ROOT / "tools/web/js/card_helpers.js",
+    ROOT / "tools/web/js/board_api.js",
     ROOT / "tools/web/js/draft_store.js",
 ]
 HARNESS = r"""
@@ -193,3 +194,34 @@ assert.equal(store.drafts.length, 0);
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DraftCoordinatorTests(unittest.TestCase):
+    def test_finishing_a_draft_sends_the_board_query_and_creates_the_card(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        scenario = r"""
+const assert = require('assert/strict');
+let sent = null;
+const board = {
+  ...createDraftCoordinator(),
+  draftBusy: false,
+  captureComposer: {draft: null, close() {}},
+  collectionQuery() { return 'status:todo'; },
+  includedCardIds() { return ['card-a']; },
+  getDraftStore() { return {finish: async (draft, extra) => { sent = extra; return {saved_ref: '@abc'}; }}; },
+  async applyPayload() {},
+};
+(async () => {
+  const result = await board.finishWorkspaceDraft({id: 'draft-a', state: 'saved'});
+  assert.deepEqual(sent, {query: 'status:todo', include: ['card-a']});
+  assert.equal(result.saved_ref, '@abc');
+  assert.equal(board.captureComposer.message, 'Created @abc');
+  assert.equal(board.captureComposer.messageError, false);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+        script = (ROOT / "tools/web/js/draft_coordinator.js").read_text() + "\n" + scenario
+        result = subprocess.run([node], input=script, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+

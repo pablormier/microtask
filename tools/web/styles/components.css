@@ -157,8 +157,7 @@ input.mt-field-property, select.mt-field-property {
 textarea.mt-field { min-height: 5rem; resize: vertical; cursor: text; }
 .mt-field:hover:enabled:not(:focus) { border-color: var(--mt-border-strong); }
 .mt-field:focus { border-color: var(--mt-focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mt-focus) 18%, transparent); }
-.mt-field[aria-invalid="true"], .mt-field.mt-field-error { border-color: var(--mt-danger); }
-.mt-field-error-text { display: block; margin-top: var(--mt-space-1); color: var(--mt-danger); font-size: var(--mt-font-size-xs); }
+.mt-field[aria-invalid="true"] { border-color: var(--mt-danger); }
 .mt-field:disabled { opacity: .62; cursor: not-allowed; }
 input.mt-field-compact, select.mt-field-compact, textarea.mt-field-compact { min-height: var(--mt-control-size-compact); padding: 3px 7px; font-size: var(--mt-font-size-compact); }
 select.mt-field-compact { padding-right: 1.85rem; }
@@ -347,7 +346,6 @@ input.mt-field[type="search"] {
 .mt-layout-group[role="group"] > * {
   flex: 0 1 auto;
 }
-.mt-layout-group.mt-details-row[role="group"] { border-top: 1px solid var(--mt-border); }
 .mt-segmented .mt-segment {
   display: inline-flex;
   flex: 0 0 auto;
@@ -518,7 +516,6 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
   background: var(--mt-surface-raised);
   box-shadow: var(--mt-shadow-surface);
 }
-.mt-surface-raised { box-shadow: var(--mt-shadow-dialog); }
 .mt-dialog-backdrop { background: var(--mt-overlay); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .mt-dialog {
   border: 1px solid var(--mt-border);
@@ -583,8 +580,6 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
   outline: 2px solid var(--mt-focus);
   outline-offset: 2px;
 }
-.mt-inline-message { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); line-height: 1.35; }
-.mt-inline-message.is-error { color: var(--mt-danger); }
 
 /* Transient action feedback, above dialogs so results stay visible while editing. */
 .mt-toast-region {

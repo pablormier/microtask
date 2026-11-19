@@ -25,7 +25,7 @@ class DraftHandlerValidationTests(unittest.TestCase):
                     payload = {"body": "Draft body",
                                "kind": "note", "mode": "new"}
                     payload[field] = value
-                    status, response = taskweb.handle_draft_save(taskweb.Workspace.at(ROOT / "templates"), payload, "test-token")
+                    status, response = taskweb.handle_draft_save(taskweb.Workspace.at(ROOT / "templates"), payload)
                     self.assertEqual(status, HTTPStatus.BAD_REQUEST)
                     self.assertIn(field, response["error"])
             save.assert_not_called()

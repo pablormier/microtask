@@ -97,7 +97,6 @@ def task_to_dict(
     fm = task.frontmatter
     tags = fm.get("tags", [])
     body = task.body
-    base_uri = task.path.resolve().parent.as_uri() + "/"
     if rank is None:
         rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
     ws_root = ws.root
@@ -134,7 +133,6 @@ def task_to_dict(
         "time_seconds": store.saved_time_seconds(task) if task.kind == "task" else 0,
         "comment_count": len(comments) if isinstance(comments, list) else 0,
         "path": str(task.path.relative_to(ws_root)) if task.path.is_relative_to(ws_root) else str(task.path),
-        "base_uri": base_uri,
     }
     if detail:
         references = store.item_references(task, reference_index) if reference_index else []
@@ -269,6 +267,14 @@ def view_topic_trees(ws: Workspace, cards: list[store.Card], query: card_query.Q
     return trees
 
 
+def draft_to_dict(draft: dict) -> dict:
+    return {**draft, "excerpt": extract_excerpt(str(draft.get("body") or ""))}
+
+
+def draft_list_payload(root: Path) -> list[dict]:
+    return [draft_to_dict(draft) for draft in draft_store.list_drafts(root)]
+
+
 def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None, include: object = None) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
@@ -299,7 +305,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
     meta["topic_trees"] = view_topic_trees(ws, ordered, query, now=now, done_cutoff=done_cutoff,
                                            topics=[*meta["workspace_usage"]["topic"], *operations.suggested_topics(cfg)])
-    drafts = draft_store.list_drafts(ws.root)
+    drafts = draft_list_payload(ws.root)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
     meta["draft_count"] = len(drafts)

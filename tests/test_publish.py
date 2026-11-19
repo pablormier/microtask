@@ -92,6 +92,18 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(remote, before)
         self.assertTrue(task.is_file())
 
+    def test_auto_sync_prints_the_saved_card_before_the_sync_output(self) -> None:
+        self.enable_auto_sync()
+
+        result = self.run_mt("add", "Order this output")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        saved = next(index for index, line in enumerate(lines) if line.endswith("order-this-output.md"))
+        syncing = lines.index("Auto-syncing task changes...")
+        self.assertLess(saved, syncing)
+        self.assertEqual(sum(line.endswith("order-this-output.md") for line in lines), 1)
+
     def test_auto_sync_add_commits_and_pushes_created_task(self) -> None:
         self.enable_auto_sync()
 

@@ -6,18 +6,11 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import uuid
 
-from cli_helpers import _cli_print_error, editor_command
+from cli_helpers import _cli_call_op, _cli_print_error, editor_command, emit_json
 import drafts as draft_store
-from operations import op_draft_save, task_defaults
-import store
-from store import (
-    TaskError,
-    _ws,
-    is_timestamp,
-    now_stamp,
-)
+from operations import op_draft_create, op_draft_discard, op_draft_edit, op_draft_save
+from store import TaskError, _ws, now_stamp
 from transaction import managed_temp_directory
 from workspace import Workspace
 
@@ -39,21 +32,6 @@ def command_draft_list(args: argparse.Namespace, ws: Workspace | None = None) ->
     return 0
 
 
-def command_draft_recover(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    recovery = _ws(ws).recovery_dir()
-    unresolved = [source.name for source in sorted(recovery.glob("*.md"))
-                  if source.is_file() and not source.is_symlink()] if recovery.is_dir() else []
-    if args.as_json:
-        print(json.dumps({"recovered": [], "unresolved": unresolved}, ensure_ascii=False))
-    elif unresolved:
-        print("Legacy editor recovery copies need manual review:")
-        for name in unresolved:
-            print(f"  {name}")
-    else:
-        print("No editor recovery copies.")
-    return 0
-
-
 def command_draft_read(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     draft = draft_store.read(_ws(ws).root, args.draft_id)
     if args.as_json:
@@ -64,41 +42,20 @@ def command_draft_read(args: argparse.Namespace, ws: Workspace | None = None) ->
 
 
 def command_draft_create(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    resolved = _ws(ws)
-    if args.title is not None and (not args.title.strip() or any(character in args.title for character in "\r\n")):
-        print("error: draft title must be non-empty and single-line", file=sys.stderr)
-        return 2
-    fields: dict[str, object] = {"kind": args.kind, "mode": "new", "title": args.title or ""}
-    body = args.section_text
-    if args.created_at and not is_timestamp(args.created_at):
-        print("error: --created-at must be a local ISO timestamp with seconds", file=sys.stderr)
-        return 2
-    capture_id = args.capture_id or str(uuid.uuid4())
     try:
-        parsed_capture_id = uuid.UUID(capture_id)
-    except (AttributeError, ValueError):
-        print("error: --capture-id must be a valid UUID", file=sys.stderr)
-        return 2
-    if str(parsed_capture_id) != capture_id.lower():
-        print("error: --capture-id must be a canonical UUID", file=sys.stderr)
-        return 2
-    fields.update({"capture_id": str(parsed_capture_id), "created": args.created_at or now_stamp()})
-    if args.kind == "task":
-        default_status, default_priority, default_type = task_defaults(store.policy(resolved))
-        fields.update({
-            "status": default_status, "priority": default_priority, "type": default_type,
-            "project": None, "topic": None, "tags": [], "due": None, "due_kind": None,
-        })
-    try:
-        draft = draft_store.save(
-            resolved.root, draft_id=args.draft_id, fields=fields, body=body,
-            now=now_stamp(),
+        draft = op_draft_create(
+            ws,
+            args.kind,
+            draft_id=args.draft_id,
+            title=args.title,
+            body=getattr(args, "file_text", ""),
+            capture_id=args.capture_id,
+            created=args.created_at,
         )
-    except (OSError, ValueError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+    except TaskError as error:
+        return _cli_print_error(error)
     if args.as_json:
-        print(json.dumps(draft, ensure_ascii=False))
+        emit_json(draft)
     else:
         print(f"Draft saved: {draft['id']}")
     return 0
@@ -130,8 +87,19 @@ def command_draft_edit(args: argparse.Namespace, ws: Workspace | None = None) ->
         if args.file is not None:
             if args.expected_hash is None:
                 raise ValueError("--expected-hash is required when using --file")
-            body = args.section_text
+            body = getattr(args, "file_text", "")
+        elif args.title is not None:
+            body = str(existing.get("body") or "")
+            if title == str(existing.get("title") or ""):
+                if args.as_json:
+                    print(json.dumps({"saved": False, "changed": False, "id": args.draft_id, "reason": "no_changes"}, ensure_ascii=False))
+                else:
+                    print("No changes: draft was not updated.")
+                return 0
         else:
+            if not sys.stdin.isatty():
+                print("error: interactive draft editor requires a terminal; pass --file or --title", file=sys.stderr)
+                return 2
             command = editor_command("draft edit")
             with managed_temp_directory("draft-edit-", ws=resolved) as directory:
                 editor_path = Path(directory) / "draft.md"
@@ -151,15 +119,17 @@ def command_draft_edit(args: argparse.Namespace, ws: Workspace | None = None) ->
                         print(f"Editor exited with status {edited.returncode}; original draft was kept", file=sys.stderr)
                     return edited.returncode or 1
                 if body == existing.get("body") and title == str(existing.get("title") or ""):
-                    print("No changes: draft was not updated.")
+                    if args.as_json:
+                        print(json.dumps({"saved": False, "changed": False, "id": args.draft_id, "reason": "no_changes"}, ensure_ascii=False))
+                    else:
+                        print("No changes: draft was not updated.")
                     return 0
         fields = {field: existing.get(field) for field in draft_store.FIELDS
                   if field in existing and field not in {"id", "updated"}}
         fields["title"] = title
         try:
-            updated = draft_store.save(
-                resolved.root, draft_id=args.draft_id, fields=fields, body=body,
-                expected_content_hash=expected_hash, now=now_stamp(),
+            updated = op_draft_edit(
+                resolved, args.draft_id, fields=fields, body=body, expected_hash=expected_hash,
             )
         except draft_store.DraftConflict:
             copy = draft_conflict_copy(existing, body, title, ws=resolved)
@@ -187,10 +157,7 @@ def command_draft_discard(args: argparse.Namespace, ws: Workspace | None = None)
             if args.expected_hash is not None:
                 raise
             expected_hash = None
-        removed = draft_store.discard(
-            resolved.root, args.draft_id,
-            expected_content_hash=expected_hash,
-        )
+        removed = op_draft_discard(resolved, args.draft_id, expected_hash=expected_hash)
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -198,26 +165,19 @@ def command_draft_discard(args: argparse.Namespace, ws: Workspace | None = None)
         print("error: draft not found", file=sys.stderr)
         return 1
     if args.as_json:
-        print(json.dumps({"discarded": True, "id": args.draft_id}))
+        print(json.dumps({"discarded": True, "id": args.draft_id}, ensure_ascii=False))
     else:
         print("Draft discarded.")
     return 0
 
 
 def command_draft_save(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    try:
-        result = op_draft_save(
+    return _cli_call_op(
+        lambda: op_draft_save(
             ws,
             args.draft_id,
             expected_hash=args.expected_hash,
-        )
-    except TaskError as error:
-        return _cli_print_error(error)
-    receipt = dict(result.receipt)
-    if result.sync_error:
-        receipt["sync_error"] = result.sync_error
-    if args.as_json:
-        print(json.dumps(receipt, ensure_ascii=False))
-    else:
-        print(result.message)
-    return 0
+            quiet_sync=args.as_json,
+        ),
+        as_json=args.as_json,
+    )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the microtask workspace (the trust boundary behind ./mt validate).
+"""Standalone workspace validation CLI (shares in-process validation with ./mt validate).
 
 Orchestrates validation of every Markdown card in cards/ (kind comes from frontmatter):
   * has YAML frontmatter
@@ -77,19 +77,12 @@ def main() -> int:
         return 0
 
     report = validation.audit_workspace(data_root, effective_policy)
-    if report.errors:
-        print(f"FAILED: {len(report.errors)} error(s):", file=sys.stderr)
-        for error in report.errors:
-            print(f"  - {error}", file=sys.stderr)
-        return 1
-
-    for warning in report.warnings:
-        print(f"WARNING: {warning}", file=sys.stderr)
-    print(
-        f"OK: validated {report.task_count} task file(s), {report.note_count} note file(s), "
-        f"and {report.draft_count} draft file(s)."
-    )
-    return 0
+    code, stdout_lines, stderr_lines = validation.format_audit_report(report)
+    for line in stderr_lines:
+        print(line, file=sys.stderr)
+    for line in stdout_lines:
+        print(line)
+    return code
 
 
 if __name__ == "__main__":

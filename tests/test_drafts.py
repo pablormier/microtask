@@ -54,6 +54,24 @@ class DraftCliTests(unittest.TestCase):
                 env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return support.run_cli(self.root, *args, input_text=input_text, env=env or self.env)
 
+    def run_mt_terminal(self, *args: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        import pty
+
+        master, slave = pty.openpty()
+        try:
+            return subprocess.run(
+                [str(self.root / "mt"), *args],
+                cwd=self.root,
+                env=env,
+                stdin=slave,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            os.close(master)
+            os.close(slave)
+
     def git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", *args], cwd=cwd or self.root, text=True, capture_output=True, check=False,
@@ -375,7 +393,7 @@ class DraftCliTests(unittest.TestCase):
         created = self.json_output(self.run_mt("draft", "create", "note", "--file", "-", "--json",
                                                input_text="original\n"))
         env = dict(self.env, VISUAL=str(self.editor), EDITOR_BODY="from editor\n")
-        edited = self.json_output(self.run_mt("draft", "edit", created["id"], "--json", env=env))
+        edited = self.json_output(self.run_mt_terminal("draft", "edit", created["id"], "--json", env=env))
         self.assertEqual(edited["body"], "from editor\n")
         self.assertNotEqual(edited["content_hash"], created["content_hash"])
 
@@ -393,69 +411,11 @@ subprocess.run([os.environ["MT_PATH"], "draft", "edit", os.environ["DRAFT_ID"], 
 ''', encoding="utf-8")
         race_editor.chmod(0o755)
         conflict_env.update(VISUAL=str(race_editor), MT_PATH=str(self.root / "mt"), DRAFT_ID=next_created["id"], DRAFT_HASH=next_created["content_hash"])
-        conflict = self.run_mt("draft", "edit", next_created["id"], env=conflict_env)
+        conflict = self.run_mt_terminal("draft", "edit", next_created["id"], env=conflict_env)
         self.assertNotEqual(conflict.returncode, 0)
         self.assertIn("edits were kept as draft", conflict.stderr)
         drafts = self.json_output(self.run_mt("draft", "list", "--json"))["drafts"]
         self.assertEqual(len([item for item in drafts if item["body"] in {"other window\n", "edited copy\n"}]), 2)
-
-    def test_editor_recovery_is_archived_once_and_unmatched_files_are_retained(self) -> None:
-        recovery = self.root / ".mt" / "recovery" / "edit"
-        recovery.mkdir(parents=True)
-        source = recovery / f"new-note-edit-{uuid.uuid4().hex}.md"
-        source.write_bytes(b"\nrecovered\r\nbody\r\n")
-        orphan = recovery / f"deleted-item-edit-{uuid.uuid4().hex}.md"
-        orphan.write_text("unmatched task edit", encoding="utf-8")
-
-        listed = self.json_output(self.run_mt("draft", "list", "--json"))
-        self.assertEqual(listed["drafts"], [])
-        self.assertTrue(source.is_file())
-
-        result = self.json_output(self.run_mt("draft", "recover", "--json"))
-        self.assertEqual(result["recovered"], [])
-        self.assertEqual(result["unresolved"], sorted([source.name, orphan.name]))
-        self.assertTrue(source.is_file())
-        self.assertTrue(orphan.is_file())
-
-    def test_note_body_recovery_preserves_yaml_frontmatter_and_original_target_hash(self) -> None:
-        captured = self.run_mt("note", "Baseline content")
-        self.assertEqual(captured.returncode, 0, captured.stderr)
-        note = card_files(self.root, "note")[0]
-        original_hash = hashlib.sha256(note.read_bytes()).hexdigest()
-        note.write_text(note.read_text(encoding="utf-8").replace("Baseline content", "Newer content"),
-                        encoding="utf-8")
-
-        recovery = self.root / ".mt" / "recovery" / "edit"
-        recovery.mkdir(parents=True, exist_ok=True)
-        source = recovery / f"{note.stem}-edit-{uuid.uuid4().hex}.md"
-        body = "---\ntitle: personal draft\n---\n\n# This is body text\n"
-        source.write_text(body, encoding="utf-8")
-        source.with_suffix(".meta.json").write_text(json.dumps({
-            "version": 1, "kind": "note", "mode": "edit",
-            "target": str(note.relative_to(self.root)), "base_hash": original_hash,
-            "base_updated": "2026-10-15", "recovery_mode": "note-body",
-        }), encoding="utf-8")
-
-        recovered = self.json_output(self.run_mt("draft", "recover", "--json"))
-        self.assertEqual(recovered["recovered"], [])
-        self.assertEqual(recovered["unresolved"], [source.name])
-        self.assertTrue(source.is_file())
-        self.assertIn("Newer content", note.read_text(encoding="utf-8"))
-
-    def test_legacy_edit_recovery_without_baseline_is_explicitly_unapplyable(self) -> None:
-        captured = self.run_mt("note", "Existing content")
-        self.assertEqual(captured.returncode, 0, captured.stderr)
-        note = card_files(self.root, "note")[0]
-        recovery = self.root / ".mt" / "recovery" / "edit"
-        recovery.mkdir(parents=True, exist_ok=True)
-        source = recovery / f"{note.stem}-edit-{uuid.uuid4().hex}.md"
-        source.write_text("Recovered edit\n", encoding="utf-8")
-
-        recovered = self.json_output(self.run_mt("draft", "recover", "--json"))
-        self.assertEqual(recovered["recovered"], [])
-        self.assertEqual(recovered["unresolved"], [source.name])
-        self.assertTrue(source.is_file())
-        self.assertIn("Existing content", note.read_text(encoding="utf-8"))
 
     def test_cli_draft_edit_detects_direct_markdown_change_with_same_revision(self) -> None:
         created = self.json_output(self.run_mt("draft", "create", "note", "--file", "-", "--json",
@@ -473,7 +433,7 @@ canonical.write_text(header + separator + "Manual edit\\n", encoding="utf-8")
 ''', encoding="utf-8")
         editor.chmod(0o755)
         env = dict(self.env, VISUAL=str(editor), EDITOR="", DRAFT_PATH=str(path))
-        edit = self.run_mt("draft", "edit", created["id"], env=env)
+        edit = self.run_mt_terminal("draft", "edit", created["id"], env=env)
         self.assertNotEqual(edit.returncode, 0, edit.stdout + edit.stderr)
         self.assertIn("edits were kept as draft", edit.stderr)
         self.assertIn("Manual edit", path.read_text(encoding="utf-8"))

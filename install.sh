@@ -330,8 +330,10 @@ try:
         if not (candidate / "mt").is_file() or not (candidate / "scripts" / "cli.py").is_file():
             raise ValueError("archive does not contain microtask")
         # mt update removes only the entries a release brought, never files added later.
-        release_entries = sorted(item.name for item in candidate.iterdir()
-                                 if item.name not in {"workspace", "deploy", "VERSION", ".release-files"})
+        release_entries = sorted(
+            item.name for item in candidate.iterdir()
+            if item.name not in {"workspace", ".update-tmp", "deploy", "VERSION", ".release-files", ".mt-hosted", "__pycache__", ".DS_Store"}
+        )
         (candidate / ".release-files").write_text("".join(name + "\n" for name in release_entries),
                                                   encoding="utf-8")
         (candidate / "VERSION").write_text(tag + "\n", encoding="utf-8")
@@ -403,10 +405,18 @@ case "$shell_name" in
   zsh) shell_rc="$HOME/.zshrc" ;;
   bash) if [[ "${OSTYPE:-}" == darwin* ]]; then shell_rc="$HOME/.bash_profile"; else shell_rc="$HOME/.bashrc"; fi ;;
 esac
-path_line="export PATH=\"$app_dir:\$PATH\""
+escape_dq() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  value="${value//\`/\\\`}"
+  printf '%s' "$value"
+}
+path_line="export PATH=\"$(escape_dq "$app_dir"):\$PATH\""
 workspace_line=""
 if [[ "$workspace_dir" != "$app_dir/workspace" && -z "$legacy_app" ]]; then
-  workspace_line="export MT_WORKSPACE=\"$workspace_dir\""
+  workspace_line="export MT_WORKSPACE=\"$(escape_dq "$workspace_dir")\""
 fi
 
 if [[ -n "$add_to_path" && -n "$interactive" && -n "$shell_rc" ]]; then
@@ -416,6 +426,9 @@ if [[ -n "$add_to_path" && -n "$interactive" && -n "$shell_rc" ]]; then
   case "$answer" in
     [Nn]*) add_to_path="" ;;
   esac
+fi
+if [[ -n "$interactive" ]]; then
+  exec 3<&-
 fi
 
 rc_changed=""
@@ -455,10 +468,26 @@ fi
 
 workspace_saved=""
 if [[ -n "$workspace_line" && -n "$save_workspace" && -n "$shell_rc" ]]; then
-  if ! { [[ -f "$shell_rc" ]] && grep -qxF -- "$workspace_line" "$shell_rc"; }; then
+  ws_found=0 ws_number=0 ws_last_other=0 ws_last_other_folder=""
+  ws_pattern='^export MT_WORKSPACE="(.+)"$'
+  if [[ -f "$shell_rc" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      ws_number=$((ws_number + 1))
+      if [[ "$line" == "$workspace_line" ]]; then
+        ws_found=$ws_number
+      elif [[ "$line" =~ $ws_pattern ]]; then
+        ws_last_other=$ws_number
+        ws_last_other_folder="${BASH_REMATCH[1]}"
+      fi
+    done < "$shell_rc"
+  fi
+  if [[ "$ws_found" -eq 0 ]]; then
     [[ -n "$add_to_path" ]] || printf '\n# microtask\n' >> "$shell_rc"
     printf '%s\n' "$workspace_line" >> "$shell_rc"
     rc_changed=1
+  elif [[ "$ws_last_other" -gt "$ws_found" ]]; then
+    echo "warning: $shell_rc sets MT_WORKSPACE=$ws_last_other_folder after this one," >&2
+    echo "so new terminals will still use that workspace. Remove or move that line to use $workspace_dir." >&2
   fi
   workspace_saved=1
 fi

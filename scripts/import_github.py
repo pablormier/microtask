@@ -21,7 +21,6 @@ import git_ops
 
 
 ROOT = Path(__file__).resolve().parent.parent
-ISSUE_TEMPLATE = ROOT / ".github" / "ISSUE_TEMPLATE" / "capture.yml"
 
 
 def gh(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -247,17 +246,14 @@ def main(argv: list[str] | None, resolved_ws: workspace.Workspace) -> int:
         captured_numbers = set(existing_numbers) | set(imported_numbers)
         # Every listed issue now has a durable local capture; sync it before closing any issue.
         sync_status = 0
-        if captured_numbers:
-            if store.policy(resolved_ws).get("rules", {}).get("auto_sync", False):
-                # Issue closure is external and requires an explicit successful
-                # sync, even when ordinary local mutations can stay Git-free.
-                if args.json:
-                    with redirect_stdout(sys.stderr):
-                        sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
-                else:
+        if captured_numbers and store.policy(resolved_ws).get("rules", {}).get("auto_sync", False):
+            # Issue closure is external and requires an explicit successful
+            # sync, even when ordinary local mutations can stay Git-free.
+            if args.json:
+                with redirect_stdout(sys.stderr):
                     sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
             else:
-                sync_status = transaction.auto_sync_after_mutation(changed=True, ws=resolved_ws)
+                sync_status = transaction.command_sync(argparse.Namespace(message=None), ws=resolved_ws)
 
         receipt: dict[str, object] = {
             "repo": repo,

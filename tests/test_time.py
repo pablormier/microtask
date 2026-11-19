@@ -63,7 +63,7 @@ class TimeTrackingTests(unittest.TestCase):
 
     def timers(self) -> dict[str, dict]:
         """Running timers as the cards hold them."""
-        return store.running_timers(tasklib.Workspace.at(self.root, demo=False))
+        return transaction.read_time_timers(tasklib.Workspace.at(self.root, demo=False))
 
     def set_timer(self, task: Path, **fields: object) -> None:
         """Change fields of a card's running timer in place, as a pull or an editor could."""

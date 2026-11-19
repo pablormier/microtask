@@ -136,10 +136,13 @@ STOP_WEB_NOTICE = ("Before moving anything, stop 'mt web' if it is running in th
                    "started before the move keeps using the old paths.")
 
 
-def check_preconditions(app_root: Path) -> tuple[bool, list[str]]:
+def check_preconditions(
+    app_root: Path, *, environ: dict[str, str] | None = None
+) -> tuple[bool, list[str]]:
     """Refuse when the move is not safe. Returns whether the folder is a Git repository and its app files."""
-    selected = os.environ.get("MT_WORKSPACE")
-    if selected and Path(selected) != app_root:
+    env = os.environ if environ is None else environ
+    selected = env.get("MT_WORKSPACE")
+    if selected and Path(selected).resolve() != app_root.resolve():
         if is_data_workspace(Path(selected)):
             raise MigrateError(f"{selected} already uses {SETTINGS_FILE}; there is nothing to migrate")
         raise MigrateError("MT_WORKSPACE is set to another folder; run mt migrate without it")
@@ -150,8 +153,13 @@ def check_preconditions(app_root: Path) -> tuple[bool, list[str]]:
         raise MigrateError(f"{app_root} does not keep cards next to the application code; nothing to migrate")
     if (app_root / OLD_SETTINGS_FILE).exists() and (app_root / SETTINGS_FILE).exists():
         raise MigrateError(f"both {OLD_SETTINGS_FILE} and {SETTINGS_FILE} exist; remove the one you do not use")
-    if not (app_root / ".git").exists():
+    if (app_root / OLD_LOCAL_SETTINGS_FILE).exists() and (app_root / LOCAL_SETTINGS_FILE).exists():
+        raise MigrateError(f"both {OLD_LOCAL_SETTINGS_FILE} and {LOCAL_SETTINGS_FILE} exist; remove the one you do not use")
+    dot_git = app_root / ".git"
+    if not dot_git.exists():
         return False, []
+    if not dot_git.is_dir():
+        raise MigrateError(f"{dot_git} is not a directory (worktrees and submodules are not supported)")
     top = checked_git(app_root, "rev-parse", "--show-toplevel").decode().strip()
     if Path(top).resolve() != app_root.resolve():
         raise MigrateError(f"{app_root} is inside the Git repository {top}; run mt migrate from its root")
@@ -237,13 +245,21 @@ def migrate(app_root: Path, has_git: bool, application_files: list[str]) -> None
             checked_git(target, "add", "--", WORKSPACE_GITIGNORE)
             checked_git(target, "commit", "-q", "-m", COMMIT_MESSAGE)
     except (OSError, MigrateError):
-        # Put everything back so the folder works as before.
+        # Put everything back so the folder works as before; keep going on partial failures.
         for old, new in reversed(renamed):
-            os.rename(target / new, target / old)
+            try:
+                os.rename(target / new, target / old)
+            except OSError:
+                pass
         for name in reversed(moved):
-            os.rename(target / name, app_root / name)
-        if (target / WORKSPACE_GITIGNORE).exists():
-            (target / WORKSPACE_GITIGNORE).unlink()
+            try:
+                os.rename(target / name, app_root / name)
+            except OSError:
+                pass
+        try:
+            (target / WORKSPACE_GITIGNORE).unlink(missing_ok=True)
+        except OSError:
+            pass
         if has_git:
             git(app_root, "reset", "-q")
             if removed_upstream:
@@ -356,7 +372,7 @@ def command_migrate(args: argparse.Namespace, ws: Workspace) -> int:
         return command_migrate_rename(args, folder)
     app_root = ws.app_root
     try:
-        has_git, application_files = check_preconditions(app_root)
+        has_git, application_files = check_preconditions(app_root, environ=dict(ws.environ))
         print(STOP_WEB_NOTICE)
         if args.check:
             for line in describe(app_root, has_git, application_files):

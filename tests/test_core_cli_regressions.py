@@ -1272,8 +1272,9 @@ class BulkEditTests(unittest.TestCase):
         plan_path = self.save_plan(plan)
         before = {first: first.read_bytes(), second: second.read_bytes()}
         arguments = argparse.Namespace(apply_plan=str(plan_path), as_json=False)
+        import cli_cards
         with patch.object(transaction, "validate_data_root", side_effect=ValueError("forced validation failure")):
-            result = tasklib._command_bulk_edit_apply(
+            result = cli_cards._command_bulk_edit_apply(
                 arguments, ws=tasklib.Workspace.at(self.root, demo=False)
             )
         self.assertEqual(result, 1)

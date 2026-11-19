@@ -72,7 +72,7 @@ def _construct_policy_mapping(loader: _PolicyLoader, node: yaml.MappingNode, dee
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
         if key in mapping:
-            raise ValueError(f"duplicate settings status ID '{key}'" if isinstance(key, str) else f"duplicate settings key {key!r}")
+            raise ValueError(f"duplicate settings key '{key}'" if isinstance(key, str) else f"duplicate settings key {key!r}")
         mapping[key] = loader.construct_object(value_node, deep=deep)
     return mapping
 
@@ -137,18 +137,24 @@ def load_policy(root: Path) -> dict:
         or any(char in username for char in "\r\n\x00")
     ):
         raise ValueError("settings default_username must be a non-empty, single-line name or null")
-    warn_hours = policy.get("rules", {}).get("timer_warn_hours", 8)
+    rules = policy.get("rules")
+    if rules is None:
+        rules = {}
+        policy["rules"] = rules
+    elif not isinstance(rules, dict):
+        raise ValueError("settings rules must be a mapping")
+    warn_hours = rules.get("timer_warn_hours", 8)
     try:
         valid_warn_hours = not isinstance(warn_hours, bool) and 0 < float(warn_hours) < float("inf")
     except (TypeError, ValueError):
         valid_warn_hours = False
     if not valid_warn_hours:
         raise ValueError("settings rules.timer_warn_hours must be a positive number")
-    policy.setdefault("rules", {}).setdefault("timer_warn_hours", 8)
-    done_window = policy["rules"].get("done_window", "2w")
+    rules.setdefault("timer_warn_hours", 8)
+    done_window = rules.get("done_window", "2w")
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
         raise ValueError("settings rules.done_window must be an age like 2w, 30d, or 1m")
-    policy["rules"].setdefault("done_window", "2w")
+    rules.setdefault("done_window", "2w")
     if "calendar" in policy:
         normalized_calendar = normalize_calendar_policy(policy["calendar"])
         if normalized_calendar is None:

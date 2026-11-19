@@ -169,7 +169,7 @@ class TopicCliTests(unittest.TestCase):
         self.nested()
         result = self.mt("topic", "list", "nope")
         self.assertEqual((result.returncode, result.stdout), (1, ""))
-        self.assertEqual(result.stderr.strip(), "error: unknown topic: nope")
+        self.assertIn("error: unknown topic: nope", result.stderr)
         self.assertEqual(self.ok("topic", "list", "personal"), "")  # suggested_topics counts as known
 
     def test_topic_list_tree_draws_connectors(self) -> None:
