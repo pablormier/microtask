@@ -23,29 +23,16 @@ Connect your **private GitHub repository** to one of these apps:
 * **Claude mobile app** (Code tab / `claude.ai/code`) via the Claude GitHub App
 
 When you send a prompt from your phone, the service starts a container, clones
-your repository, and reads its `AGENTS.md`. Your private repository holds only
-your cards, so add an `AGENTS.md` to it that tells the agent to install
-microtask first:
-
-````markdown
-# Tasks
-
-This repository holds microtask cards. Before working with them, install
-microtask for this session:
+your repository, and reads its `AGENTS.md`. A workspace created or migrated by
+microtask 0.2.0 or later has an `AGENTS.md` that tells the agent to install
+microtask for the session before it works with your cards. For an older
+workspace, copy `templates/workspace-AGENTS.md` from the app folder into your
+workspace as `AGENTS.md` (and `templates/workspace-CLAUDE.md` as `CLAUDE.md`),
+then commit them:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/pablormier/microtask/main/install.sh | bash -s -- --yes --no-path --dir /tmp/microtask --workspace "$PWD"
-```
-
-Then read `/tmp/microtask/AGENTS.md` and follow it. Run every command from
-this repository's root as `/tmp/microtask/mt -R . COMMAND`.
-````
-
-Commit it once, from your computer:
-
-```sh
-mt run git add AGENTS.md
-mt run git commit -m "Add instructions for cloud agents"
+mt run git add AGENTS.md CLAUDE.md
+mt run git commit -m "Add instructions for agents"
 mt sync
 ```
 

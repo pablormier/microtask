@@ -84,6 +84,24 @@ class RepositorySelectorTests(unittest.TestCase):
         for workspace in (self.launcher, self.target):
             self.assertEqual(state(workspace), before[workspace])
 
+    def test_run_lets_an_agent_use_plain_mt_on_the_selected_workspace_folder(self) -> None:
+        folder = self.home / "data workspace"
+        env = {key: value for key, value in self.env.items() if key != "MT_WORKSPACE"}
+        created = self.run_mt("init", str(folder), "--data", env=env)
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.assertTrue((folder / "AGENTS.md").is_file())
+        self.assertEqual((folder / "CLAUDE.md").read_text(encoding="utf-8"), "@AGENTS.md\n")
+        added = self.run_mt("-R", str(folder), "add", "Only in the folder", env=env)
+        self.assertEqual(added.returncode, 0, added.stderr)
+        # The child has no mt on its original PATH and runs plain 'mt', as an agent would.
+        env["PATH"] = "/usr/bin:/bin"
+        result = self.run_mt("-R", str(folder), "run", "sh", "-c",
+                             'printf "%s\\n" "$PWD" "$MT_WORKSPACE"; mt list', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[:2], [str(folder), str(folder)])
+        self.assertIn("Only in the folder", result.stdout)
+
     def test_run_resolves_relative_executable_and_preserves_child_separator(self) -> None:
         executable = self.target / "probe command"
         executable.write_text("#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\"\n", encoding="utf-8")

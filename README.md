@@ -60,6 +60,7 @@ microtask/                 the app, replaced as a whole by mt update
   mt  scripts/  tools/  templates/  .agents/skills/  ...
   workspace/               your data, created by the installer or ./mt init
     cards/  drafts/  attachments/  settings.yaml    shared by mt sync
+    AGENTS.md  CLAUDE.md                            for agents started here
     settings.local.yaml  .mt/                       this machine only
 ```
 
@@ -122,7 +123,8 @@ edit cards, comment, track time, and paste images there.
 
 ## Working with AI agents
 
-Start your agent in the workspace with `mt run`, from any folder:
+Start your agent in your workspace with `mt run`, from any folder. The
+agent's `mt` then works on that workspace:
 
 ```sh
 mt run claude      # or: mt run codex, mt run agy

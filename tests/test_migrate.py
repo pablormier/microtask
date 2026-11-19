@@ -81,8 +81,16 @@ class MigrateTests(unittest.TestCase):
         changes = dict(line.split("\t")[::-1] for line in
                        self.git("show", "--name-status", "--format=", "HEAD", cwd=workspace).splitlines())
         deleted = sorted(name for name, status in changes.items() if status == "D")
-        # settings.local.yaml was tracked; it stops syncing but stays on disk.
-        self.assertEqual(deleted, sorted(self.app_files + ["settings.local.yaml"]))
+        # settings.local.yaml was tracked; it stops syncing but stays on disk. The app's
+        # AGENTS.md and CLAUDE.md become the workspace's instructions for agents.
+        agent_files = ["AGENTS.md", "CLAUDE.md"]
+        self.assertEqual(deleted, sorted([name for name in self.app_files if name not in agent_files]
+                                         + ["settings.local.yaml"]))
+        for name in agent_files:
+            self.assertNotEqual(changes.get(name), "D")
+            self.assertEqual(self.git("ls-files", name, cwd=workspace), name)
+            self.assertEqual((workspace / name).read_bytes(),
+                             (self.app / "templates" / f"workspace-{name}").read_bytes())
         self.assertEqual((workspace / "settings.local.yaml").read_text(), "rules:\n  max_doing_tasks: 4\n")
         self.assertEqual(self.git("ls-files", "settings.local.yaml", cwd=workspace), "")
         self.assertFalse(any(name.startswith(("cards/", "drafts/")) for name in changes))

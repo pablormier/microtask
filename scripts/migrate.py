@@ -13,6 +13,7 @@ from pathlib import Path
 
 import git_ops
 from workspace import (
+    AGENT_FILES,
     LOCAL_SETTINGS_FILE,
     OLD_LOCAL_SETTINGS_FILE,
     OLD_SETTINGS_FILE,
@@ -196,11 +197,13 @@ def describe(app_root: Path, has_git: bool, application_files: list[str]) -> lis
             lines.append(f"Remove the 'upstream' remote ({upstream}): it points at the application, "
                          "and pulling from it would merge application files into your cards")
         lines.append(f"Add {WORKSPACE_GITIGNORE} lines: {', '.join(IGNORE_LINES)}")
+        lines.append(f"Add {' and '.join(AGENT_FILES)} for agents started in the workspace")
         local = tracked_local_files(app_root)
         if local:
             lines.append(f"Stop tracking machine-local files (they stay on disk): {', '.join(local)}")
         lines.append(f"One commit \"{COMMIT_MESSAGE}\" in the workspace would delete "
-                     f"{len(application_files)} application file(s) and update {WORKSPACE_GITIGNORE}:")
+                     f"{len(application_files)} application file(s) and update {WORKSPACE_GITIGNORE}, "
+                     f"{' and '.join(AGENT_FILES)}:")
         shown = application_files[:10]
         lines.extend(f"  {path}" for path in shown)
         if len(application_files) > len(shown):
@@ -229,6 +232,9 @@ def migrate(app_root: Path, has_git: bool, application_files: list[str]) -> None
             os.rename(target / old, target / new)
             renamed.append((old, new))
         (target / WORKSPACE_GITIGNORE).write_text(merged_gitignore(gitignore_text), encoding="utf-8")
+        for name in AGENT_FILES:
+            # Agents started in the workspace (mt run, cloud services) need instructions there.
+            (target / name).write_bytes((app_root / "templates" / f"workspace-{name}").read_bytes())
         if has_git:
             removed_upstream = app_upstream(target)
             if removed_upstream:
@@ -242,7 +248,7 @@ def migrate(app_root: Path, has_git: bool, application_files: list[str]) -> None
                 checked_git(target, "rm", "--cached", "--ignore-unmatch", "-q", "--", OLD_SETTINGS_FILE)
             if settings_tracked:
                 checked_git(target, "add", "--", SETTINGS_FILE)
-            checked_git(target, "add", "--", WORKSPACE_GITIGNORE)
+            checked_git(target, "add", "--", WORKSPACE_GITIGNORE, *AGENT_FILES)
             checked_git(target, "commit", "-q", "-m", COMMIT_MESSAGE)
     except (OSError, MigrateError):
         # Put everything back so the folder works as before; keep going on partial failures.
@@ -256,10 +262,11 @@ def migrate(app_root: Path, has_git: bool, application_files: list[str]) -> None
                 os.rename(target / name, app_root / name)
             except OSError:
                 pass
-        try:
-            (target / WORKSPACE_GITIGNORE).unlink(missing_ok=True)
-        except OSError:
-            pass
+        for name in (WORKSPACE_GITIGNORE, *AGENT_FILES):
+            try:
+                (target / name).unlink(missing_ok=True)
+            except OSError:
+                pass
         if has_git:
             git(app_root, "reset", "-q")
             if removed_upstream:

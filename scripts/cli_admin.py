@@ -419,8 +419,8 @@ def command_run(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     resolved = _ws(ws)
     os.chdir(resolved.root)
     try:
-        # The command is not this mt, so any mt it starts picks its own workspace.
-        os.execvpe(args.argv[0], args.argv, foreign_env(resolved))
+        # An agent started here runs plain 'mt', which must be this app on this workspace.
+        os.execvpe(args.argv[0], args.argv, resolved.run_env())
     except FileNotFoundError:
         print(f"error: command not found: {args.argv[0]}", file=sys.stderr)
         return 127

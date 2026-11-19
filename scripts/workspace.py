@@ -112,6 +112,10 @@ def workspace_error(
     )
 
 
+# Instructions for agents started in the workspace, such as by 'mt run' or a cloud service.
+AGENT_FILES = ("AGENTS.md", "CLAUDE.md")
+
+
 def create_workspace(path: Path, app_root: Path = APP_ROOT, *, policy: Path | None = None) -> None:
     """Create or complete a workspace at path from templates/, never overwriting a file.
 
@@ -126,7 +130,8 @@ def create_workspace(path: Path, app_root: Path = APP_ROOT, *, policy: Path | No
     if policy is None or not Path(policy).is_file():
         policy = templates / "settings.yaml"
     for name, source in (("settings.yaml", policy),
-                         (WORKSPACE_GITIGNORE, templates / "workspace.gitignore")):
+                         (WORKSPACE_GITIGNORE, templates / "workspace.gitignore"),
+                         *((name, templates / f"workspace-{name}") for name in AGENT_FILES)):
         if not (path / name).exists():
             (path / name).write_bytes(Path(source).read_bytes())
 
@@ -340,6 +345,14 @@ class Workspace:
     def foreign_env(self) -> dict[str, str]:
         """Environment for another application copy, which must use its own workspace."""
         return {key: value for key, value in self.environ.items() if key != "MT_WORKSPACE"}
+
+    def run_env(self) -> dict[str, str]:
+        """Environment for a command run in the workspace: plain mt runs this app on this workspace."""
+        env = self.foreign_env()
+        env["PATH"] = os.pathsep.join(filter(None, (str(self.app_root), self.environ.get("PATH", ""))))
+        if is_data_workspace(self.root):
+            env["MT_WORKSPACE"] = str(self.root)
+        return env
 
 
 if __name__ == "__main__":

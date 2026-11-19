@@ -46,7 +46,8 @@ git clone https://github.com/pablormier/microtask.git && cd microtask && ./mt in
 ```
 
 `./mt init` creates `workspace/` next to the app with `cards/`, `drafts/`,
-`settings.yaml` and a `.gitignore`. The clone ignores `workspace/`, so your
+`settings.yaml`, a `.gitignore`, and an `AGENTS.md` and `CLAUDE.md` for agents
+started there. The clone ignores `workspace/`, so your
 cards stay out of the app's history. Run `./install.sh --here` to put this
 `mt` on your PATH.
 
@@ -131,6 +132,8 @@ mt migrate
   files into `workspace/`,
 - renames `mt-policy.yaml` to `settings.yaml` (and `mt-policy.local.yaml` to
   `settings.local.yaml`),
+- adds an `AGENTS.md` and `CLAUDE.md` to `workspace/`, so agents started
+  there (by `mt run` or a cloud service) know how to use `mt`,
 - removes a remote named `upstream` that points at the microtask app
   repository,
 - makes one commit in `workspace/` that removes the app files from your
