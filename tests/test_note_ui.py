@@ -1005,6 +1005,7 @@ global.document = {
   createElement() {
     const el = Object.create(global.Element.prototype);
     el.innerHTML = "";
+    el.querySelectorAll = () => [];
     return el;
   }
 };
@@ -1063,7 +1064,8 @@ global.document = {
     let _html = "";
     return {
       get innerHTML() { return _html; },
-      set innerHTML(val) { _html = val; }
+      set innerHTML(val) { _html = val; },
+      querySelectorAll() { return []; }
     };
   }
 };

@@ -98,6 +98,29 @@ class MigrateTests(unittest.TestCase):
         self.assertIn(str(workspace), listed.stderr)
         self.assertIn("migrate", self.mt("migrate").stderr)
 
+    def test_attachments_move_with_the_cards(self) -> None:
+        workspace = self.app / "workspace"
+        (self.app / "attachments").mkdir()
+        (self.app / "attachments" / "diagram.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg'/>\n")
+        self.git("add", "-f", "attachments/diagram.svg")
+        self.git("commit", "--quiet", "-m", "Add an attachment")
+        app_files = [name for name in self.app_files]
+
+        described = self.mt("migrate", "--check")
+
+        self.assertEqual(described.returncode, 0, described.stderr)
+        self.assertRegex(described.stdout, r"Move into .*workspace: .*\battachments\b")
+        self.assertIn(f"delete {len(app_files)} application file(s)", described.stdout)
+        result = self.mt("migrate")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.app / "attachments").exists())
+        self.assertTrue((workspace / "attachments" / "diagram.svg").is_file())
+        self.assertEqual(self.git("ls-files", "attachments", cwd=workspace), "attachments/diagram.svg")
+        changes = dict(line.split("\t")[::-1] for line in
+                       self.git("show", "--name-status", "--format=", "HEAD", cwd=workspace).splitlines())
+        self.assertNotIn("attachments/diagram.svg", changes)
+
     def test_check_describes_the_move_and_changes_nothing(self) -> None:
         before = self.listing()
         head = self.git("rev-parse", "HEAD")

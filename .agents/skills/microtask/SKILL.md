@@ -70,6 +70,7 @@ mt edit REF --replace-file - <<'EOF'                  # many or multiline replac
 [{"old": "...", "new": "..."}]
 EOF
 mt edit REF --body --file - --expected-hash HASH      # replace the whole body
+mt attach PATH [--card REF] [--json]                  # copy a file into attachments/ and link it
 ```
 
 Each `--old` passage must match exactly once, so the hash is optional there.

@@ -91,7 +91,7 @@ class TemplateMethodTests(unittest.TestCase):
         called = {name for expression in expressions for name in re.findall(r"\b([A-Za-z_]\w*)\(", expression)}
         script = "\n".join(path.read_text(encoding="utf-8") for path in sorted((web / "js").glob("*.js")))
         defined = set(re.findall(r"\b([A-Za-z_]\w*)\s*(?:\(|:\s*(?:async\s*)?function|=\s*(?:async\s*)?\()", script))
-        browser = {"ResizeObserver", "blur", "disconnect", "observe", "requestSubmit", "translateY",
+        browser = {"ResizeObserver", "blur", "click", "disconnect", "observe", "requestSubmit", "translateY",
                    "String", "Number", "Boolean", "Array", "Object", "Math", "Date", "JSON", "Set", "Map"}
         self.assertEqual(sorted(called - defined - browser), [])
 

@@ -88,6 +88,8 @@ function taskBoard() {
     moveDestination: "",
     contentEditor: createContentEditor(),
     commentText: "",
+    attachmentDragTarget: "",
+    attachmentUploading: false,
     actionMessage: "",
     actionError: false,
     toast: null,

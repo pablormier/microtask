@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import attachments
 import card_format
 import card_references
 
@@ -10,6 +11,7 @@ VALID_LEVELS = ("off", "warn")
 DEFAULT_LEVELS = {
     "backticked_ref": "warn",
     "topic_case": "warn",
+    "broken_attachment": "warn",
 }
 
 
@@ -102,11 +104,55 @@ def topic_case_messages(
     ]
 
 
-def lint_item(rel: Path | str, fm: dict[str, object], body: str, policy: dict) -> list[str]:
-    """Run per-card lint rules and return warning messages."""
-    if rule_level(policy, "backticked_ref") == "off":
+def broken_attachment_messages(
+    rel: Path | str,
+    fm: dict[str, object],
+    body: str,
+    attachments_root: Path | None,
+) -> list[str]:
+    """Report ../attachments/... links whose target file does not exist."""
+    if attachments_root is None:
         return []
-    return backticked_ref_messages(rel, fm, body)
+    texts: list[str] = [body]
+    for field in ("next_action", "processing_instructions"):
+        value = fm.get(field)
+        if isinstance(value, str) and value:
+            texts.append(value)
+    comments = fm.get("comments")
+    if isinstance(comments, list):
+        for comment in comments:
+            if isinstance(comment, dict) and isinstance(comment.get("text"), str):
+                texts.append(comment["text"])
+    missing: list[str] = []
+    seen: set[str] = set()
+    for text in texts:
+        for target in attachments.extract_attachment_targets(text):
+            if target in seen:
+                continue
+            seen.add(target)
+            if attachments.resolve_attachment_path(attachments_root, target) is None:
+                missing.append(target)
+    return [
+        f"{rel}: broken attachment link '../attachments/{target}'"
+        for target in missing
+    ]
+
+
+def lint_item(
+    rel: Path | str,
+    fm: dict[str, object],
+    body: str,
+    policy: dict,
+    *,
+    attachments_root: Path | None = None,
+) -> list[str]:
+    """Run per-card lint rules and return warning messages."""
+    messages: list[str] = []
+    if rule_level(policy, "backticked_ref") != "off":
+        messages.extend(backticked_ref_messages(rel, fm, body))
+    if rule_level(policy, "broken_attachment") != "off":
+        messages.extend(broken_attachment_messages(rel, fm, body, attachments_root))
+    return messages
 
 
 def lint_workspace(

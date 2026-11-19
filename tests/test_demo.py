@@ -74,6 +74,42 @@ class DemoWorkspaceTests(unittest.TestCase):
         reopened = self.run_mt("read", title, "--json")
         self.assertEqual(json.loads(reopened.stdout)["properties"]["due"], "2030-01-05")
 
+    def test_demo_seeds_example_attachments_unchanged(self) -> None:
+        validated = self.run_mt("validate")
+        self.assertEqual(validated.returncode, 0, validated.stderr)
+        self.assertNotIn("broken attachment link", validated.stdout + validated.stderr)
+        examples = self.root / "examples" / "attachments"
+        sources = sorted(path for path in examples.iterdir() if not path.name.startswith("."))
+        self.assertTrue(sources)
+        for source in sources:
+            with self.subTest(attachment=source.name):
+                seeded = self.root / ".mt" / "demo" / "attachments" / source.name
+                self.assertEqual(seeded.read_bytes(), source.read_bytes())
+
+    def test_demo_keeps_edits_until_examples_change_then_rebuilds(self) -> None:
+        demo = self.root / ".mt" / "demo"
+        moved = self.run_mt("move", "Prepare the lab meeting readout", "doing")
+        self.assertEqual(moved.returncode, 0, moved.stderr)
+        self.assertIn("Prepare the lab meeting readout", self.run_mt("list", "--status", "doing").stdout)
+
+        # Unchanged examples keep the demo, edits included.
+        self.assertIn("Prepare the lab meeting readout", self.run_mt("list", "--status", "doing").stdout)
+
+        # Changed examples (as after `mt update`) rebuild it: edits are dropped, new files appear.
+        examples = self.root / "examples"
+        (examples / "attachments" / "0123456789ab-new-figure.svg").write_text("<svg/>", encoding="utf-8")
+        listed = self.run_mt("list", "--status", "doing")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertNotIn("Prepare the lab meeting readout", listed.stdout)
+        self.assertTrue((demo / "attachments" / "0123456789ab-new-figure.svg").is_file())
+        self.assertEqual([path.name for path in (self.root / ".mt").iterdir() if path.name.startswith("demo-")], [])
+
+        # A demo built before fingerprints existed is rebuilt once.
+        self.run_mt("move", "Prepare the lab meeting readout", "doing")
+        (demo / ".examples-sha256").unlink()
+        self.assertNotIn("Prepare the lab meeting readout", self.run_mt("list", "--status", "doing").stdout)
+        self.assertTrue((demo / ".examples-sha256").is_file())
+
     def test_demo_has_resolved_task_and_note_reference_trails(self) -> None:
         result = self.run_mt("list", "--all", "--json")
         self.assertEqual(result.returncode, 0, result.stderr)

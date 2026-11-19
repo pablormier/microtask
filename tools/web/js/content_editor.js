@@ -139,7 +139,6 @@ function createContentEditor() {
       this.previewHtml = "";
       this.conflict = false;
       this.error = "";
-      if (this.surface) this.surface.setValue(this.text);
       ctx.clearStatus();
       ctx.focusInput();
     },
@@ -154,7 +153,6 @@ function createContentEditor() {
         this.error = STALE_UNSAVED_MESSAGE;
       }
       this.persist();
-      if (this.surface) this.surface.setValue(this.text);
       this.schedulePreview(ctx);
     },
 
@@ -217,7 +215,7 @@ function createContentEditor() {
     },
 
     canSave(ctx) {
-      if (!this.open || this.saving || ctx.draftBusy || ctx.busy) return false;
+      if (!this.open || this.saving || ctx.draftBusy || ctx.busy || ctx.attachmentUploading) return false;
       const bodyDirty = this.text !== this.original;
       const propsDirty = Boolean(this.zen && ctx.hasPropertyChanges && ctx.hasPropertyChanges());
       // Property problems (a conflict, an empty title) never block saving the body.

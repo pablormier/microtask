@@ -28,7 +28,7 @@ from workspace import (
 
 # What belongs to the workspace. Everything else Git tracks in the folder is application code.
 DATA_FILES = (SETTINGS_FILE, LOCAL_SETTINGS_FILE, OLD_SETTINGS_FILE, OLD_LOCAL_SETTINGS_FILE)
-DATA_FOLDERS = ("cards", "drafts", ".mt")
+DATA_FOLDERS = ("cards", "drafts", "attachments", ".mt")
 IGNORE_LINES = (".mt/", LOCAL_SETTINGS_FILE)
 # Machine-local files: ignored from now on, and no longer tracked if they were, so they
 # stop syncing between machines. The files themselves stay on disk.

@@ -22,6 +22,7 @@ function createDraftCoordinator() {
         this._captureContext = {
           get workspaceKey() { return self.workspaceKey; },
           get busy() { return self.busy; },
+          get attachmentUploading() { return self.attachmentUploading; },
           get store() { return self.getDraftStore(); },
           get taskDefaults() { return self.taskDefaults; },
           get taskStatuses() { return self.taskStatuses; },
@@ -73,6 +74,7 @@ function createDraftCoordinator() {
         selected: this.selected,
         busy: this.busy,
         draftBusy: this.draftBusy,
+        attachmentUploading: this.attachmentUploading,
         getSelected: () => this.selected,
         getCards: () => this.tasks,
         saveCardBody: (ref, expectedHash, body) => this.saveCardBody(ref, expectedHash, body),
@@ -189,7 +191,6 @@ function createDraftCoordinator() {
       this.captureComposer.zenView = "write";
       this.captureComposer.zenMetaOpen = false;
       this.captureComposer.previewHtml = "";
-      if (this.captureComposer.surface) this.captureComposer.surface.setValue(draft.body);
       this.captureComposer.open = true;
       this.$nextTick(() => {
         const input = (this.$refs && this.$refs.composerBody) || document.getElementById("mt-composer-body");

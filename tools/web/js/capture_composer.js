@@ -132,7 +132,6 @@ function createCaptureComposer() {
       this.zenView = "write";
       this.zenMetaOpen = false;
       this.previewHtml = "";
-      if (this.surface) this.surface.setValue("");
       this.message = "";
       this.messageError = false;
       if (ctx.clearStatus) ctx.clearStatus();
@@ -214,7 +213,6 @@ function createCaptureComposer() {
         this.draft.body += separator + headings;
       }
       this.persist(ctx);
-      if (this.surface) this.surface.setValue(this.draft.body);
       this.schedulePreview();
       this.message = "Meeting headings added. Existing text was kept.";
       this.messageError = false;
@@ -223,7 +221,7 @@ function createCaptureComposer() {
 
     canSave(ctx) {
       const draft = this.draft;
-      if (!draft || (draft.workspaceKey && draft.workspaceKey !== ctx.workspaceKey) || ctx.busy) return false;
+      if (!draft || (draft.workspaceKey && draft.workspaceKey !== ctx.workspaceKey) || ctx.busy || ctx.attachmentUploading) return false;
       if (draft.state === "conflict" || draft.state === "closed") return false;
       const options = draft.taskOptions || {};
       if (options.due && !options.due_kind) return false;

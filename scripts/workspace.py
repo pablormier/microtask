@@ -3,17 +3,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, timedelta
+import fcntl
+import hashlib
 import os
 from pathlib import Path
 import re
 import shutil
-import uuid
+import tempfile
 
 import policy_parser
 
 
 APP_ROOT = policy_parser.APP_ROOT
 DEMO_DATE_ANCHOR = date(2026, 1, 5)
+# Records which examples/ content the demo was built from, so a changed set rebuilds it.
+DEMO_FINGERPRINT_FILE = ".examples-sha256"
 
 _DETERMINISTIC_POLICY_KEYS = {
     "statuses", "priorities", "types", "due_kinds", "suggested_topics", "suggested_tags",
@@ -23,7 +27,7 @@ _DETERMINISTIC_POLICY_KEYS = {
 _DETERMINISTIC_RULE_KEYS = {
     "auto_sync", "done_window", "max_doing_tasks", "demo_workspace", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
-    "allow_public_origin",
+    "allow_public_origin", "max_attachment_mb",
 }
 
 
@@ -166,6 +170,37 @@ def _shift_demo_date(match: re.Match[str], offset: int) -> str:
     return shifted.isoformat() + (match.group(4) or "")
 
 
+def _example_files(examples: Path) -> list[tuple[Path, Path]]:
+    """Return (relative, source) for every non-hidden file under examples/, in a stable order."""
+    if not examples.is_dir():
+        return []
+    files = []
+    for source in sorted(examples.rglob("*")):
+        relative = source.relative_to(examples)
+        if source.is_file() and not any(part.startswith(".") for part in relative.parts):
+            files.append((relative, source))
+    return files
+
+
+def _examples_fingerprint(files: list[tuple[Path, Path]]) -> str:
+    digest = hashlib.sha256()
+    for relative, source in files:
+        content = source.read_bytes()
+        digest.update(f"{relative.as_posix()}\0{len(content)}\0".encode("utf-8"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def _demo_fingerprint(demo: Path) -> str | None:
+    """The examples fingerprint the demo was built from; None for a missing or pre-fingerprint demo."""
+    if not (demo / "cards").is_dir():
+        return None
+    try:
+        return (demo / DEMO_FINGERPRINT_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
 def rebase_demo_dates(text: str) -> str:
     offset = (date.today() - DEMO_DATE_ANCHOR).days
     if offset == 0:
@@ -255,6 +290,9 @@ class Workspace:
     def real_cards_root(self) -> Path:
         return self.root / "cards"
 
+    def real_attachments_root(self) -> Path:
+        return self.root / "attachments"
+
     def demo_root(self) -> Path:
         return self.root / ".mt" / "demo"
 
@@ -303,33 +341,53 @@ class Workspace:
         return self._demo_state
 
     def maybe_seed_demo(self) -> None:
+        """Build the demo from examples/, and rebuild it when examples/ has changed since.
+
+        Demo edits survive until the examples change (for example after `mt update`).
+        The new demo is built beside the old one and swapped in, under a demo-only lock:
+        callers may already hold the mutation lock, so taking it here could deadlock.
+        """
         if not self.demo_active():
             return
         demo = self.demo_root()
-        if (demo / "cards").is_dir():
-            return
         examples = self.app_root / "examples"
+        files = _example_files(examples)
+        fingerprint = _examples_fingerprint(files)
+        if _demo_fingerprint(demo) == fingerprint:
+            return
         demo.parent.mkdir(parents=True, exist_ok=True)
-        staging = demo.parent / f".demo.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-        try:
-            staging.mkdir(parents=True, exist_ok=True)
-            for source in sorted(examples.rglob("*.md")):
-                relative = source.relative_to(examples)
-                destination = staging / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(rebase_demo_dates(source.read_text(encoding="utf-8")), encoding="utf-8")
-            if (demo / "cards").is_dir():
-                return
-            if demo.exists():
-                shutil.rmtree(demo)
+        with (demo.parent / "demo.lock").open("a+") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                os.replace(staging, demo)
-            except OSError:
-                if not (demo / "cards").is_dir():
+                if _demo_fingerprint(demo) == fingerprint:
+                    return  # Another process rebuilt it while this one waited.
+                staging = Path(tempfile.mkdtemp(prefix="demo-new-", dir=demo.parent))
+                retired = None
+                try:
+                    for relative, source in files:
+                        destination = staging / relative
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        if source.suffix == ".md":
+                            text = rebase_demo_dates(source.read_text(encoding="utf-8"))
+                            destination.write_text(text, encoding="utf-8")
+                        else:
+                            # Attachments are copied byte for byte; only card text has its dates rebased.
+                            destination.write_bytes(source.read_bytes())
+                    (staging / "cards").mkdir(exist_ok=True)
+                    (staging / DEMO_FINGERPRINT_FILE).write_text(fingerprint + "\n", encoding="utf-8")
+                    if demo.exists():
+                        retired = Path(tempfile.mkdtemp(prefix="demo-old-", dir=demo.parent))
+                        os.replace(demo, retired / "demo")
+                    os.replace(staging, demo)
+                except BaseException:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    if retired is not None and not demo.exists():
+                        os.replace(retired / "demo", demo)  # Put the previous demo back.
                     raise
-        finally:
-            if staging.exists():
-                shutil.rmtree(staging, ignore_errors=True)
+                if retired is not None:
+                    shutil.rmtree(retired, ignore_errors=True)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def active_root(self) -> Path:
         return self.demo_root() if self.demo_active() else self.root
@@ -338,6 +396,11 @@ class Workspace:
         if self.demo_active():
             return self.demo_root() / "cards"
         return self.real_cards_root()
+
+    def attachments_root(self) -> Path:
+        if self.demo_active():
+            return self.demo_root() / "attachments"
+        return self.real_attachments_root()
 
     def focus_state_path(self) -> Path:
         if self.demo_active():

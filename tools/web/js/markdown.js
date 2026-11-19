@@ -1,9 +1,20 @@
+function resolveAttachmentWebUrl(href) {
+  if (typeof window === "undefined" || !window.location || !/^https?:$/i.test(window.location.protocol)) {
+    return null;
+  }
+  const match = href.match(/^\.\.\/attachments\/(.+)$/);
+  if (!match) return null;
+  return "/attachments/" + match[1];
+}
+
 function resolveUrl(base, href) {
   if (href == null) return href;
   href = String(href);
   if (href === "" || href.startsWith("#")) return href;
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return href;
   if (href.startsWith("//")) return href;
+  const attachmentUrl = resolveAttachmentWebUrl(href);
+  if (attachmentUrl) return attachmentUrl;
   try { return new URL(href, base).href; } catch (e) { return href; }
 }
 
@@ -93,21 +104,38 @@ function renderMarkdown(task, source) {
   const protectedMath = protectMathSpans(source || "");
   const raw = marked.parse(protectedMath.protectedSource, { gfm: true, breaks: false, renderer });
   const restored = restoreMathSpans(raw, protectedMath.mathList);
-  const sanitized = DOMPurify.sanitize(restored, { USE_PROFILES: { html: true }, ADD_ATTR: ["target"] });
-  if (typeof window !== "undefined" && window.renderMathInElement &&
-      typeof document !== "undefined" && typeof document.createElement === "function") {
+  const sanitized = DOMPurify.sanitize(restored, { USE_PROFILES: { html: true }, ADD_ATTR: ["target", "rel"] });
+  if (typeof document !== "undefined" && typeof document.createElement === "function") {
     const container = document.createElement("div");
     // DOMPurify has already sanitized the HTML. setHTML's default sanitizer strips task checkbox inputs.
     container.innerHTML = sanitized;
-    window.renderMathInElement(container, {
-      delimiters: [
-        { left: "$$", right: "$$", display: true },
-        { left: "\\[", right: "\\]", display: true },
-        { left: "\\(", right: "\\)", display: false },
-        { left: "$", right: "$", display: false }
-      ],
-      throwOnError: false,
-      ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+    if (typeof window !== "undefined" && window.renderMathInElement) {
+      window.renderMathInElement(container, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "$", right: "$", display: false }
+        ],
+        throwOnError: false,
+        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+      });
+    }
+    container.querySelectorAll("img[src]").forEach(img => {
+      if (img.closest("a")) return;
+      const src = img.getAttribute("src");
+      if (!src) return;
+      const link = document.createElement("a");
+      link.className = "mt-image-link";
+      link.setAttribute("href", src);
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+      img.parentNode.insertBefore(link, img);
+      link.appendChild(img);
+    });
+    container.querySelectorAll('a[href^="/attachments/"]').forEach(link => {
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
     });
     return container.innerHTML;
   }

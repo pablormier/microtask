@@ -166,6 +166,11 @@ summary and the causal inference course tracker. **Deadlines** shows a mix of
 hard deadlines, a reminder, and a target. The demo sets those dates relative to
 the day it first seeds the cards and keeps them on reopen.
 
+Changes you make in the demo stay until the bundled examples change, for example
+after `mt update`. The next command then rebuilds the demo from the new examples,
+which discards your demo edits. To start the demo over yourself, delete
+`.mt/demo`.
+
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where
 you tick one or more values; a card matches when it has any value ticked in a
@@ -216,6 +221,25 @@ mt draft create note --title "Meeting follow-up" --file notes.md
 
 Saving a draft checks its revision so another tab or the CLI never silently
 overwrites newer changes.
+
+## Attachments
+
+Images and other files you add to a card live in `attachments/`, next to
+`cards/` in the workspace. In the dashboard, paste an image, drop a file, or
+use the Attach button in the card editor, the capture composer, or the comment
+box. The file is copied into `attachments/` and a Markdown link is inserted at
+the cursor. From the CLI, `mt attach FILE` copies a file and prints the link;
+add `--card REF` to append the link to a card:
+
+```sh
+mt attach chart.png --card "Quarterly review"
+```
+
+Cards refer to attachments as `../attachments/NAME`, which also works in any
+Markdown viewer that opens the card file. Files larger than
+`rules.max_attachment_mb` (10 by default) are refused. `mt sync` commits
+attachments with the cards. `mt validate` reports broken attachment links
+(`lint.broken_attachment` in `settings.yaml` can turn that warning off).
 
 ## Workspaces
 

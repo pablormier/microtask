@@ -32,7 +32,7 @@ import validation
 from workspace import Workspace
 
 # mt-policy.yaml is the settings file of old-style installs until 'mt migrate' renames it.
-SYNC_PATHS = (":(glob)cards/*.md", ":(glob)drafts/*.md", "settings.yaml", "mt-policy.yaml")
+SYNC_PATHS = (":(glob)cards/*.md", ":(glob)drafts/*.md", "attachments", "settings.yaml", "mt-policy.yaml")
 _TIME_LOCK_STATE = threading.local()
 
 
@@ -456,14 +456,23 @@ def staged_task_changes(ws: Workspace | None = None) -> list[tuple[str, str, str
 def task_commit_message(changes: list[tuple[str, str, str | None]], ws: Workspace | None = None) -> str:
     markdown_changes = [change for change in changes if Path(change[1]).suffix == ".md"]
     drafts = [change for change in markdown_changes if change[1].startswith("drafts/")]
-    cards = [change for change in markdown_changes if not change[1].startswith("drafts/")]
+    cards = [
+        change for change in markdown_changes
+        if not change[1].startswith(("drafts/", "attachments/"))
+    ]
+    attachments = [change for change in changes if change[1].startswith("attachments/")]
+    attachment_suffix = (
+        f" and {len(attachments)} attachment{'s' if len(attachments) != 1 else ''}" if attachments else ""
+    )
     if any(old_path in {"settings.yaml", "mt-policy.yaml"} for _, old_path, _ in changes):
         message = "Update tasks and settings" if cards else "Update workspace settings"
         if drafts:
             message += f" and {len(drafts)} draft{'s' if len(drafts) != 1 else ''}"
-        return message
+        return message + attachment_suffix
     if not cards and drafts:
-        return f"Update {len(drafts)} workspace draft{'s' if len(drafts) != 1 else ''}"
+        return f"Update {len(drafts)} workspace draft{'s' if len(drafts) != 1 else ''}{attachment_suffix}"
+    if not cards and attachments:
+        return f"Update {len(attachments)} attachment{'s' if len(attachments) != 1 else ''}"
     if not cards:
         return "Update workspace"
     actions: list[tuple[str, str, str | None, str]] = []  # verb, title, destination status, kind
@@ -482,16 +491,17 @@ def task_commit_message(changes: list[tuple[str, str, str | None]], ws: Workspac
             else:
                 actions.append(("Update", title, None, kind))
     drafts_suffix = f" and {len(drafts)} draft{'s' if len(drafts) != 1 else ''}" if drafts else ""
+    extra_suffix = drafts_suffix + attachment_suffix
     if len(actions) == 1:
         verb, title, destination, kind = actions[0]
         if verb == "Move":
-            return f"Move task {title} to {destination}{drafts_suffix}"
-        return f"{verb} {kind} {title}{drafts_suffix}"
+            return f"Move task {title} to {destination}{extra_suffix}"
+        return f"{verb} {kind} {title}{extra_suffix}"
     kinds = {kind for *_rest, kind in actions}
     noun = "notes" if kinds == {"note"} else "tasks" if kinds == {"task"} else "items"
     if len({verb for verb, *_rest in actions}) == 1:
-        return f"{actions[0][0]} {len(actions)} {noun}{drafts_suffix}"
-    return f"Update {len(actions)} {noun}{drafts_suffix}"
+        return f"{actions[0][0]} {len(actions)} {noun}{extra_suffix}"
+    return f"Update {len(actions)} {noun}{extra_suffix}"
 
 
 

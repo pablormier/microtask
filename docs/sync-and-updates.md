@@ -48,7 +48,8 @@ git clone https://github.com/pablormier/microtask.git && cd microtask && ./mt in
 ```
 
 `./mt init` creates `workspace/` next to the app, with `cards/`, `drafts/`,
-`settings.yaml` and a `.gitignore`. The repository ignores `workspace/`, so
+`settings.yaml` and a `.gitignore`. Pasted and attached files go into `attachments/`
+there, which `mt sync` commits with the cards. The repository ignores `workspace/`, so
 your cards never end up in the app's history. Run `./install.sh --here` in the
 clone to put `mt` on PATH.
 
@@ -65,7 +66,7 @@ use them.
 mt sync
 ```
 
-This commits changes to cards, drafts, and `settings.yaml` in the workspace,
+This commits changes to cards, drafts, attachments, and `settings.yaml` in the workspace,
 then fetches, merges, and pushes to `origin`. Set `rules.auto_sync: true` in
 `settings.yaml` to sync after every card change. Everything works locally
 without Git; sync is optional. If a sync fails, including one run in the
@@ -153,7 +154,7 @@ mt migrate --check     # show what would move and what the commit contains
 mt migrate
 ```
 
-`mt migrate` moves `.git`, `cards/`, `drafts/`, `.mt/` and the settings files
+`mt migrate` moves `.git`, `cards/`, `drafts/`, `attachments/`, `.mt/` and the settings files
 into `workspace/`, renaming `mt-policy.yaml` to `settings.yaml` and
 `mt-policy.local.yaml` to `settings.local.yaml` on the way. It adds `.mt/` and
 `settings.local.yaml` to the workspace's `.gitignore`, and makes one commit

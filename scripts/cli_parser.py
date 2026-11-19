@@ -24,6 +24,7 @@ from cli_admin import (
 )
 from cli_cards import (
     command_add,
+    command_attach,
     command_bulk_edit,
     command_capture,
     command_comment,
@@ -159,7 +160,7 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
 
     migrate_command = sub.add_parser(
         "migrate", help="move an old-style workspace into workspace/ and rename mt-policy.yaml to settings.yaml",
-        description="Move the Git history, cards, drafts, settings files and local state of an old-style workspace, "
+        description="Move the Git history, cards, drafts, attachments, settings files and local state of an old-style workspace, "
                     "where cards sit next to the app code, into workspace/, rename mt-policy.yaml to settings.yaml "
                     "(and mt-policy.local.yaml to settings.local.yaml), and commit the removal of the application "
                     "files there. For a workspace folder with no application, such as /srv/mt/NAME, select it with "
@@ -612,6 +613,14 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     add_match_mode_arguments(comment)
     comment.add_argument("--json", dest="as_json", action="store_true", help="return the updated card receipt as JSON")
     comment.set_defaults(func=command_comment)
+
+    attach = sub.add_parser("attach", help="copy a file into attachments/ and print its Markdown link")
+    attach.add_argument("source", metavar="FILE", help="path to the local file to copy into attachments/")
+    attach.add_argument("--card", nargs="+", help="append the Markdown link to one matched task or note")
+    attach.add_argument("--label", help="override the Markdown alt text or link label")
+    add_match_mode_arguments(attach)
+    attach.add_argument("--json", dest="as_json", action="store_true", help="return the attachment receipt as JSON")
+    attach.set_defaults(func=command_attach)
 
     convert = sub.add_parser("convert", help="convert one item between task and note")
     convert.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")

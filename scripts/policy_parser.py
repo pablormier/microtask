@@ -151,6 +151,14 @@ def load_policy(root: Path) -> dict:
     if not valid_warn_hours:
         raise ValueError("settings rules.timer_warn_hours must be a positive number")
     rules.setdefault("timer_warn_hours", 8)
+    max_attachment_mb = rules.get("max_attachment_mb", 10)
+    try:
+        valid_max_attachment = not isinstance(max_attachment_mb, bool) and 0 < float(max_attachment_mb) < float("inf")
+    except (TypeError, ValueError):
+        valid_max_attachment = False
+    if not valid_max_attachment:
+        raise ValueError("settings rules.max_attachment_mb must be a positive number")
+    rules.setdefault("max_attachment_mb", 10)
     done_window = rules.get("done_window", "2w")
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
         raise ValueError("settings rules.done_window must be an age like 2w, 30d, or 1m")

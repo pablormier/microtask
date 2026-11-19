@@ -118,6 +118,12 @@
 }
 .mt-composer-footer .mt-composer-discard { margin-right: auto; }
 .mt-composer-body-label-row button.mt-composer-template { color: var(--mt-accent); }
+.mt-composer-body-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
 /* Discarding stays available without competing with the primary action. */
 .mt-composer-footer button.mt-button-danger.mt-composer-discard:not(:hover):enabled { border-color: transparent; background: transparent; box-shadow: none; }
 .mt-composer-shortcut { display: inline-flex; align-items: center; gap: 3px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }

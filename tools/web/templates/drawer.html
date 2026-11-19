@@ -94,23 +94,42 @@
                         <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'split'" @click="contentEditor.setZenView(contentContext(), 'split')">Split</button>
                         <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'preview'" @click="contentEditor.setZenView(contentContext(), 'preview')">Preview</button>
                       </div>
-                      <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-zen-toggle"
-                              :aria-label="contentEditor.zen ? 'Exit Zen mode' : 'Enter Zen mode'"
-                              :title="contentEditor.zen ? 'Exit Zen mode (Esc)' : 'Zen mode (⌘/Ctrl+Shift+F)'"
-                              :aria-pressed="contentEditor.zen"
-                              @click="contentEditor.toggleZen(contentContext())">
-                        <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                          <path x-show="!contentEditor.zen" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-                          <path x-show="contentEditor.zen" d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"/>
-                        </svg>
-                      </button>
+                      <div class="mt-editor-toolbar-actions">
+                        <input type="file" multiple class="mt-attach-input" x-ref="contentAttachInput"
+                               @change="handleAttachmentPick('content', $event, $refs.detailContentInput)"
+                               :disabled="draftBusy || contentEditor.saving || attachmentUploading">
+                        <button type="button" class="mt-button mt-button-quiet mt-button-compact"
+                                aria-label="Attach file" title="Attach file or paste image"
+                                :disabled="draftBusy || contentEditor.saving || attachmentUploading"
+                                @click="$refs.contentAttachInput.click()">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                          </svg>
+                          <span>Attach</span>
+                        </button>
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-zen-toggle"
+                                :aria-label="contentEditor.zen ? 'Exit Zen mode' : 'Enter Zen mode'"
+                                :title="contentEditor.zen ? 'Exit Zen mode (Esc)' : 'Zen mode (⌘/Ctrl+Shift+F)'"
+                                :aria-pressed="contentEditor.zen"
+                                @click="contentEditor.toggleZen(contentContext())">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path x-show="!contentEditor.zen" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+                            <path x-show="contentEditor.zen" d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"/>
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                     <div class="mt-zen-workspace" :class="{ 'is-zen': contentEditor.zen, 'is-split': contentEditor.zen && contentEditor.zenView === 'split', 'is-preview': contentEditor.zen && contentEditor.zenView === 'preview' }">
                       <div class="mt-zen-editor-pane mt-editor-surface-host"
                            x-show="contentEditor.zen ? contentEditor.zenView !== 'preview' : contentEditor.tab === 'write'">
                         <textarea class="mt-field mt-content-input" x-ref="detailContentInput"
+                                  :class="{ 'is-drag-over': attachmentDragTarget === 'content' }"
                                   x-model="contentEditor.text"
                                   @input="contentEditor.persist(contentContext()); contentEditor.schedulePreview(contentContext()); contentEditor.updateMention(contentContext(), $el)"
+                                  @paste="handleAttachmentPaste('content', $event, $el)"
+                                  @dragover="handleAttachmentDragOver('content', $event)"
+                                  @dragleave="handleAttachmentDragLeave('content')"
+                                  @drop="handleAttachmentDrop('content', $event, $el)"
                                   @click="contentEditor.updateMention(contentContext(), $el)"
                                   @keydown="contentEditor.handleMentionKeydown(contentContext(), $event, $el)"
                                   @keyup="contentEditor.handleMentionKeyup(contentContext(), $event, $el)"
@@ -180,8 +199,27 @@
                 </button>
                 <div class="mt-card-properties-preview" x-show="!contentEditor.open" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <form class="mt-comment-composer" x-show="!contentEditor.open" @submit.prevent="commentSelected()">
-                  <textarea class="mt-field" x-model="commentText" :disabled="busy" aria-label="Comment text" placeholder="Leave a comment"></textarea>
-                  <button type="submit" class="mt-button mt-button-compact" :disabled="busy || !commentText.trim()" :aria-busy="busy">Comment</button>
+                  <textarea class="mt-field" x-ref="commentInput" x-model="commentText" :disabled="busy"
+                            :class="{ 'is-drag-over': attachmentDragTarget === 'comment' }"
+                            @paste="handleAttachmentPaste('comment', $event, $el)"
+                            @dragover="handleAttachmentDragOver('comment', $event)"
+                            @dragleave="handleAttachmentDragLeave('comment')"
+                            @drop="handleAttachmentDrop('comment', $event, $el)"
+                            aria-label="Comment text" placeholder="Leave a comment"></textarea>
+                  <div class="mt-comment-actions">
+                    <input type="file" multiple class="mt-attach-input" x-ref="commentAttachInput"
+                           @change="handleAttachmentPick('comment', $event, $refs.commentInput)"
+                           :disabled="busy || attachmentUploading">
+                    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact"
+                            aria-label="Attach file to comment" title="Attach file or paste image"
+                            :disabled="busy || attachmentUploading"
+                            @click="$refs.commentAttachInput.click()">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                      </svg>
+                    </button>
+                    <button type="submit" class="mt-button mt-button-compact" :disabled="busy || attachmentUploading || !commentText.trim()" :aria-busy="busy">Comment</button>
+                  </div>
                 </form>
               </section>
               <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }">
