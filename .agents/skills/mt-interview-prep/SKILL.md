@@ -45,7 +45,9 @@ contribution, technical knowledge, scientific reasoning, learning and
 independence, collaboration and expectations, and the candidate's questions.
 Pick only what this interview needs: a short slot should cover fewer areas well
 rather than many superficially. Leave time for follow-ups and the candidate's
-questions.
+questions. Keep the interviewers' introduction short so the candidate does most
+of the talking, agree beforehand who leads and keeps time when several people
+interview, and end by telling the candidate the next steps and timeline.
 
 Calibrate to career stage: an intern is assessed on curiosity and learning, a
 postdoc on independence and research ability. Briefly say why the structure fits
@@ -106,5 +108,6 @@ Produce the smallest result that serves the request:
   space, and a debrief format.
 
 Size follows the request, not the interview length. For each section give time,
-goal, and questions. Skip generic advice and long introductions; vary the shape
-to fit the interview rather than repeating one template.
+goal, and questions. A few tips specific to this interview (roles, timing, what
+to watch for) are welcome; skip generic advice and long introductions. Vary the
+shape to fit the interview rather than repeating one template.
