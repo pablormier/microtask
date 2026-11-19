@@ -166,6 +166,11 @@ summary and the causal inference course tracker. **Deadlines** shows a mix of
 hard deadlines, a reminder, and a target. The demo sets those dates relative to
 the day it first seeds the cards and keeps them on reopen.
 
+Changes you make in the demo stay until the bundled examples change, for example
+after `mt update`. The next command then rebuilds the demo from the new examples,
+which discards your demo edits. To start the demo over yourself, delete
+`.mt/demo`.
+
 Filters opens a row of filter chips under the title: Status, Priority, Type, Project,
 Topic, Tags, Due, and Updated, beside a search box. Each chip opens a list where
 you tick one or more values; a card matches when it has any value ticked in a
