@@ -293,6 +293,29 @@ class AttachmentCoreTests(unittest.TestCase):
             self.assertEqual(report.errors, [])
             self.assertEqual(report.warnings, [])
 
+    def test_content_disposition_ascii_and_unicode(self) -> None:
+        ascii_header = attachments.content_disposition_attachment("report.zip")
+        self.assertEqual(ascii_header, 'attachment; filename="report.zip"')
+        ascii_header.encode("latin-1")
+
+        unicode_header = attachments.content_disposition_attachment("日本語-résumé.zip")
+        unicode_header.encode("latin-1")
+        self.assertIn('filename="', unicode_header)
+        self.assertIn("filename*=UTF-8''", unicode_header)
+        self.assertIn("%E6%97%A5%E6%9C%AC%E8%AA%9E", unicode_header)
+
+        control_header = attachments.content_disposition_attachment('bad"\r\nname.txt')
+        control_header.encode("latin-1")
+        self.assertNotIn("\r", control_header)
+        self.assertNotIn("\n", control_header)
+
+    def test_attachment_csp_allows_pdf_viewer_and_sandboxes_others(self) -> None:
+        self.assertEqual(attachments.attachment_csp(Path("paper.pdf")), "default-src 'none'; object-src 'self'")
+        self.assertEqual(attachments.attachment_csp(Path("PAPER.PDF")), "default-src 'none'; object-src 'self'")
+        self.assertFalse(attachments.should_force_download(Path("paper.pdf")))
+        for name in ("diagram.svg", "shot.png", "evil.html", "archive.zip"):
+            self.assertEqual(attachments.attachment_csp(Path(name)), "sandbox")
+
 
 class AttachmentWebServerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -385,6 +408,8 @@ class AttachmentWebServerTests(unittest.TestCase):
         with urllib.request.urlopen(f"{self.base_url}/attachments/papers/spec.pdf", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             self.assertEqual(resp.headers.get("Content-Type"), "application/pdf")
+            self.assertEqual(resp.headers.get("Content-Security-Policy"), "default-src 'none'; object-src 'self'")
+            self.assertIsNone(resp.headers.get("Content-Disposition"))
 
         # Traversal attempts return 404.
         for bad_path in ("/attachments/../mt-policy.yaml", "/attachments/%2e%2e/mt-policy.yaml"):

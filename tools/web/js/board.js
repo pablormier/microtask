@@ -1148,7 +1148,7 @@ function taskBoard() {
 
     commentSelected() {
       const message = this.commentText.trim();
-      if (!this.selected || !message) return;
+      if (!this.selected || !message || this.attachmentUploading) return;
       this.apiPost("/api/comment", { ref: this.selected.ref, message }).then(payload => {
         if (payload) this.commentText = "";
       });
@@ -1160,6 +1160,7 @@ function taskBoard() {
           getText: () => this.contentEditor.text,
           setText: next => {
             this.contentEditor.text = next;
+            if (this.contentEditor.surface) this.contentEditor.surface.setValue(next);
             this.contentEditor.persist(this.contentContext());
             this.contentEditor.schedulePreview(this.contentContext());
           },
@@ -1171,6 +1172,7 @@ function taskBoard() {
           setText: next => {
             if (!this.captureComposer.draft) return;
             this.captureComposer.draft.body = next;
+            if (this.captureComposer.surface) this.captureComposer.surface.setValue(next);
             this.captureComposer.persist(this.captureContext());
             this.captureComposer.schedulePreview(this.captureContext());
           },

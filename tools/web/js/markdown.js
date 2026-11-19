@@ -2,7 +2,7 @@ function resolveAttachmentWebUrl(href) {
   if (typeof window === "undefined" || !window.location || !/^https?:$/i.test(window.location.protocol)) {
     return null;
   }
-  const match = href.match(/^(?:\.\.\/|\.\/)?attachments\/(.+)$/);
+  const match = href.match(/^\.\.\/attachments\/(.+)$/);
   if (!match) return null;
   return "/attachments/" + match[1];
 }

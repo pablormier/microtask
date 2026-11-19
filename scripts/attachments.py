@@ -5,7 +5,7 @@ import hashlib
 import mimetypes
 from pathlib import Path
 import re
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 DEFAULT_MAX_ATTACHMENT_MB = 10
 
@@ -121,6 +121,23 @@ def should_force_download(path: Path) -> bool:
     if suffix in IMAGE_EXTENSIONS or suffix == ".pdf":
         return False
     return True
+
+
+def attachment_csp(path: Path) -> str:
+    """Return a restrictive Content-Security-Policy for serving an attachment."""
+    if path.suffix.lower() == ".pdf":
+        return "default-src 'none'; object-src 'self'"
+    return "sandbox"
+
+
+def content_disposition_attachment(filename: str) -> str:
+    """Build an ASCII-safe RFC 6266 Content-Disposition attachment header value."""
+    cleaned = re.sub(r'[\x00-\x1f\x7f"\\]+', "_", filename).strip() or "attachment"
+    ascii_fallback = cleaned.encode("ascii", "replace").decode("ascii").replace("?", "_").strip() or "attachment"
+    if ascii_fallback == cleaned:
+        return f'attachment; filename="{ascii_fallback}"'
+    encoded = quote(cleaned, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 
 def markdown_link(relative_path: str, label: str = "", *, is_image: bool | None = None) -> str:

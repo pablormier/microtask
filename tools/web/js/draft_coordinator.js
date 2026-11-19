@@ -20,6 +20,7 @@ function createDraftCoordinator() {
       return {
         workspaceKey: this.workspaceKey,
         busy: this.busy,
+        attachmentUploading: this.attachmentUploading,
         store: this.getDraftStore(),
         taskDefaults: this.taskDefaults,
         taskStatuses: this.taskStatuses,
@@ -73,6 +74,7 @@ function createDraftCoordinator() {
         selected: this.selected,
         busy: this.busy,
         draftBusy: this.draftBusy,
+        attachmentUploading: this.attachmentUploading,
         getSelected: () => this.selected,
         getCards: () => this.tasks,
         saveCardBody: (ref, expectedHash, body) => this.saveCardBody(ref, expectedHash, body),

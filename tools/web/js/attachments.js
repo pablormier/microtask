@@ -68,22 +68,26 @@ let _mtAttachmentUploadSeq = 0;
 async function uploadAndInsertAttachments({ files, textarea, getText, setText, apiToken, scope, notify, nextTick }) {
   const list = Array.from(files || []).filter(Boolean);
   if (!list.length) return [];
-  const uploaded = [];
-  for (const file of list) {
+  const entries = list.map(file => {
     const seq = ++_mtAttachmentUploadSeq;
     const isImage = Boolean(file.type && file.type.startsWith("image/"));
     const displayName = (file.name || (isImage ? "image" : "file")).replace(/[\[\]\r\n]+/g, " ").trim();
     const placeholder = (isImage ? "!" : "") + "[Uploading " + displayName + "…](#mt-upload-" + seq + ")";
-    const inserted = insertTextAtCursor(textarea, getText(), placeholder);
-    setText(inserted.text);
-    if (textarea && typeof nextTick === "function") {
-      nextTick(() => {
-        try {
-          textarea.selectionStart = inserted.cursor;
-          textarea.selectionEnd = inserted.cursor;
-        } catch (_) {}
-      });
-    }
+    return { file, placeholder };
+  });
+  const block = entries.map(entry => entry.placeholder).join("\n");
+  const inserted = insertTextAtCursor(textarea, getText(), block);
+  setText(inserted.text);
+  if (textarea && typeof nextTick === "function") {
+    nextTick(() => {
+      try {
+        textarea.selectionStart = inserted.cursor;
+        textarea.selectionEnd = inserted.cursor;
+      } catch (_) {}
+    });
+  }
+  const uploaded = [];
+  for (const { file, placeholder } of entries) {
     try {
       const attachment = await uploadAttachmentFile(apiToken, file, { scope });
       const current = String(getText() || "");

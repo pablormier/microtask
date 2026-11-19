@@ -349,9 +349,7 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
     elif attachments_root.exists() and not attachments_root.is_dir():
         errors.append("attachments exists but is not a directory")
     elif attachments_root.is_dir():
-        stack = [attachments_root]
-        while stack:
-            current_dir = stack.pop()
+        def _walk_attachments(current_dir: Path) -> None:
             for entry in sorted(current_dir.iterdir()):
                 if entry.name.startswith("."):
                     continue
@@ -359,7 +357,7 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                 if entry.is_symlink():
                     errors.append(f"symbolic link under attachments/: {rel_entry}")
                 elif entry.is_dir():
-                    stack.append(entry)
+                    _walk_attachments(entry)
                 elif entry.is_file():
                     size = entry.stat().st_size
                     if size > max_bytes:
@@ -369,6 +367,8 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
                         )
                 else:
                     errors.append(f"unexpected entry under attachments/: {rel_entry}")
+
+        _walk_attachments(attachments_root)
 
     if not errors:
         warnings.extend(card_linter.lint_workspace(collected["topics"], policy))

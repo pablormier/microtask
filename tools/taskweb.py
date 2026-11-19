@@ -247,7 +247,11 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def send_attachment_file(self, path: Path) -> None:
-        body = path.read_bytes()
+        try:
+            body = path.read_bytes()
+        except OSError:
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
         etag = '"' + hashlib.sha256(body).hexdigest() + '"'
         status = HTTPStatus.NOT_MODIFIED if self.headers.get("If-None-Match") == etag else HTTPStatus.OK
         self.send_response(status.value)
@@ -255,10 +259,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.send_header("ETag", etag)
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "sandbox")
+        self.send_header("Content-Security-Policy", attachments.attachment_csp(path))
         if attachments.should_force_download(path):
-            safe_name = path.name.replace('"', "").replace("\r", "").replace("\n", "")
-            self.send_header("Content-Disposition", f'attachment; filename="{safe_name}"')
+            self.send_header("Content-Disposition", attachments.content_disposition_attachment(path.name))
         if status is HTTPStatus.NOT_MODIFIED:
             self.end_headers()
             return

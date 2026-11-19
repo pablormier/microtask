@@ -196,7 +196,7 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
 .mt-task-checkbox { cursor: pointer; }
 .mt-task-checkbox:disabled { cursor: default; }
 .mt-preview a { display: inline; }
-.mt-preview a.mt-image-link { display: inline-block; max-width: 100%; }
+.mt-preview a.mt-image-link { display: block; width: fit-content; max-width: 100%; }
 .mt-preview table { display: block; overflow-x: auto; }
 .mt-preview img {
   display: block;
