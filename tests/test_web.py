@@ -490,7 +490,8 @@ view_labels:
         self.assertIn("mt-focus-list", rendered)
         self.assertIn('x-if="isCardsView()"', rendered)
         self.assertIn('x-if="mode === \'focus\'"', rendered)
-        self.assertIn('<section class="mt-overview">', rendered)
+        self.assertIn('<div class="mt-focus-view">', rendered)
+        self.assertNotIn("mt-overview", rendered)
 
     def test_group_layout_selector_and_layout(self) -> None:
         self.render_dashboard()
@@ -1700,7 +1701,9 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         self.render_dashboard()
         rendered = self.output.read_text(encoding="utf-8")
         self.assertIn("mt-followups", rendered)
-        self.assertIn("No waiting follow-ups.", rendered)
+        self.assertIn('x-show="followupTasks().length"', rendered)
+        self.assertIn("focusAlertLabel(task)", rendered)
+        self.assertNotIn("Deadlines to check", rendered)
         self.assertIn("this.focusContext.followup_ids", rendered)
         self.assertNotIn("mt-command-line", rendered)
         self.assertNotIn("restartCommand", rendered)

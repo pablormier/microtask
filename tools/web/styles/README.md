@@ -95,9 +95,11 @@ selector specificity as their base and follow it in the stylesheet.
   optional sections are quiet disclosures rather than boxed rows.
   Escape closes the composer and keeps a non-empty draft for Resume; Discard
   draft appears only when the draft holds text.
-- **Focus view:** below the Focus and Follow-ups panels, open tasks with a
-  deadline to check or no next step sit under a "Needs attention" heading
-  with a count and a one-line explanation; the section hides when empty.
+- **Focus view:** one centered column. The current task comes first, with its
+  next step set apart as the thing to act on and the timer in a footer row.
+  Below it, "Needs attention" (deadlines to check, unclear next steps) and
+  "Waiting on others" are compact rows inside one surface, each with a count;
+  a section hides when empty. A task appears in only one list.
 - **Pickers:** Project, Topic, and Tags accept any text but choose from a
   `mt-picker` list that always shows every option (most-used first, with
   counts), a Create row for new text, and Clear at the top when set. Tags are

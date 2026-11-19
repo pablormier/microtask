@@ -1,16 +1,10 @@
-/* Focus view */
-.mt-overview {
-  display: grid;
-  grid-template-columns: minmax(20rem, 1fr) minmax(22rem, 1.4fr);
-  gap: 12px;
-  padding: 16px 18px 0;
-}
+/* Shared panel used by the Drafts view. */
 .mt-panel {
   min-width: 0;
   padding: 14px 16px;
   border-radius: var(--mt-radius-lg);
 }
-.mt-panel h2, .mt-focus-alerts h2 {
+.mt-panel h2, .mt-focus-heading {
   margin: 0 0 10px;
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-xs);
@@ -18,61 +12,129 @@
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.mt-focus-card .mt-title { margin: 0; font-size: var(--mt-font-size-lg); }
-/* Status and the card reference share one quiet row under the title. */
-.mt-focus-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0; }
-.mt-focus-card .mt-due, .mt-followup-item .mt-due { justify-self: start; margin: 2px 0; }
+.mt-panel-count { margin-left: 4px; color: var(--mt-text); font-variant-numeric: tabular-nums; }
+
+/* Focus view: one reading column. The current task comes first, then short
+   lists of what needs attention and what waits on others. */
+.mt-focus-view {
+  display: grid;
+  gap: 28px;
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 24px 18px 32px;
+}
+.mt-focus-section { min-width: 0; margin: 0; }
+.mt-focus-heading { margin-bottom: 8px; }
 .mt-focus-card {
   display: grid;
-  gap: 5px;
-}
-.mt-card-line {
-  color: var(--mt-text-muted);
-  font-size: var(--mt-font-size-sm);
-  line-height: 1.35;
-}
-.mt-card-line strong { color: var(--mt-text); }
-.mt-focus-time { margin-top: 3px; }
-.mt-focus-alerts { display: grid; gap: var(--mt-space-2); margin-top: var(--mt-space-4); padding-top: var(--mt-space-4); border-top: 1px solid var(--mt-border); }
-.mt-focus-alerts h2 { margin-bottom: 2px; }
-.mt-focus-alerts .mt-card-line { overflow-wrap: anywhere; }
-.mt-time-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-/* The follow-ups panel matches the Focus panel's height: size containment
-   keeps the list from growing the row, and it scrolls only when it overflows. */
-.mt-followups-panel { display: flex; flex-direction: column; }
-.mt-panel-count { margin-left: 4px; color: var(--mt-text); font-variant-numeric: tabular-nums; }
-.mt-followups {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-height: 11rem;
-  contain: size;
-  overflow: auto;
-}
-.mt-followup-item {
-  padding: 10px 12px;
-}
-.mt-followup-title { margin: 3px 0; color: var(--mt-text); font-weight: 650; font-size: var(--mt-font-size-md); }
-/* Cards that need attention, below the Focus and Follow-ups panels. */
-.mt-focus-attention { padding: 20px 18px 0; }
-.mt-focus-attention-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 10px; }
-.mt-focus-attention-header h2 {
+  gap: 12px;
   margin: 0;
+  padding: 18px 20px 14px;
+  border-radius: var(--mt-radius-lg);
+}
+.mt-focus-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* The title opens the card; it drops the shared button chrome to read as a heading. */
+button.mt-button.mt-focus-title {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  font-size: var(--mt-font-size-xl);
+  font-weight: 650;
+  line-height: 1.3;
+  text-align: start;
+  white-space: normal;
+}
+button.mt-button.mt-focus-title:enabled:hover { border: 0; background: none; box-shadow: none; color: var(--mt-accent); }
+button.mt-button.mt-focus-title:focus-visible { border-radius: var(--mt-radius-sm); }
+.mt-focus-card-head .mt-priority { flex: none; margin-top: 4px; }
+.mt-focus-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.mt-focus-reason { color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); }
+/* The next step is the one thing to act on, so it gets the most weight. */
+.mt-focus-next {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--mt-accent);
+  border-radius: var(--mt-radius-sm);
+  background: var(--mt-surface-inset);
+  color: var(--mt-text);
+  font-size: var(--mt-font-size-md);
+  line-height: 1.45;
+}
+.mt-focus-next.is-missing { border-left-color: var(--mt-warning-border); color: var(--mt-text-muted); }
+.mt-focus-next-label {
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-xs);
   font-weight: 650;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.mt-focus-attention-header p { margin: 0; color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); }
-.mt-focus-list {
-  padding: 0 0 24px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-  gap: 12px;
-  align-items: start;
+.mt-focus-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mt-border);
 }
+.mt-focus-card-foot .mt-time-buttons { display: flex; align-items: center; gap: 6px; }
+.mt-focus-card-foot .mt-time-values { width: auto; align-items: baseline; gap: 8px; }
+.mt-focus-card-foot .mt-ref { margin-left: auto; }
+.mt-focus-card-foot .mt-time-session { font-size: var(--mt-font-size-md); font-variant-numeric: tabular-nums; }
+/* Lists are rows inside one surface, separated by hairlines. */
+ul.mt-focus-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  border-radius: var(--mt-radius-md);
+}
+li.mt-focus-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--mt-text);
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1.4;
+  text-align: start;
+  user-select: text;
+  list-style: none;
+  cursor: pointer;
+  transition: background-color .12s ease;
+}
+li.mt-focus-row + li.mt-focus-row { border-top: 1px solid var(--mt-border); }
+li.mt-focus-row:hover, li.mt-focus-row:focus { background: var(--mt-surface-hover); box-shadow: none; }
+li.mt-focus-row:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: -2px; }
+li.mt-focus-row.is-overdue { box-shadow: inset 3px 0 0 var(--mt-danger); }
+li.mt-focus-row.is-due-today { box-shadow: inset 3px 0 0 var(--mt-warning-border); }
+.mt-focus-row-title { min-width: 0; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); overflow-wrap: anywhere; }
+.mt-focus-row-badges { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.mt-focus-row-detail {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-sm);
+}
+.mt-focus-row-hint { flex: none; color: var(--mt-text); }
+.mt-focus-row-hint.is-warning { color: var(--mt-warning); }
+.mt-focus-row-hint + .mt-focus-row-next::before { content: "·"; margin-right: 8px; }
+.mt-focus-row-next { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Deadlines view */
 .mt-deadline-list {
@@ -479,16 +541,17 @@ button.mt-button-icon.mt-topic-tree-disclosure {
 
 /* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
-  .mt-overview { grid-template-columns: 1fr; padding: 12px 12px 0; }
-  .mt-followups { min-height: 0; contain: none; overflow: visible; }
   .mt-cards-body { flex-direction: column; }
   .mt-topic-tree { flex: none; min-width: 0; max-width: none; max-height: 15rem; margin: 8px 12px 0; }
 }
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
   .mt-groups { padding: 12px; }
-  .mt-focus-attention { padding: 16px 12px 0; }
-  .mt-focus-list { padding-bottom: 12px; }
+  .mt-focus-view { gap: 22px; padding: 16px 12px 24px; }
+  .mt-focus-card { padding: 14px 14px 12px; }
+  button.mt-button.mt-focus-title { font-size: var(--mt-font-size-lg); }
+  li.mt-focus-row { grid-template-columns: minmax(0, 1fr); }
+  .mt-focus-row-badges { justify-content: flex-start; }
   .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   /* Column pager: names every column, marks the one in view, and jumps on tap. */

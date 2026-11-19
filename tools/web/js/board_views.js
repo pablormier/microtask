@@ -232,10 +232,17 @@ function createBoardViews() {
 
     needsRestartStep(task) { return Boolean(task && task.needs_restart); },
 
+    // Waiting tasks are listed under Waiting on others, so they are left out here.
     focusModeTasks() {
       const current = this.focusTask();
+      const waiting = new Set(this.followupTasks().map(t => t.id));
       return this.openTasks()
-        .filter(t => (!current || t.id !== current.id) && (this.focusContext.alerts.some(alert => alert.id === t.id) || this.needsRestartStep(t)));
+        .filter(t => (!current || t.id !== current.id) && !waiting.has(t.id)
+          && (this.focusContext.alerts.some(alert => alert.id === t.id) || this.needsRestartStep(t)));
+    },
+
+    focusAlertLabel(task) {
+      return this.focusContext.alerts.find(alert => alert.id === task.id)?.action_label || "";
     },
 
     groupOptions(kind) { return cardGroupOptions(kind); },
