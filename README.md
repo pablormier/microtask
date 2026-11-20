@@ -1,8 +1,15 @@
-# microtask
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.svg">
+    <img src="docs/images/logo.svg" width="240" alt="MicroTask">
+  </picture>
+</p>
 
-A task and notes manager for you and your AI agents. Each task and note is a
-Markdown file in a folder you own, which you can keep in a private Git
-repository.
+<p align="center">
+  <strong>A task and notes manager for you and your AI agents.</strong><br>
+  Each task and note is a Markdown file in a folder you own, synced through your own private Git repository.
+</p>
 
 You work with the `mt` command in a terminal. `mt web` opens a dashboard in
 your browser, served from your own machine. Your editor and your agents read

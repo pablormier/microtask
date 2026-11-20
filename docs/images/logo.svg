@@ -2,10 +2,6 @@
   <style>
     .mt-wm { fill: #1b2230; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.03em; }
     .mt-wm-accent { fill: #2563eb; }
-    @media (prefers-color-scheme: dark) {
-      .mt-wm { fill: #e6e9ef; }
-      .mt-wm-accent { fill: #6d9eff; }
-    }
   </style>
   <defs>
     <clipPath id="mt-lockup-clip">
