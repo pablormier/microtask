@@ -63,6 +63,7 @@ HTML_TEMPLATE = """<!doctype html>
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; font-src data:; img-src file: data: https:; base-uri file:; object-src 'none'">
   <base href="{base_uri}">
   <title>{title}</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CclipPath id='c'%3E%3Crect width='32' height='32' rx='7.5'/%3E%3C/clipPath%3E%3C/defs%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='32' height='32' fill='%232563eb'/%3E%3Crect width='6.5' height='32' fill='%23172554'/%3E%3Crect x='6.5' width='1' height='32' fill='%2393c5fd' fill-opacity='0.35'/%3E%3C/g%3E%3Cpath fill='%23fff' d='M11.6 9.5L14.6 8.5V16.2C14.6 18.2 15.8 19.3 17.7 19.3C19.6 19.3 20.9 18.1 20.9 16V9.5L23.9 8.5V18.2C23.9 19 24.4 19.4 25.3 19.4L26.2 19.2V21.5C25.4 21.8 24.6 22 23.6 22C22 22 21.1 21.2 20.8 20C19.8 21.3 18.3 22 16.5 22C15.7 22 15.1 21.8 14.6 21.5V24.8L11.6 25.8V9.5Z'/%3E%3C/svg%3E">
   <style>{katex_css}</style>
   <script nonce="{nonce}">{marked_js}</script>
   <script nonce="{nonce}">{dompurify_js}</script>
