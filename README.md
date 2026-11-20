@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="tools/web/favicon.svg" width="56" height="56" alt="MicroTask">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/logo.svg">
+    <img src="docs/images/logo.svg" width="240" alt="MicroTask">
+  </picture>
 </p>
-
-<h1 align="center">MicroTask</h1>
 
 <p align="center">
   <strong>A task and notes manager for you and your AI agents.</strong><br>
