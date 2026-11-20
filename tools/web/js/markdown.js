@@ -167,33 +167,83 @@ function renderTextProperty(task, field) {
   return renderMarkdown(task, referenceSource(task, field, value));
 }
 
-// Comment and time history panels, shown below the card's text properties.
+function formatTimeEntryRange(start, end) {
+  const startRaw = String(start || "");
+  const endRaw = String(end || "");
+  const startDate = startRaw ? parseCardDueDate(startRaw) : null;
+  const endDate = endRaw ? parseCardDueDate(endRaw) : null;
+  const validStart = startDate && !Number.isNaN(startDate.getTime());
+  const validEnd = endDate && !Number.isNaN(endDate.getTime());
+  if (validStart && validEnd && typeof CARD_DATE_FORMATTER !== "undefined" && CARD_DATE_FORMATTER && CARD_TIME_FORMATTER) {
+    const sameDay = startDate.getFullYear() === endDate.getFullYear()
+      && startDate.getMonth() === endDate.getMonth()
+      && startDate.getDate() === endDate.getDate();
+    if (sameDay) {
+      return {
+        date: CARD_DATE_FORMATTER.format(startDate),
+        range: CARD_TIME_FORMATTER.format(startDate) + " – " + CARD_TIME_FORMATTER.format(endDate),
+      };
+    }
+  }
+  const startLabel = startRaw ? formatCardDate(startRaw) : "";
+  const endLabel = endRaw ? formatCardDate(endRaw) : "";
+  return {
+    date: "",
+    range: startLabel && endLabel ? startLabel + " – " + endLabel : (startLabel || endLabel),
+  };
+}
+
+function renderCommentsHtml(task) {
+  if (!window.marked || !window.DOMPurify) return "";
+  const comments = Array.isArray(task && task.comments) ? task.comments : [];
+  if (!comments.length) return "";
+  const spans = ((task.reference_spans || {}).comments || []);
+  const entries = comments.map((comment, index) => {
+    const value = comment && typeof comment.text === "string" ? comment.text : "";
+    const at = comment && comment.at || "";
+    const by = comment && typeof comment.by === "string" ? comment.by : "";
+    const meta = (by ? '<span class="mt-comment-author">' + escapeHtml(by) + "</span>" : "") +
+      '<time datetime="' + escapeHtml(at) + '" title="' + escapeHtml(at) + '">' +
+      escapeHtml(at ? formatCardDate(at) : "") + "</time>";
+    return '<article class="mt-comment-entry"><div class="mt-comment-meta">' + meta +
+      '</div><div class="mt-comment-body">' +
+      renderMarkdown(task, referenceSource(task, "comments", value, spans[index])) + "</div></article>";
+  }).join("");
+  return '<div class="mt-comment-history">' + entries + "</div>";
+}
+
+function renderTimeEntriesHtml(task) {
+  const entries = Array.isArray(task && task.time_entries) ? task.time_entries : [];
+  if (!entries.length) return "";
+  const rows = entries.map(entry => {
+    const start = entry && entry.start || "";
+    const end = entry && entry.end || "";
+    const formatted = formatTimeEntryRange(start, end);
+    const title = start && end ? start + " – " + end : (start || end);
+    const when = (formatted.date ? '<span class="mt-time-entry-date">' + escapeHtml(formatted.date) + "</span>" : "") +
+      '<span class="mt-time-entry-range" title="' + escapeHtml(title) + '">' + escapeHtml(formatted.range) + "</span>";
+    return '<li class="mt-time-entry"><span class="mt-time-entry-when">' + when +
+      '</span><span class="mt-time-entry-duration">' +
+      escapeHtml(formatTrackedDuration(entry && entry.elapsed_seconds)) + "</span></li>";
+  }).join("");
+  return '<ol class="mt-time-entry-list">' + rows + "</ol>";
+}
+
+// Comment and time history panels for standalone preview (`mt show`).
 function renderPropertyPanels(task, el) {
   if (!window.marked || !window.DOMPurify) return;
   const sections = [];
 
-  const comments = Array.isArray(task.comments) ? task.comments : [];
+  const comments = Array.isArray(task && task.comments) ? task.comments : [];
   if (comments.length) {
-    const spans = ((task.reference_spans || {}).comments || []);
-    const entries = comments.map((comment, index) => {
-      const value = comment && typeof comment.text === "string" ? comment.text : "";
-      const at = comment && comment.at || "";
-      return '<article class="mt-comment-entry"><time datetime="' + escapeHtml(at) + '" title="' + escapeHtml(at) + '">' +
-        escapeHtml(at ? formatCardDate(at) : "") + "</time>" +
-        (comment && typeof comment.by === "string" && comment.by ? '<span class="mt-comment-author">' + escapeHtml(comment.by) + "</span>" : "") +
-        '<div class="mt-comment-body">' + renderMarkdown(task, referenceSource(task, "comments", value, spans[index])) + "</div></article>";
-    }).join("");
-    sections.push('<details class="mt-history-panel"><summary>Comments (' + comments.length +
-      ")</summary><div class=\"mt-comment-history\">" + entries + "</div></details>");
+    sections.push('<details class="mt-history-panel" open><summary>Comments (' + comments.length +
+      ")</summary>" + renderCommentsHtml(task) + "</details>");
   }
 
-  const entries = Array.isArray(task.time_entries) ? task.time_entries : [];
+  const entries = Array.isArray(task && task.time_entries) ? task.time_entries : [];
   if (entries.length) {
-    const rows = entries.map(entry => '<li><time>' + escapeHtml(entry.start || "") +
-      "</time> – <time>" + escapeHtml(entry.end || "") + "</time> · " +
-      escapeHtml(formatTrackedDuration(entry.elapsed_seconds)) + "</li>").join("");
     sections.push('<details class="mt-history-panel"><summary>Time entries (' + entries.length +
-      ")</summary><ul>" + rows + "</ul></details>");
+      ")</summary>" + renderTimeEntriesHtml(task) + "</details>");
   }
   el.innerHTML = sections.join("");
 }

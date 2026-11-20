@@ -41,13 +41,68 @@ function createDetailController() {
       renderPreview(this.selected, preview);
       enableTaskCheckboxes(preview);
       this.previewHtml = preview.innerHTML;
-      const properties = document.createElement("div");
-      renderPropertyPanels(this.selected, properties);
-      this.propertiesHtml = properties.innerHTML;
+      this.commentsHtml = renderCommentsHtml(this.selected);
+      this.timeEntriesHtml = renderTimeEntriesHtml(this.selected);
+      if (this.activityTab === "time" && !this.hasTimeActivityTab()) {
+        this.activityTab = "comments";
+      }
       this.textPropertyHtml = {
         next_action: renderTextProperty(this.selected, "next_action"),
         processing_instructions: renderTextProperty(this.selected, "processing_instructions"),
       };
+    },
+
+    hasTimeActivityTab() {
+      const card = this.selected;
+      return Boolean(card && (card.kind === "task" || (Array.isArray(card.time_entries) && card.time_entries.length)));
+    },
+
+    activityTabs() {
+      const card = this.selected;
+      if (!card) return [];
+      const commentCount = Array.isArray(card.comments) ? card.comments.length : 0;
+      const tabs = [{ id: "comments", label: "Comments", count: commentCount }];
+      if (this.hasTimeActivityTab()) {
+        const timeCount = Array.isArray(card.time_entries) ? card.time_entries.length : 0;
+        tabs.push({ id: "time", label: "Time", count: timeCount });
+      }
+      return tabs;
+    },
+
+    selectActivityTab(tabId, focusTab = false) {
+      if (tabId === "time" && !this.hasTimeActivityTab()) tabId = "comments";
+      this.activityTab = tabId;
+      if (focusTab) {
+        this.$nextTick(() => {
+          const dialog = this.$refs && this.$refs.detailDialog;
+          const tab = dialog && dialog.querySelector("#mt-activity-tab-" + tabId);
+          if (tab && typeof tab.focus === "function") tab.focus();
+        });
+      }
+    },
+
+    openTimeActivity() {
+      if (!this.hasTimeActivityTab()) return;
+      this.selectActivityTab("time");
+      this.$nextTick(() => {
+        const section = this.$refs && this.$refs.activitySection;
+        if (section && typeof section.scrollIntoView === "function") {
+          section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+    },
+
+    handleActivityTabKeydown(event, index) {
+      const tabs = this.activityTabs();
+      if (tabs.length < 2) return;
+      let nextIndex = -1;
+      if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+      else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") nextIndex = 0;
+      else if (event.key === "End") nextIndex = tabs.length - 1;
+      if (nextIndex === -1) return;
+      event.preventDefault();
+      this.selectActivityTab(tabs[nextIndex].id, true);
     },
 
     // Next action and processing instructions live in one place: rendered in the content
@@ -301,7 +356,9 @@ function createDetailController() {
       this.actionMessage = "";
       this.actionError = false;
       this.previewHtml = "";
-      this.propertiesHtml = "";
+      this.commentsHtml = "";
+      this.timeEntriesHtml = "";
+      this.activityTab = "comments";
       this.textPropertyHtml = {};
       this.textPropertyEditing = "";
       this.detailError = "";
@@ -322,7 +379,8 @@ function createDetailController() {
       this.detailLoading = true;
       if (!preserveError) this.detailError = "";
       this.previewHtml = "";
-      this.propertiesHtml = "";
+      this.commentsHtml = "";
+      this.timeEntriesHtml = "";
       try {
         const response = await fetch("/api/item?id=" + encodeURIComponent(identity), { cache: "no-store" });
         const payload = await response.json();
@@ -377,6 +435,9 @@ function createDetailController() {
       this.previousCardId = null;
       this.detailReturnFocus = null;
       this.previewHtml = "";
+      this.commentsHtml = "";
+      this.timeEntriesHtml = "";
+      this.activityTab = "comments";
       this.moveDestination = "";
       this.propertyEditor.form = null;
       this.propertyEditor.baseline = "";

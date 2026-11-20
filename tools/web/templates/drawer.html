@@ -13,7 +13,7 @@
                               x-model="propertyEditor.form.title" :disabled="busy || draftBusy || propertyEditor.saving"
                               x-effect="propertyEditor.form.title; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
                               x-init="if ($el._mtResizeObserver) $el._mtResizeObserver.disconnect(); let width = 0; const ro = new ResizeObserver(([entry]) => { if (!$el.isConnected) { ro.disconnect(); return; } if (entry.contentRect.width === width) return; width = entry.contentRect.width; $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; }); $el._mtResizeObserver = ro; ro.observe($el)"
-                              @keydown.enter.prevent="$el.form && $el.form.requestSubmit()"
+                              @keydown.enter="if ($event.isComposing || $event.keyCode === 229) return; $event.preventDefault(); $el.form && $el.form.requestSubmit()"
                               @keydown.escape.stop="propertyEditor.form.title = selected?.title || ''; $el.blur()"></textarea>
                   </template>
                   <template x-if="!propertyEditor.form"><span x-text="selected?.title"></span></template>
@@ -32,6 +32,7 @@
                 <details class="mt-card-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
                   <summary class="mt-menu-trigger" aria-label="More card actions" title="More card actions"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary>
                   <div class="mt-card-menu-items">
+                    <button type="button" class="mt-button mt-button-compact" x-show="selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'" @click="$el.closest('details').open = false; editTextProperty('processing_instructions')" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading || !!contentEditor.open">Add processing instructions</button>
                     <button type="button" class="mt-button mt-button-compact" @click="archiveSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.archived ? 'Unarchive' : 'Archive'"></button>
                     <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
                   </div>
@@ -51,11 +52,11 @@
                 <button type="button" class="mt-button mt-button-compact" x-show="selected?.needs_review" @click="markReviewed(selected)" :disabled="busy || draftBusy || !!contentEditor.open">Mark reviewed</button>
               </div>
               <div class="mt-detail-timer mt-layout-group" x-show="selected?.kind === 'task'" role="group" aria-label="Task timer">
-                <span class="mt-time-readout">
+                <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-time-readout" @click="openTimeActivity()" :disabled="!!contentEditor.open" title="View time entries">
                   <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M10 2h4"/></svg>
                   <span class="mt-time-session" x-show="timerRunningFor(selected)" x-text="timerSessionLabel(selected)"></span>
                   <span class="mt-time-total" x-text="savedTimeLabel(selected)"></span>
-                </span>
+                </button>
                 <button type="button" class="mt-button mt-button-compact" x-show="showStartTimer(selected)" @click="startTimer(selected)" :disabled="!canStartTimer(selected) || !!contentEditor.open" :aria-label="'Start timer for ' + selected?.title">Start</button>
                 <button type="button" class="mt-button mt-button-compact" x-show="showStopTimer(selected)" @click="stopTimer(selected)" :disabled="!canStopTimer(selected) || !!contentEditor.open" :aria-label="'Stop timer for ' + selected?.title">Stop</button>
                 {timer_menu}
@@ -166,10 +167,10 @@
                 </template>
                 <div class="mt-preview" x-show="!contentEditor.open" x-ref="preview" x-html="previewHtml" @click="openReference($event); toggleTaskCheckbox($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
                 <template x-for="field in textPropertyFields()" :key="field.key">
-                  <section class="mt-text-property" x-show="!contentEditor.open" :aria-label="field.label">
+                  <section class="mt-text-property" :class="{ 'is-next-action': field.key === 'next_action' }" x-show="!contentEditor.open" :aria-label="field.label">
                     <header class="mt-text-property-header">
                       <h3 x-text="field.label"></h3>
-                      <button type="button" class="mt-button mt-button-quiet mt-button-compact" x-show="textPropertyEditing !== field.key"
+                      <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-text-property-edit" x-show="textPropertyEditing !== field.key"
                               @click="editTextProperty(field.key)" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading"
                               :aria-label="(field.value ? 'Edit ' : 'Add ') + field.label.toLowerCase()" x-text="field.value ? 'Edit' : 'Add'"></button>
                     </header>
@@ -191,36 +192,78 @@
                     </template>
                   </section>
                 </template>
-                <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-text-property-add"
-                        x-show="!contentEditor.open && selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'"
-                        @click="editTextProperty('processing_instructions')" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading">
-                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
-                  <span>Add processing instructions</span>
-                </button>
-                <div class="mt-card-properties-preview" x-show="!contentEditor.open" x-html="propertiesHtml" @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)" @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
-                <form class="mt-comment-composer" x-show="!contentEditor.open" @submit.prevent="commentSelected()">
-                  <textarea class="mt-field" x-ref="commentInput" x-model="commentText" :disabled="busy"
-                            :class="{ 'is-drag-over': attachmentDragTarget === 'comment' }"
-                            @paste="handleAttachmentPaste('comment', $event, $el)"
-                            @dragover="handleAttachmentDragOver('comment', $event)"
-                            @dragleave="handleAttachmentDragLeave('comment')"
-                            @drop="handleAttachmentDrop('comment', $event, $el)"
-                            aria-label="Comment text" placeholder="Leave a comment"></textarea>
-                  <div class="mt-comment-actions">
-                    <input type="file" multiple class="mt-attach-input" x-ref="commentAttachInput"
-                           @change="handleAttachmentPick('comment', $event, $refs.commentInput)"
-                           :disabled="busy || attachmentUploading">
-                    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact"
-                            aria-label="Attach file to comment" title="Attach file or paste image"
-                            :disabled="busy || attachmentUploading"
-                            @click="$refs.commentAttachInput.click()">
-                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                      </svg>
-                    </button>
-                    <button type="submit" class="mt-button mt-button-compact" :disabled="busy || attachmentUploading || !commentText.trim()" :aria-busy="busy">Comment</button>
+                <section class="mt-detail-activity" x-show="!contentEditor.open" x-ref="activitySection" aria-label="Card activity">
+                  <header class="mt-activity-header">
+                    <h3 x-text="activityTabs().length > 1 ? 'Activity' : ((selected?.comments?.length || 0) ? 'Comments (' + selected.comments.length + ')' : 'Comments')"></h3>
+                    <div class="mt-activity-tabs" role="tablist" focusgroup="tablist nomemory" aria-label="Activity views" x-show="activityTabs().length > 1">
+                      <template x-for="(tab, index) in activityTabs()" :key="tab.id">
+                        <button type="button" role="tab" class="mt-button mt-button-quiet mt-activity-tab"
+                                :id="'mt-activity-tab-' + tab.id"
+                                :aria-selected="String(activityTab === tab.id)"
+                                :tabindex="activityTab === tab.id ? 0 : -1"
+                                :focusgroupstart="activityTab === tab.id ? '' : null"
+                                @click="selectActivityTab(tab.id)"
+                                @keydown="handleActivityTabKeydown($event, index)">
+                          <span x-text="tab.label"></span>
+                          <span class="mt-activity-tab-count" x-show="tab.count > 0" x-text="tab.count"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </header>
+                  <div class="mt-activity-panels">
+                    <div class="mt-activity-panel" id="mt-activity-panel-comments" role="tabpanel"
+                         aria-labelledby="mt-activity-tab-comments"
+                         :hidden="activityTab !== 'comments' ? 'until-found' : false"
+                         @beforematch="activityTab = 'comments'">
+                      <div class="mt-activity-panel-body">
+                        <div class="mt-activity-comments" x-show="commentsHtml" x-html="commentsHtml"
+                             @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)"
+                             @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                        <form class="mt-comment-composer" @submit.prevent="commentSelected()">
+                          <div class="mt-comment-composer-box" :class="{ 'is-drag-over': attachmentDragTarget === 'comment' }">
+                            <textarea class="mt-comment-input" x-ref="commentInput" x-model="commentText" :disabled="busy"
+                                      rows="2"
+                                      @paste="handleAttachmentPaste('comment', $event, $el)"
+                                      @dragover="handleAttachmentDragOver('comment', $event)"
+                                      @dragleave="handleAttachmentDragLeave('comment')"
+                                      @drop="handleAttachmentDrop('comment', $event, $el)"
+                                      @keydown.meta.enter.prevent="if (!busy && !attachmentUploading && commentText.trim()) commentSelected()"
+                                      @keydown.ctrl.enter.prevent="if (!busy && !attachmentUploading && commentText.trim()) commentSelected()"
+                                      aria-label="Comment text" placeholder="Write a comment…"></textarea>
+                            <div class="mt-comment-composer-bar">
+                              <input type="file" multiple class="mt-attach-input" x-ref="commentAttachInput"
+                                     @change="handleAttachmentPick('comment', $event, $refs.commentInput)"
+                                     :disabled="busy || attachmentUploading">
+                              <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact"
+                                      aria-label="Attach file to comment" title="Attach file or paste image"
+                                      :disabled="busy || attachmentUploading"
+                                      @click="$refs.commentAttachInput.click()">
+                                <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                                </svg>
+                              </button>
+                              <button type="submit" class="mt-button mt-button-compact"
+                                      :class="{ 'mt-button-primary': Boolean(commentText.trim()) }"
+                                      :disabled="busy || attachmentUploading || !commentText.trim()"
+                                      :aria-busy="busy">Comment</button>
+                            </div>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                    <template x-if="hasTimeActivityTab()">
+                      <div class="mt-activity-panel" id="mt-activity-panel-time" role="tabpanel"
+                           aria-labelledby="mt-activity-tab-time"
+                           :hidden="activityTab !== 'time' ? 'until-found' : false"
+                           @beforematch="activityTab = 'time'">
+                        <div class="mt-activity-panel-body">
+                          <div class="mt-activity-time" x-show="timeEntriesHtml" x-html="timeEntriesHtml"></div>
+                          <p class="mt-activity-empty" x-show="!timeEntriesHtml">No time entries recorded yet. Start the timer above to log a session.</p>
+                        </div>
+                      </div>
+                    </template>
                   </div>
-                </form>
+                </section>
               </section>
               <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }">
                 <header class="mt-properties-header"><h3>Properties</h3></header>
@@ -246,12 +289,12 @@
                     <button type="submit" class="mt-button mt-button-primary" x-show="!(contentEditor.open && contentEditor.zen)" :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="busy || propertyEditor.saving">Save changes</button>
                   </footer>
                 </form>
+                <footer class="mt-detail-footer">
+                  <div><span class="mt-detail-footer-label">Created</span><time :datetime="selected?.created" :title="selected?.created" x-text="dateLabel(selected?.created)"></time></div>
+                  <div><span class="mt-detail-footer-label">Updated</span><time :datetime="selected?.updated" :title="selected?.updated" x-text="dateLabel(selected?.updated)"></time></div>
+                </footer>
               </aside>
             </div>
-            <footer class="mt-detail-footer">
-              <span>Created <time :datetime="selected?.created" :title="selected?.created" x-text="dateLabel(selected?.created)"></time></span>
-              <span>Updated <time :datetime="selected?.updated" :title="selected?.updated" x-text="dateLabel(selected?.updated)"></time></span>
-            </footer>
           </section>
           <div class="mt-card-popover"
                x-cloak
