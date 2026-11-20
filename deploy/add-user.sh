@@ -72,9 +72,25 @@ app_dir="${app_dir:-$root/opt/microtask/current}"
 
 [[ -f "$template" ]] || die "missing Caddy template: $template"
 [[ -x "$app_dir/mt" ]] || die "no microtask at $app_dir; run upgrade.sh first or pass --app"
-for path in "$workspace" "$env_file" "$caddy_file"; do
-  [[ ! -e "$path" ]] || die "user $user already exists ($path is present)"
-done
+secret_file="$env_dir/$user.secret"
+members_file="$env_dir/$user.members"
+retired_file="$env_dir/$user.retired"
+# add-shared.sh uses the same names and paths, so its files count too. The check runs once early
+# for a friendly error and again with the lock held, because another run may have created the
+# name in between.
+check_existing() {
+  local path
+  for path in "$workspace" "$env_file" "$secret_file" "$caddy_file" "$members_file" "$retired_file"; do
+    [[ ! -e "$path" ]] || die "user $user already exists ($path is present)"
+  done
+}
+# Remember a path this run is about to create. It must not exist yet, so the cleanup after a
+# failure never removes something that belongs to another run.
+claim_path() {
+  [[ ! -e "$1" ]] || die "user $user already exists ($1 is present)"
+  created+=("$1")
+}
+check_existing
 if [[ -z "$no_systemctl" && -z "$dry_run" ]]; then
   id "$service_user" >/dev/null 2>&1 || die "service account $service_user does not exist"
 fi
@@ -85,7 +101,7 @@ if [[ -z "$dry_run" ]]; then
   lock_tries=0
   while ! mkdir "$lock_dir" 2>/dev/null; do
     lock_tries=$((lock_tries + 1))
-    [[ $lock_tries -lt 50 ]] || die "another add-user.sh run holds $lock_dir"
+    [[ $lock_tries -lt 50 ]] || die "another add-user.sh or add-shared.sh run holds $lock_dir"
     sleep 0.1
   done
 fi
@@ -120,6 +136,9 @@ p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
   fi
 }
 trap cleanup EXIT
+if [[ -z "$dry_run" ]]; then
+  check_existing
+fi
 
 # Lowest unused port from first_port up, judged by the existing env files.
 used_ports=" "
@@ -150,7 +169,7 @@ fi
 # because root on a server often has none. Bytecode is not written, so nothing
 # lands in the read-only app folder.
 mkdir -p "$(dirname "$workspace")"
-created+=("$workspace")
+claim_path "$workspace"
 init_log="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 \
   GIT_AUTHOR_NAME=microtask GIT_AUTHOR_EMAIL=microtask@localhost \
   GIT_COMMITTER_NAME=microtask GIT_COMMITTER_EMAIL=microtask@localhost \
@@ -159,11 +178,11 @@ init_log="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 \
 chmod 700 "$workspace"
 
 mkdir -p "$env_dir"
-created+=("$env_file")
+claim_path "$env_file"
 printf 'PORT=%s\nHOST_NAME=%s\n' "$port" "$host" > "$env_file"
 
 mkdir -p "$caddy_dir"
-created+=("$caddy_file")
+claim_path "$caddy_file"
 {
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line//@USER@/$user}"

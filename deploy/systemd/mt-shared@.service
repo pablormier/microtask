@@ -1,0 +1,41 @@
+# Template unit: one dashboard serving one workspace to a group of people. Start it with
+#   systemctl enable --now mt-shared@team
+# It reads /etc/mt/team.env (PORT, HOST_NAME, MT_ADMINS and MT_PROXY_SECRET_FILE) and serves
+# the workspace folder /srv/mt/team with the app in /opt/microtask/current. Caddy tells the
+# dashboard who is signed in; see docs/hosting.md, "Shared workspace".
+[Unit]
+Description=microtask shared dashboard for %i
+After=network.target
+
+[Service]
+Type=simple
+User=mt
+Group=mt
+EnvironmentFile=/etc/mt/%i.env
+WorkingDirectory=/srv/mt/%i
+Environment=HOME=/srv/mt/%i
+Environment=PYTHONDONTWRITEBYTECODE=1
+# One shared, read-only app. upgrade.sh moves the 'current' link and restarts the services.
+# --trust-proxy-user reads the secret from MT_PROXY_SECRET_FILE and the administrators from MT_ADMINS.
+ExecStart=/opt/microtask/current/mt -R /srv/mt/%i web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME} --trust-proxy-user
+Restart=on-failure
+RestartSec=3
+UMask=0077
+# mt web waits up to 60 seconds for a running sync after SIGTERM.
+TimeoutStopSec=90
+
+NoNewPrivileges=true
+PrivateTmp=true
+# strict leaves /opt/microtask read-only, which is what we want for the app.
+ProtectSystem=strict
+ProtectHome=true
+# The service sees an empty /srv/mt with only this workspace bound in.
+TemporaryFileSystem=/srv/mt
+BindPaths=/srv/mt/%i
+ReadWritePaths=/srv/mt/%i
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

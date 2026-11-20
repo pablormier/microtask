@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,8 +32,10 @@ import transaction  # noqa: E402
 from workspace import Workspace, missing_workspace_error  # noqa: E402
 
 try:
+    from . import web_hosted
     from .web_actions import (
         BackgroundSync,
+        SNAPSHOT_BEFORE,
         UNSYNCED_ACTIONS,
         handle_api_action,
         handle_draft_save,
@@ -56,8 +59,10 @@ try:
     )
 except ImportError:  # Direct script entry point or file-based test loader.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import web_hosted  # noqa: F401
     from web_actions import (  # noqa: F401
         BackgroundSync,
+        SNAPSHOT_BEFORE,
         UNSYNCED_ACTIONS,
         handle_api_action,
         handle_draft_save,
@@ -83,8 +88,10 @@ except ImportError:  # Direct script entry point or file-based test loader.
 
 class TaskWebServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = (),
-                 *, demo: bool = False):
+                 *, demo: bool = False, hosted: web_hosted.HostedConfig | None = None):
         super().__init__(address, TaskWebHandler)
+        # Set when one dashboard serves a shared workspace: every request must then name a signed-in person.
+        self.hosted = hosted
         self.allow_hosts = {name.lower() for name in allow_hosts}  # NAME or NAME:PORT, from --allow-host.
         self.requested_host = address[0]  # As given on the command line, which may be a name.
         self.token = token
@@ -160,6 +167,30 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "unrecognized Host header"})
         return True
 
+    def authenticate(self) -> tuple[bool, web_hosted.Identity | None]:
+        """Who is asking: (True, None) for a single-user dashboard, (True, person) in a shared one.
+
+        A shared dashboard answers 401 or 403 and returns (False, None) when the request carries
+        no valid proxy secret or no single signed-in identity, for reads as well as writes.
+        """
+        hosted = getattr(self.server, "hosted", None)
+        if hosted is None:
+            return True, None
+        try:
+            return True, hosted.identify(self.headers)
+        except web_hosted.HostedAuthError as error:
+            self.send_json(HTTPStatus(error.status), {"error": error.message})
+            return False, None
+
+    def api_token(self, actor: web_hosted.Identity | None) -> str:
+        """The write token for this request: the process token, or in a shared workspace the signed-in person's."""
+        if actor is None:
+            return self.server.token
+        return web_hosted.member_token(self.server.token, actor.user)
+
+    def hosted_meta(self, actor: web_hosted.Identity | None) -> dict | None:
+        return {"user": actor.user, "admin": actor.admin} if actor is not None else None
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
@@ -228,7 +259,17 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def handle_attachment_upload(self) -> None:
+    def write_scope(self, ws: Workspace, actor: web_hosted.Identity | None):
+        """One hold of the mutation lock around a write and its history commit.
+
+        In a shared workspace no other dashboard write can land between the action and its commit.
+        The commit stages every pending workspace path, so it may also hold changes that were
+        already waiting, such as shell edits or draft autosaves. Nothing inside waits on the
+        network: the commit is local, and the background sync runs after the lock is released.
+        """
+        return transaction.time_mutation_lock(ws) if actor is not None else contextlib.nullcontext()
+
+    def handle_attachment_upload(self, actor: web_hosted.Identity | None = None) -> None:
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -254,14 +295,19 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         raw_filename = self.headers.get("X-Filename", "")
         filename = unquote(raw_filename) if raw_filename else ""
         content_type = self.headers.get("Content-Type")
+        history_warning = ""
         try:
-            result = operations.op_store_attachment(
-                ws,
-                raw_bytes,
-                filename=filename,
-                content_type=content_type,
-                sync=False,
-            )
+            with self.write_scope(ws, actor):
+                result = operations.op_store_attachment(
+                    ws,
+                    raw_bytes,
+                    filename=filename,
+                    content_type=content_type,
+                    by=actor.user if actor else None,
+                    sync=False,
+                )
+                if result.changed and actor is not None:
+                    history_warning = web_hosted.record_history(ws, f"Web upload by {actor.user}")
         except store.InputError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
@@ -273,10 +319,16 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if result.changed:
             self.server.sync.request(ws)
-        self.send_json(HTTPStatus.OK, {"attachment": result.receipt})
+        reply = {"attachment": result.receipt}
+        if history_warning:
+            reply["history_warning"] = history_warning
+        self.send_json(HTTPStatus.OK, reply)
 
     def do_GET(self) -> None:
         if self.reject_host():
+            return
+        allowed, actor = self.authenticate()
+        if not allowed:
             return
         url = urlsplit(self.path)
         if url.path.startswith("/vendor/"):
@@ -296,7 +348,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 self.send_attachment_file(found)
             return
         if url.path in ("/", "/index.html"):
-            page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.server.token))
+            page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.api_token(actor),
+                                                                         actor.user if actor else None))
             self.send_html(page, nonce=nonce)
             return
         if url.path == "/api/item":
@@ -319,8 +372,9 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 params = parse_qs(url.query)
                 include = params.pop("include", None)
                 ws = self.server.workspace.for_operation()
-                payload = dashboard_payload(ws, self.server.cache, api_token=self.server.token, include=include,
-                                            query=request_query(ws, params), demo=self.server.demo)
+                payload = dashboard_payload(ws, self.server.cache, api_token=self.api_token(actor), include=include,
+                                            query=request_query(ws, params), demo=self.server.demo,
+                                            actor=actor.user if actor else None, hosted=self.hosted_meta(actor))
                 payload["sync_warning"] = self.server.sync.current_warning()
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
@@ -349,7 +403,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/drafts":
             try:
-                self.send_json(HTTPStatus.OK, {"drafts": draft_list_payload(self.server.workspace.root)})
+                self.send_json(HTTPStatus.OK, {"drafts": draft_list_payload(self.server.workspace.root,
+                                                                             actor.user if actor else None)})
             except (OSError, ValueError) as error:
                 self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
             return
@@ -358,11 +413,21 @@ class TaskWebHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.reject_host():
             return
-        if not secrets.compare_digest(self.headers.get("X-Microtask-Token") or "", self.server.token):
-            self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
+        allowed, actor = self.authenticate()
+        if not allowed:
+            return
+        sent_token = (self.headers.get("X-Microtask-Token") or "").encode("utf-8")
+        if not secrets.compare_digest(sent_token, self.api_token(actor).encode("utf-8")):
+            if actor is not None:
+                # Before anything is read or changed: the page was loaded for another account, or by an
+                # older process. The client keeps its unsaved work locally and reloads.
+                self.send_json(HTTPStatus.CONFLICT, {"error": "The signed-in account changed. Reload the page.",
+                                                     "member_changed": True})
+            else:
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
             return
         if urlsplit(self.path).path == "/api/attachments":
-            self.handle_attachment_upload()
+            self.handle_attachment_upload(actor)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -390,17 +455,31 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         except card_query.QueryError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
-        status, payload = handle_api_action(ws, path, body)
-        if path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed")):
+        history_warning = ""
+        with self.write_scope(ws, actor):
+            if actor is not None and actor.admin and path in SNAPSHOT_BEFORE:
+                history_warning = web_hosted.record_history(ws, f"Before {path[len('/api/'):]}")
+                if history_warning:
+                    self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "error": f"Nothing was changed: the card could not be saved to local history first. {history_warning}"})
+                    return
+            status, payload = handle_api_action(ws, path, body, actor)
+            wrote = path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed"))
+            if wrote and actor is not None:
+                history_warning = web_hosted.record_history(ws, f"Web change by {actor.user}") or history_warning
+        if wrote:
             self.server.sync.request(ws)
         if status == HTTPStatus.OK:
             # Actions return receipts; build the queried collection once, after success.
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
-                                           api_token=self.server.token, query=query, include=body.get("include"),
-                                           demo=self.server.demo),
-                       "sync_warning": self.server.sync.current_warning(),
+                                           api_token=self.api_token(actor), query=query, include=body.get("include"),
+                                           demo=self.server.demo, actor=actor.user if actor else None,
+                                           hosted=self.hosted_meta(actor)),
+                       "sync_warning": " ".join(part for part in (self.server.sync.current_warning(), history_warning) if part),
                        "restart_notice": self.server.restart_notice(),
                        **payload}
+        elif history_warning:
+            payload = {**payload, "sync_warning": history_warning}
         self.send_json(status, payload)
 
 
@@ -419,10 +498,13 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
 
 
 def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
-                    allow_hosts: Iterable[str] = (), demo: bool = False) -> int:
+                    allow_hosts: Iterable[str] = (), demo: bool = False,
+                    hosted: web_hosted.HostedConfig | None = None) -> int:
     token = secrets.token_urlsafe(24)
+    if hosted is not None:
+        web_hosted.use_default_git_identity(workspace)
     try:
-        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo)
+        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
@@ -431,6 +513,9 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
     if not no_open:
         cli_helpers.open_in_browser(url)
     print(url, flush=True)
+    if hosted is not None:
+        print(f"Shared workspace: signed-in users come from the {web_hosted.EMAIL_HEADER} header; "
+              f"{len(hosted.admins)} administrator(s).", flush=True)
     # Process supervisors stop us with SIGTERM; treat it like Ctrl-C so the cleanup below runs.
     previous = None
     if threading.current_thread() is threading.main_thread():
@@ -457,6 +542,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig | None:
+    """The shared-workspace settings given by flags or MT_* variables, or None for a single-user dashboard."""
+    if not args.trust_proxy_user:
+        return None
+    secret = web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
+                                    environ.get("MT_PROXY_SECRET"))
+    admins = web_hosted.parse_admins(*args.admin, environ.get("MT_ADMINS"))
+    return web_hosted.HostedConfig(secret, admins, web_hosted.read_user_map(args.user_map or environ.get("MT_USER_MAP")))
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     # The process edge: `mt web` starts this script with the selected workspace in its environment.
@@ -465,9 +560,14 @@ def main(argv: list[str]) -> int:
     if missing:
         print(f"error: {missing}", file=sys.stderr)
         return 2
+    try:
+        hosted = hosted_config(args, workspace.environ)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
                            filters=board_filters(workspace, args), allow_hosts=args.allow_host,
-                           demo=bool(args.demo))
+                           demo=bool(args.demo), hosted=hosted)
 
 
 if __name__ == "__main__":

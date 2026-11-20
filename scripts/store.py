@@ -262,8 +262,8 @@ def open_statuses(ws: Workspace | None = None) -> list[str]:
 
 
 
-def focus_state_path(ws: Workspace | None = None) -> Path:
-    return _ws(ws).focus_state_path()
+def focus_state_path(ws: Workspace | None = None, user: str | None = None) -> Path:
+    return _ws(ws).focus_state_path(user)
 
 
 
@@ -274,8 +274,8 @@ class FocusState:
 
 
 
-def read_focus_state(ws: Workspace | None = None) -> FocusState | None:
-    path = focus_state_path(ws)
+def read_focus_state(ws: Workspace | None = None, user: str | None = None) -> FocusState | None:
+    path = focus_state_path(ws, user)
     try:
         raw = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
@@ -298,21 +298,21 @@ def read_focus_state(ws: Workspace | None = None) -> FocusState | None:
 
 
 
-def write_focus_task_id(task_id: str, ws: Workspace | None = None) -> None:
-    write_focus_state(task_id, "manual", ws=ws)
+def write_focus_task_id(task_id: str, ws: Workspace | None = None, user: str | None = None) -> None:
+    write_focus_state(task_id, "manual", ws=ws, user=user)
 
 
 
-def write_focus_state(task_id: str, mode: str, ws: Workspace | None = None) -> None:
-    path = focus_state_path(ws)
+def write_focus_state(task_id: str, mode: str, ws: Workspace | None = None, user: str | None = None) -> None:
+    path = focus_state_path(ws, user)
     text = json.dumps({"task_id": task_id, "mode": mode}, ensure_ascii=True, indent=2) + "\n"
     atomic_write(path, text.encode("utf-8"))
 
 
 
-def clear_focus_task_id(ws: Workspace | None = None) -> None:
+def clear_focus_task_id(ws: Workspace | None = None, user: str | None = None) -> None:
     try:
-        focus_state_path(ws).unlink()
+        focus_state_path(ws, user).unlink()
     except FileNotFoundError:
         pass
 

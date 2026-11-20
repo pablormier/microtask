@@ -445,7 +445,7 @@ def _complete_locked(
     updated = transition_claim(task, updated, "done", username, completed_at)
     try:
         updated, _timer = settle_timer(updated, completed_epoch)
-        updated = append_comments(updated, [*notes, *comments], completed_at)
+        updated = append_comments(updated, [*notes, *comments], completed_at, by)
     except ValueError as error:
         raise InputError(f"completion update failed: {error}", exit_code=1) from error
     return _commit_item_write(
@@ -528,7 +528,7 @@ def _move_locked(
         updated = transition_claim(task, updated, destination, username, moved_at)
         if destination != "doing" or takeover:
             updated, _timer = settle_timer(updated, moved_epoch)
-        updated = append_comments(updated, list(comments), moved_at)
+        updated = append_comments(updated, list(comments), moved_at, by)
     except ValueError as error:
         raise InputError(f"move failed: {error}", exit_code=1) from error
     return _commit_item_write(
@@ -568,6 +568,7 @@ def _comment_locked(
     query: str,
     comments: list[str] | tuple[str, ...],
     *,
+    by: str | None = None,
     match_mode: str = "exact",
 ) -> WriteResult:
     _require_mutation_lock(resolved)
@@ -580,7 +581,8 @@ def _comment_locked(
     commented_at = now_stamp()
     try:
         updated = card_format.replace_property(item.raw, "updated", commented_at)
-        updated = append_comments(updated, list(comments), commented_at)
+        updated = append_comments(updated, list(comments), commented_at,
+                                  current_username(by, ws=resolved) if by is not None else None)
     except ValueError as error:
         raise InputError(f"comment failed: {error}", exit_code=1) from error
     return _commit_item_write(
@@ -598,14 +600,15 @@ def op_comment(
     query: str,
     comments: list[str] | tuple[str, ...],
     *,
+    by: str | None = None,
     match_mode: str = "exact",
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Append one or more timestamped comments to a task or note."""
+    """Append one or more timestamped comments to a task or note; `by` records who wrote them."""
     return _run_write_operation(
         ws,
-        lambda resolved: _comment_locked(resolved, query, comments, match_mode=match_mode),
+        lambda resolved: _comment_locked(resolved, query, comments, by=by, match_mode=match_mode),
         sync=sync,
         quiet_sync=quiet_sync,
     )
@@ -743,6 +746,7 @@ def _convert_locked(
     status: str | None = None,
     task_type: str | None = None,
     next_action: str | None = None,
+    by: str | None = None,
     match_mode: str = "exact",
 ) -> WriteResult:
     _require_mutation_lock(resolved)
@@ -761,6 +765,11 @@ def _convert_locked(
     )
     if item.kind == destination:
         raise InputError(f"convert {destination} destination requires a {'task' if to_note else 'note'} source")
+    if by is not None and item.is_task:
+        try:
+            check_claim(item, current_username(by, ws=resolved))
+        except ValueError as error:
+            raise ConflictError(str(error), exit_code=1) from error
     now = now_stamp()
     try:
         if to_note:
@@ -795,16 +804,17 @@ def op_convert(
     status: str | None = None,
     task_type: str | None = None,
     next_action: str | None = None,
+    by: str | None = None,
     match_mode: str = "exact",
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Convert an open task to a note, or a note to a task."""
+    """Convert an open task to a note, or a note to a task. With `by`, a task claimed by someone else stays as it is."""
     return _run_write_operation(
         ws,
         lambda resolved: _convert_locked(
             resolved, query, destination, status=status, task_type=task_type,
-            next_action=next_action, match_mode=match_mode,
+            next_action=next_action, by=by, match_mode=match_mode,
         ),
         sync=sync,
         quiet_sync=quiet_sync,
@@ -1085,12 +1095,13 @@ def op_focus(
     clear: bool = False,
     cycle_next: bool = False,
     by: str | None = None,
+    focus_user: str | None = None,
 ) -> dict:
     """Update or read local focus state under the mutation lock and return focus context."""
     def _run(resolved: Workspace) -> WriteResult:
         actor = current_username(by, ws=resolved)
         if clear:
-            clear_focus_task_id(resolved)
+            clear_focus_task_id(resolved, focus_user)
         elif query:
             task = _resolve_unique_card(resolved, query, statuses=open_statuses(resolved))
             if task.frontmatter.get("status") not in {"inbox", "active", "doing"}:
@@ -1098,17 +1109,17 @@ def op_focus(
                     "focus requires an inbox, active, or doing task; read blocked or deferred work first"
                 )
             check_claim(task, actor)
-            write_focus_task_id(str(task.frontmatter.get("id") or task.path.stem), ws=resolved)
+            write_focus_task_id(str(task.frontmatter.get("id") or task.path.stem), ws=resolved, user=focus_user)
         open_query = card_query.narrow(selection, "status", open_statuses(resolved))
         open_tasks = select_cards(discover(ws=resolved), open_query) if open_query else []
-        context = focus_context(open_tasks, actor=actor, ws=resolved)
+        context = focus_context(open_tasks, actor=actor, focus_user=focus_user, ws=resolved)
         candidates = context["candidates"]
         if cycle_next and candidates:
             current_id = context["selected"]["id"]
             current_index = next(index for index, item in enumerate(candidates) if item["id"] == current_id)
             selected_task = candidates[(current_index + 1) % len(candidates)]
-            write_focus_state(str(selected_task["id"]), "cycle", ws=resolved)
-            context = focus_context(open_tasks, actor=actor, ws=resolved)
+            write_focus_state(str(selected_task["id"]), "cycle", ws=resolved, user=focus_user)
+            context = focus_context(open_tasks, actor=actor, focus_user=focus_user, ws=resolved)
         return WriteResult(card=None, receipt=context, changed=False)
 
     return _run_write_operation(ws, _run, sync=False).receipt
@@ -1334,7 +1345,7 @@ def op_time_end(
     )
 
 
-def _time_remove_locked(resolved: Workspace, session_id_arg: str) -> WriteResult:
+def _time_remove_locked(resolved: Workspace, session_id_arg: str, by: str | None = None) -> WriteResult:
     _require_mutation_lock(resolved)
     session_ref = session_id_arg.lower()
     if not re.fullmatch(r"[0-9a-f]{8,32}", session_ref):
@@ -1351,6 +1362,11 @@ def _time_remove_locked(resolved: Workspace, session_id_arg: str) -> WriteResult
         lines = "\n".join(f"  {entry['session_id']}  [@{task.short_ref}] {task.title}" for task, entry in matches)
         raise InputError(f"multiple sessions match; use a longer session ID:\n{lines}", exit_code=2)
     task, entry = matches[0]
+    if by is not None:
+        try:
+            check_claim(task, current_username(by, ws=resolved))
+        except ValueError as error:
+            raise ConflictError(str(error), exit_code=1) from error
     session_id = str(entry["session_id"])
     properties, body = card_format.parse_document(task.raw, expected_kind="task")
     entries = properties.get("time_entries", [])
@@ -1375,9 +1391,11 @@ def _time_remove_locked(resolved: Workspace, session_id_arg: str) -> WriteResult
     return result
 
 
-def op_time_remove(ws: Workspace | None, session_id: str, *, sync: bool = True, quiet_sync: bool = True) -> WriteResult:
-    """Remove a recorded time session from a task."""
-    return _run_write_operation(ws, lambda resolved: _time_remove_locked(resolved, session_id), sync=sync, quiet_sync=quiet_sync)
+def op_time_remove(ws: Workspace | None, session_id: str, *, by: str | None = None, sync: bool = True,
+                   quiet_sync: bool = True) -> WriteResult:
+    """Remove a recorded time session from a task. With `by`, a task claimed by someone else is refused."""
+    return _run_write_operation(ws, lambda resolved: _time_remove_locked(resolved, session_id, by),
+                                sync=sync, quiet_sync=quiet_sync)
 
 
 def _time_add_locked(
@@ -1387,6 +1405,7 @@ def _time_add_locked(
     duration: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    by: str | None = None,
 ) -> WriteResult:
     _require_mutation_lock(resolved)
     try:
@@ -1406,6 +1425,11 @@ def _time_add_locked(
     except ValueError as error:
         raise InputError(str(error), exit_code=2) from error
     task = _resolve_unique_card(resolved, query.strip(), kind="task")
+    if by is not None:
+        try:
+            check_claim(task, current_username(by, ws=resolved))
+        except ValueError as error:
+            raise ConflictError(str(error), exit_code=1) from error
     timer = {
         "session_id": uuid.uuid4().hex,
         "task_id": str(task.frontmatter.get("id") or task.path.stem),
@@ -1431,13 +1455,14 @@ def op_time_add(
     duration: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    by: str | None = None,
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Record a manual time session on a task."""
+    """Record a manual time session on a task. With `by`, a task claimed by someone else is refused."""
     return _run_write_operation(
         ws,
-        lambda resolved: _time_add_locked(resolved, query, duration=duration, start=start, end=end),
+        lambda resolved: _time_add_locked(resolved, query, duration=duration, start=start, end=end, by=by),
         sync=sync,
         quiet_sync=quiet_sync,
     )
@@ -1452,8 +1477,9 @@ def op_draft_create(
     body: str = "",
     capture_id: str | None = None,
     created: str | None = None,
+    by: str | None = None,
 ) -> dict[str, object]:
-    """Create a new-mode draft in the workspace."""
+    """Create a new-mode draft in the workspace. In a shared workspace `by` becomes its owner."""
     resolved = _ws(ws)
     if title is not None and not card_format.is_single_line_text(title):
         raise InputError("draft title must be non-empty and single-line", exit_code=2)
@@ -1487,6 +1513,7 @@ def op_draft_create(
             fields=fields,
             body=body,
             now=stamp,
+            viewer=by,
         )
     except (OSError, ValueError) as error:
         raise InputError(str(error), exit_code=1) from error
@@ -1499,8 +1526,9 @@ def op_draft_edit(
     fields: dict[str, object],
     body: str,
     expected_hash: str,
+    by: str | None = None,
 ) -> dict[str, object]:
-    """Update an existing draft with compare-and-swap."""
+    """Update an existing draft with compare-and-swap. With `by`, only that owner's draft can change."""
     resolved = _ws(ws)
     return draft_store.save(
         resolved.root,
@@ -1509,6 +1537,7 @@ def op_draft_edit(
         body=body,
         expected_content_hash=expected_hash,
         now=now_stamp(),
+        viewer=by,
     )
 
 
@@ -1517,13 +1546,14 @@ def op_draft_discard(
     draft_id: str,
     *,
     expected_hash: str | None,
+    by: str | None = None,
 ) -> bool:
-    """Discard a draft with compare-and-swap."""
+    """Discard a draft with compare-and-swap. With `by`, only that owner's draft can be discarded."""
     resolved = _ws(ws)
-    return draft_store.discard(resolved.root, draft_id, expected_hash)
+    return draft_store.discard(resolved.root, draft_id, expected_hash, viewer=by)
 
 
-def _save_new_draft(resolved: Workspace, draft: dict[str, object]) -> tuple[Card, bool]:
+def _save_new_draft(resolved: Workspace, draft: dict[str, object], by: str | None = None) -> tuple[Card, bool]:
     """Capture a new card from a 'new'-mode draft."""
     body = str(draft.get("body") or "")
     return capture_card(
@@ -1541,6 +1571,7 @@ def _save_new_draft(resolved: Workspace, draft: dict[str, object]) -> tuple[Card
         tags=list(draft.get("tags") or []) if isinstance(draft.get("tags"), list) else [],
         status=draft.get("status") if draft["kind"] == "task" and isinstance(draft.get("status"), str) else None,
         task_type=draft.get("type") if draft["kind"] == "task" and isinstance(draft.get("type"), str) else None,
+        by=by if draft["kind"] == "task" and draft.get("status") == "doing" else None,
         ws=resolved,
     )
 
@@ -1550,6 +1581,7 @@ def _draft_save_locked(
     draft_id: str,
     *,
     expected_hash: str | None = None,
+    by: str | None = None,
 ) -> tuple[WriteResult, bool]:
     _require_mutation_lock(resolved)
     path = draft_store.draft_path(resolved.root, draft_id)
@@ -1561,12 +1593,12 @@ def _draft_save_locked(
         try:
             if not path.is_file():
                 raise draft_store.DraftConflict("draft was removed outside microtask; local copy was kept")
-            draft = draft_store.read(resolved.root, draft_id)
+            draft = draft_store.read(resolved.root, draft_id, by)
             if expected_hash is not None and draft["content_hash"] != expected_hash:
                 raise draft_store.DraftConflict("draft content changed outside microtask; refresh and reconcile")
             if draft["mode"] != "new":
                 raise ValueError("draft mode must be new")
-            item, changed = _save_new_draft(resolved, draft)
+            item, changed = _save_new_draft(resolved, draft, by)
             if draft_store.read(resolved.root, draft_id)["content_hash"] != draft["content_hash"]:
                 raise draft_store.DraftConflict(
                     "draft content changed outside microtask; card saved and draft retained"
@@ -1579,6 +1611,8 @@ def _draft_save_locked(
             draft_store.unlock(lock_handle)
     except draft_store.DraftConflict as error:
         raise ConflictError(str(error), exit_code=1) from error
+    except draft_store.DraftNotFound as error:
+        raise NotFoundError(str(error), exit_code=1, prefixed=True) from error
     except (OSError, UnicodeError, ValueError) as error:
         raise InputError(str(error), exit_code=1) from error
     receipt = item_receipt(item, updated=changed, ws=resolved)
@@ -1596,15 +1630,17 @@ def op_draft_save(
     draft_id: str,
     *,
     expected_hash: str | None = None,
+    by: str | None = None,
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Apply a draft to the workspace and remove the draft file."""
+    """Apply a draft to the workspace and remove the draft file. With `by`, only that owner's draft applies."""
     def _run(resolved: Workspace) -> WriteResult:
         result, draft_removed = _draft_save_locked(
             resolved,
             draft_id,
             expected_hash=expected_hash,
+            by=by,
         )
         if draft_removed and not result.changed:
             return replace(result, changed=True)
@@ -1620,11 +1656,14 @@ def op_card_metadata(
     *,
     expected_hash: str,
     kind: str | None = None,
+    by: str | None = None,
     match_mode: str = "exact",
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Apply a card metadata patch with a whole-card compare-and-swap."""
+    """Apply a card metadata patch with a whole-card compare-and-swap.
+
+    With `by`, a task claimed by someone else is refused, like body rewrites in op_edit."""
     if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash or ""):
         raise InputError("expected hash must be a 64-character SHA-256 digest", exit_code=2)
     if not isinstance(patch, dict) or not patch:
@@ -1642,6 +1681,11 @@ def op_card_metadata(
         actual_hash = hashlib.sha256(original).hexdigest()
         if actual_hash.casefold() != expected_hash.casefold():
             raise ConflictError("conflict: card changed since it was loaded (content hash mismatch)")
+        if by is not None and item.is_task:
+            try:
+                check_claim(item, current_username(by, ws=resolved))
+            except ValueError as error:
+                raise ConflictError(f"invalid edit: {error}", exit_code=2) from error
         properties, body = dict(item.frontmatter), item.body
         try:
             patched = card_format.apply_property_patch(properties, patch, kind=item_kind)
@@ -1679,6 +1723,7 @@ def _store_attachment_locked(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
+    by: str | None = None,
 ) -> WriteResult:
     _require_mutation_lock(resolved)
     if not isinstance(data, (bytes, bytearray)) or len(data) == 0:
@@ -1691,6 +1736,11 @@ def _store_attachment_locked(
         raise InputError(f"attachment exceeds max_attachment_mb ({limit_mb} MB)", exit_code=2)
 
     item = _resolve_unique_card(resolved, card_ref, match_mode=match_mode) if card_ref else None
+    if by is not None and item is not None and item.is_task:
+        try:
+            check_claim(item, current_username(by, ws=resolved))
+        except ValueError as error:
+            raise ConflictError(str(error), exit_code=1) from error
     target_dir = resolved.attachments_root()
     if target_dir.is_symlink():
         raise ValidationError("attachments/ must not be a symbolic link")
@@ -1797,10 +1847,13 @@ def op_store_attachment(
     card_ref: str | None = None,
     match_mode: str = "exact",
     label: str | None = None,
+    by: str | None = None,
     sync: bool = True,
     quiet_sync: bool = True,
 ) -> WriteResult:
-    """Store an attachment in attachments/ and optionally append its Markdown link to a card."""
+    """Store an attachment in attachments/ and optionally append its Markdown link to a card.
+
+    With `by`, linking it from a task claimed by someone else is refused."""
     return _run_write_operation(
         ws,
         lambda resolved: _store_attachment_locked(
@@ -1811,6 +1864,7 @@ def op_store_attachment(
             card_ref=card_ref,
             match_mode=match_mode,
             label=label,
+            by=by,
         ),
         sync=sync,
         quiet_sync=quiet_sync,

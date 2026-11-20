@@ -585,8 +585,18 @@ def _sync_preflight_branch(resolved: Workspace, *, err: TextIO) -> str | None:
     return branch.stdout.strip()
 
 
+def stage_and_commit_local(
+    resolved: Workspace, note: str = "", *, out: TextIO, err: TextIO
+) -> tuple[int | None, bool]:
+    """Commit pending card changes to the local history only: no fetch, no push, no origin needed.
+
+    The caller holds the mutation lock. `note` is added under the usual commit message.
+    """
+    return _sync_stage_and_commit_local(resolved, None, out=out, err=err, note=note)
+
+
 def _sync_stage_and_commit_local(
-    resolved: Workspace, message_arg: str | None, *, out: TextIO, err: TextIO
+    resolved: Workspace, message_arg: str | None, *, out: TextIO, err: TextIO, note: str = ""
 ) -> tuple[int | None, bool]:
     """Stage tracked/untracked task paths, commit changes if any, and verify a clean tree."""
     listed = git_text(
@@ -613,6 +623,8 @@ def _sync_stage_and_commit_local(
         print("No local task changes to commit.", file=out)
     else:
         message = message_arg.strip() if message_arg is not None else task_commit_message(changes, ws=resolved)
+        if message and note:
+            message = f"{message}\n\n{note}"
         if not message:
             print("error: sync message must not be empty", file=err)
             return 2, False

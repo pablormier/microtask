@@ -312,6 +312,7 @@ def command_comment(args: argparse.Namespace, ws: Workspace | None = None) -> in
             ws,
             " ".join(args.query),
             args.comments,
+            by=getattr(args, "by", None),
             match_mode=args.match_mode,
             quiet_sync=args.as_json,
         ),

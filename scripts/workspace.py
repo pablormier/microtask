@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 
+import card_format
 import policy_parser
 
 
@@ -21,7 +22,7 @@ _DETERMINISTIC_POLICY_KEYS = {
 _DETERMINISTIC_RULE_KEYS = {
     "auto_sync", "done_window", "max_doing_tasks", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
-    "allow_public_origin", "max_attachment_mb",
+    "allow_public_origin", "max_attachment_mb", "doing_limit_scope",
 }
 
 
@@ -333,8 +334,13 @@ class Workspace:
     def attachments_root(self) -> Path:
         return self.root / "attachments"
 
-    def focus_state_path(self) -> Path:
-        return self.root / ".mt" / "focus"
+    def focus_state_path(self, user: str | None = None) -> Path:
+        """The focus file: one per workspace, or one per person in a shared workspace."""
+        if user is None:
+            return self.root / ".mt" / "focus"
+        if not card_format.is_safe_username(user):
+            raise ValueError(f"not a safe user name for per-person state: {user!r}")
+        return self.root / ".mt" / "focus-users" / user
 
     def legacy_timer_path(self) -> Path:
         """The old timer file before timers moved onto cards; read once, then renamed."""

@@ -11,6 +11,7 @@ function createDraftCoordinator() {
           captureFields: draft => this.captureDraftFields(draft),
           onStatus: status => { this.draftWorkspaceStatus = status; },
           onWarning: message => { this.captureComposer.recoveryWarning = message; },
+          onSaved: draft => this.clearCaptureStash(draft),
         });
       }
       return this.draftStorage;
@@ -37,6 +38,7 @@ function createDraftCoordinator() {
           },
           getCards: () => self.tasks,
           scheduleDraftSave: (draft, delay) => self.scheduleDraftSave(draft, delay),
+          clearStash: draft => self.clearCaptureStash(draft),
           finishWorkspaceDraft: draft => self.finishWorkspaceDraft(draft),
           clearStatus: () => { self.draftWorkspaceStatus = ""; self.captureComposer.message = ""; self.captureComposer.messageError = false; },
           nextTick: callback => self.$nextTick(callback),
@@ -254,6 +256,88 @@ function createDraftCoordinator() {
       };
     },
 
+    // A capture draft that was not yet saved to the workspace when the signed-in person changed is kept in
+    // this browser under the previous person's key, because a server save would file it under the new one.
+    // It comes back as a dirty draft when that person's page loads again.
+    captureStashKey(workspaceKey) {
+      return workspaceKey ? "mt-unsaved-capture:" + workspaceKey : "";
+    },
+
+    stashCaptureDraft() {
+      const draft = this.captureComposer.draft;
+      const key = this.captureStashKey(this.workspaceKey);
+      if (!draft || !key || draft.state === "closed") return false;
+      const store = this.getDraftStore();
+      if (store.isEmpty(draft)) return false;
+      const unsaved = draft.state === "dirty" || draft.state === "saving" || draft.state === "conflict" ||
+        store.hasChanges(draft);
+      if (!unsaved) return false;
+      const fields = {
+        id: String(draft.id || draft.capture_id || ""),
+        capture_id: String(draft.capture_id || draft.id || ""),
+        kind: draft.kind || "note",
+        title: String(draft.title || ""),
+        body: String(draft.body || ""),
+        instructions: String(draft.instructions || ""),
+        taskOptions: this.taskOptionsFromDraft(draft),
+        created: String(draft.created || ""),
+      };
+      try {
+        localStorage.setItem(key, JSON.stringify(fields));
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+
+    // Reopens what stashCaptureDraft kept for this page's key, as a dirty draft that saves itself again.
+    restoreCaptureStash() {
+      const key = this.captureStashKey(this.workspaceKey);
+      if (!key || this.captureComposer.draft) return false;
+      let saved = null;
+      try {
+        saved = JSON.parse(localStorage.getItem(key) || "null");
+      } catch (_) {
+        saved = null;
+      }
+      if (!saved || typeof saved !== "object" || !saved.id) {
+        try { localStorage.removeItem(key); } catch (_) {}
+        return false;
+      }
+      const store = this.getDraftStore();
+      const known = store.drafts.find(item => item.id === saved.id);
+      const draft = this.prepareDraftForEditing({
+        id: saved.id,
+        capture_id: saved.capture_id || saved.id,
+        kind: saved.kind === "task" ? "task" : "note",
+        title: saved.title,
+        body: saved.body,
+        instructions: saved.instructions,
+        taskOptions: saved.taskOptions && typeof saved.taskOptions === "object" ? saved.taskOptions : {},
+        created: saved.created,
+        // A copy of this draft may already be in the workspace; the stash holds the newer text.
+        content_hash: known ? known.content_hash : "",
+        _saved: known ? known._saved : null,
+        state: "dirty",
+      });
+      const stored = store.upsert(draft);
+      this.restoredStashId = String(stored.id);
+      this.captureComposer.draft = stored;
+      this.captureComposer.recoveryWarning = "Restored the draft you had open when your account changed.";
+      this.captureComposer.zen = false;
+      this.captureComposer.previewHtml = "";
+      this.captureComposer.open = true;
+      this.captureComposer.persist(this.captureContext());
+      return true;
+    },
+
+    // The stash has done its job once the draft is in the workspace again, was discarded, or is empty.
+    clearCaptureStash(draft) {
+      if (!this.restoredStashId || !draft || String(draft.id) !== this.restoredStashId) return;
+      this.restoredStashId = "";
+      try { localStorage.removeItem(this.captureStashKey(this.workspaceKey)); } catch (_) {}
+    },
+
     scheduleDraftSave(draft, delay = 450) {
       return this.getDraftStore().schedule(draft, delay);
     },
@@ -344,6 +428,7 @@ function createDraftCoordinator() {
           this.captureComposer.open = false;
         }
         this.draftWorkspaceStatus = "";
+        this.clearCaptureStash({ id: discardedId });
         if (typeof this.notify === "function") this.notify("Draft discarded");
       } catch (error) {
         this.draftWorkspaceStatus = "Error";

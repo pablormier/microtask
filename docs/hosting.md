@@ -2,7 +2,8 @@
 
 This sets up microtask on a Linux server for people who will not install it.
 Each person gets a private workspace and their own web address, and signs in
-with their Google account.
+with their Google account. To serve one workspace to a team instead, see
+[Shared workspace](#shared-workspace).
 
 To reach your own dashboard from your phone, [Tailscale](mobile.md#mt-web-over-tailscale)
 is simpler: no domain, proxy or certificates.
@@ -249,11 +250,260 @@ Remove the email from `/etc/oauth2-proxy/emails.txt`. Delete `/srv/mt/alice` onl
 after you have a backup of it. Upgrades check every folder in `/srv/mt`, so move
 or delete a removed user's workspace to keep it out of them.
 
+## Shared workspace
+
+A team of up to about a hundred people, few of them active at once, can share
+one workspace served by one `mt web` process. Everyone signs in with their own
+account and sees the same cards. The storage does not change: Markdown files,
+file locks and Git.
+
+```
+browser --> Caddy (HTTPS, email allowlist, adds the secret) --> mt web on 127.0.0.1:810x
+               |
+               +--> oauth2-proxy on 127.0.0.1:4180 (sign-in)
+```
+
+Single-user setups are not affected. Everything here applies only when
+`mt web` starts with `--trust-proxy-user`.
+
+### Who is asking
+
+The dashboard acts for the person named in the `X-Auth-Request-Email` header.
+A program on the same machine can send any header to a local port, so the
+header counts only on a request that also carries `X-Microtask-Proxy-Secret`
+with the right value. Caddy removes both headers from the browser's request and
+adds them itself after oauth2-proxy has signed the visitor in. The dashboard
+answers 403 to a request without the secret, and 401 or 403 to one without
+exactly one email, for reads as well as writes.
+
+The user name of an address is its line in the user map when it has one,
+and otherwise the part before the `@` in lowercase, such as `alice` for
+`Alice@example.org`. It becomes part of file names, so it may contain only
+lowercase letters, digits, `.`, `_` and `-`, must start with a letter or
+digit, and may be up to 64 characters long. Two addresses with the same user
+name are the same person to the dashboard, so `add-shared.sh` refuses them,
+whether the names come from the map or from the part before the `@`. It asks
+the installed app for each name and for the `MT_ADMINS` list, so it resolves
+them the way the dashboard does, and uses them for the administrator checks and
+the retired list. Lines of a map file may end in `\n` or `\r\n`. To give an address another name,
+add a line `EMAIL USER` to a map file. The dashboard reads the file named by
+`--user-map FILE` or `MT_USER_MAP`, and `add-shared.sh` reads the file named
+by `MT_USER_MAP` in `/etc/mt/NAME.env`, so set it there and restart
+`mt-shared@NAME`. When `MT_USER_MAP` is set, `add-shared.sh` checks the file
+before any change, dry runs included. It stops if the file is missing,
+unreadable or invalid, because the dashboard would refuse the same file.
+`MT_ADMINS` may separate names with commas, spaces or both.
+
+The secret and the administrators are given at startup, not in `settings.yaml`,
+because settings are workspace data that people can edit in the dashboard:
+
+| Option | Environment variable | Meaning |
+| --- | --- | --- |
+| `--trust-proxy-user` | | turn on the shared mode |
+| `--proxy-secret-file FILE` | `MT_PROXY_SECRET_FILE` | the secret, at least 16 characters |
+| `--admin USER` (repeatable) | `MT_ADMINS` (comma-separated) | administrators |
+| `--user-map FILE` | `MT_USER_MAP` | email to user name lines |
+
+### What is per person
+
+- **Focus.** Each person has their own selected card, stored in
+  `.mt/focus-users/USER`. The single-user file `.mt/focus` is not used. Focus
+  offers only tasks that nobody else has claimed.
+- **Drafts.** A draft has an `owner`, set to the person who first saved it. A
+  person lists, saves, discards and finishes only their own drafts. Another
+  person's draft ID gets a 404. Drafts that existed before the switch have no
+  owner and are hidden from everyone until an administrator assigns them with
+  `mt -R /srv/mt/NAME draft assign DRAFT-ID USER`. An older microtask that
+  saves a draft drops its `owner`.
+- **Comments.** Comments written in the dashboard have a `by` field with the
+  user name, and so do comments from `mt comment --by NAME`. Comments from
+  `mt done` and `mt move` are attributed when `--by` is given. Older versions
+  of microtask reject a card with a `by` comment, so upgrade every `mt` that
+  reads the workspace (servers, laptops, agents) before the first person
+  comments in the shared dashboard.
+- **Claims and timers.** Dashboard actions run as the signed-in person. Changing
+  the properties or body of a task another person has claimed, and starting a
+  timer on it, are refused with 409.
+- **Tasks in progress.** The shared workspace sets `rules.doing_limit_scope:
+  per_claimant`. Then `rules.max_doing_tasks` is the number each person may
+  have in `doing`, and not the number for the whole workspace. Moving a task
+  to `doing` and taking over a claim are both checked, by the CLI, the
+  dashboard and `mt validate` alike. Tasks in `doing` that nobody has claimed
+  count together as one more group with the same limit. The default,
+  `workspace`, counts every task in `doing` together, as before.
+
+### Administrators
+
+These dashboard actions exist only in the shared mode and need a user listed
+as an administrator. Anyone else gets 403 with the message "Only a workspace
+administrator can do this.".
+
+- `POST /api/delete` deletes a card.
+- `POST /api/takeover` takes over a claim from another person.
+- `POST /api/topic-rename` renames or merges a topic.
+
+The dashboard has no controls for them yet. Administrators also work with the
+`mt` command on the server, which is not restricted by this list.
+`settings.yaml` has no web editor, so changing settings needs shell access to
+the workspace.
+
+### History
+
+A hosted workspace starts with `auto_sync` off and no remote, so Git would
+otherwise hold nothing newer than the first commit. In the shared mode every
+dashboard write is committed to the workspace's local Git history right after it
+succeeds. There is no fetch or push, and no remote is needed. The commit
+message says `Web change by USER`, but the author is the service account, because
+one `mt sync` can later carry several people's changes. Before a delete, takeover
+or topic rename the dashboard also commits whatever is pending, so the card
+exists in history even if it was only ever created from the shell. Draft
+autosaves are not committed until the next card change. No other dashboard write
+can land between a change and its commit, because both happen under one hold of
+the workspace lock. The commit stages every pending workspace path, so it can
+also contain changes that were already waiting, such as edits made from the
+shell or draft autosaves. If a commit fails, only the person who made that change sees a warning, for
+dashboard writes and uploads alike. It is shown together with any sync warning.
+A delete, takeover or topic rename needs its commit before it runs. If that
+commit fails, the dashboard answers 503, changes nothing and says so. Check
+that the service account can write to `/srv/mt/NAME/.git`, that the disk is not
+full and that no stale `index.lock` is left there, then try again.
+
+To restore a deleted card:
+
+```sh
+git -C /srv/mt/NAME log --diff-filter=D --name-only --format='%h %s'
+git -C /srv/mt/NAME checkout COMMIT~1 -- cards/THE-CARD.md
+```
+
+If the service account has no Git identity, the dashboard commits as
+`microtask <microtask@localhost>`.
+
+### Conflicting edits
+
+Saving a card body or its properties sends the hash of the version the person
+loaded. If someone else changed the card in the meantime, the answer is 409 and
+nothing is written. The body editor keeps its text in the browser and offers to
+reload the card and keep it. The properties editor keeps the person's changes in
+the open form and says that the card changed. Unsaved edits that the browser
+keeps are stored per signed-in person, so two people who use the same browser
+do not see each other's text.
+
+### When the signed-in account changes
+
+A page stays open while the proxy session behind it can change, for example
+when someone signs out of one account and into another in a second tab. Each
+page carries a write token that belongs to the person it was loaded for. The
+dashboard accepts a write only with the token of the person the proxy names for
+that request, and otherwise answers 409 with `member_changed` before anything is
+read or changed, for card edits, draft saves and attachment uploads alike.
+
+When the page sees this answer, or a refresh that belongs to another person, it
+saves unsaved property and body edits and an open capture draft in the browser
+under the previous person's key, sends nothing more for them, and reloads. The
+reloaded page shows a notice. The previous person finds their capture draft
+reopened, with a short note, the next time their page loads in that browser.
+
+### Set it up
+
+Do steps 1 to 5 of [Set up the server](#set-up-the-server) first. Then install
+the unit for shared workspaces and create the workspace:
+
+```sh
+sudo cp /opt/microtask/current/deploy/systemd/mt-shared@.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo /opt/microtask/current/deploy/add-shared.sh --admin alice team team.mt.example.com \
+  alice@example.com bob@example.com carol@example.com
+```
+
+`add-shared.sh` takes a workspace name, a public host name and the allowed email
+addresses (more with `--emails-file FILE`). It creates `/srv/mt/team` with
+`mt init --data`, sets `rules.doing_limit_scope: per_claimant` with the
+indentation of the other entries under `rules:`, checks with `mt validate` and
+`mt settings --json` that the workspace accepts it, and commits that,
+writes `/etc/mt/team.env` (port, host, administrators and the path of the
+secret) and a new random secret in `/etc/mt/team.secret` (mode 600), writes
+`/etc/caddy/mt-users/team.caddy`, adds the addresses to the oauth2-proxy emails
+file, starts `mt-shared@team` and reloads Caddy. `--dry-run`, `--root`,
+`--no-systemctl` and `--app` work as in `add-user.sh`. `upgrade.sh` restarts
+`mt-shared@NAME` services too and validates the workspace with the new version.
+
+The Caddy file holds a copy of the secret and is readable by root and the
+`caddy` group. The allowlist is the `header_regexp` line in that file. Anyone
+who signs in with an address outside the list gets 403 from Caddy. The
+dashboard has no list of its own and accepts whoever Caddy lets through, so
+Caddy's line is the one that decides.
+
+### Add or remove people
+
+The members are listed in `/etc/mt/NAME.members` (mode 600), one address per
+line. Change them with the same script:
+
+```sh
+sudo /opt/microtask/current/deploy/add-shared.sh --add team carol@example.com dave@example.com
+sudo /opt/microtask/current/deploy/add-shared.sh --remove team bob@example.com
+```
+
+Both modes apply the checks of the creation run: valid addresses, and a different
+part before the `@` for each person. They rewrite the members file and the Caddy
+site from the template, keeping the workspace's secret and port, update the
+oauth2-proxy emails file and reload Caddy. The service does not restart.
+`--dry-run`, `--root` and `--no-systemctl` work as before, and a failed update
+puts the previous files back. Edits you made by hand to the Caddy site are
+replaced by the template's version. The scripts take a lock before they check or
+change anything, so two runs at once do not overwrite each other.
+`add-user.sh` takes the same lock and refuses a name that `add-shared.sh` has
+already created, and the other way round. The Caddy
+site, the secret and the members list are created with mode 640, 600 and 600
+before any secret is written, whatever the umask of the shell.
+
+When someone is removed, their address leaves the oauth2-proxy emails file only if
+no other members list or Caddy site still names it. Removing an administrator is
+refused until `MT_ADMINS` in `/etc/mt/NAME.env` no longer lists them; edit that
+line, restart `mt-shared@NAME`, and run the command again. The cards and comments
+a removed person wrote stay in the workspace. oauth2-proxy may need a restart to
+read a changed emails file.
+
+A user name identifies a person's private data: their drafts, claims, focus
+and timers. Removing someone therefore retires their user name. It is recorded
+in `/etc/mt/NAME.retired` (mode 600), one line `USER EMAIL` per removed person.
+`--add` refuses a different address that would get a retired name, for example
+`alice@b.org` after `alice@a.org` was removed, because that person would
+inherit the old drafts and claims. Two ways forward:
+
+- Give the new person another name. Put a line `alice@b.org alice2` in a user
+  map file, and set `MT_USER_MAP=/etc/mt/NAME.users` in `/etc/mt/NAME.env`
+  (restart `mt-shared@NAME`), as described under
+  [Who is asking](#who-is-asking). Add the map line before `--add`.
+- Run `--add --reuse-name NAME alice@b.org` after confirming that it is the
+  same person. The name is then free again.
+
+Adding back the exact address that was removed needs no flag, since it is the
+same account. Either way the name leaves the retired list once someone is
+admitted under it.
+
+A removed person's drafts stay in the workspace and no one else can see them.
+To hand one over, run `mt -R /srv/mt/NAME draft assign DRAFT-ID USER`. Their
+claims on tasks also stay. An administrator takes one over with
+`POST /api/takeover` in the dashboard API, or on the server with
+`mt -R /srv/mt/NAME move TASK doing --by USER --takeover`, which is not
+restricted by the administrator list.
+
+To rotate the secret, write a new one to `/etc/mt/team.secret`, put the same
+value in the `request_header X-Microtask-Proxy-Secret` line of the Caddy file,
+restart `mt-shared@team` and reload Caddy.
+
+Try it before announcing it: sign in as an allowed account and as one that is
+not listed, and check that `curl -H 'X-Auth-Request-Email: alice@example.com'
+http://127.0.0.1:8101/api/items` on the server answers 403.
+
 ## What this kit does not cover
 
 - Docker or other container setups.
-- Several users sharing one workspace, or any team features.
-- Multi-tenant hosting in one process. Each user runs a separate dashboard.
+- Several workspaces in one process, or per-person permissions beyond the
+  administrator list. Everyone on the allowlist can read and edit every card
+  of a shared workspace.
+- Dashboard controls for the administrator actions, bulk edits in the
+  dashboard, and a settings editor.
 - Servers other than one Linux machine, and identity providers other than the
   one you configure in oauth2-proxy.
 - Syncing a hosted workspace to a Git remote. You can add one by hand, but it is

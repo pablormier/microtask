@@ -182,6 +182,7 @@ button.mt-button.mt-text-property-add { margin: var(--mt-space-2) 0 0 -8px; colo
   overflow-wrap: anywhere;
 }
 .mt-comment-entry:last-child { padding-bottom: 0; }
+.mt-comment-entry .mt-comment-author { display: block; margin-bottom: 2px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-weight: 600; }
 .mt-comment-entry time { display: block; margin-bottom: 2px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-variant-numeric: tabular-nums; }
 .mt-comment-body > :last-child { margin-bottom: 0; }
 .mt-comment-body p { margin-bottom: var(--mt-space-2); }

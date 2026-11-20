@@ -146,6 +146,14 @@ def parse_yaml(frontmatter: str) -> dict[str, object]:
     return value
 
 
+# A name that is safe in a file name: shared workspaces key per-person files (focus, draft owner) on it.
+SAFE_USERNAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+
+
+def is_safe_username(value: object) -> bool:
+    return isinstance(value, str) and SAFE_USERNAME_RE.fullmatch(value) is not None
+
+
 def validate_records(properties: dict[str, object]) -> list[str]:
     errors: list[str] = []
     for field in ("comments", "time_entries"):
@@ -161,9 +169,11 @@ def validate_records(properties: dict[str, object]) -> list[str]:
                 errors.append(f"{prefix} must be a mapping")
                 continue
             if field == "comments":
-                if set(record) != {"at", "text"}:
-                    errors.append(f"{prefix} must contain exactly at and text")
+                if set(record) not in ({"at", "text"}, {"at", "text", "by"}):
+                    errors.append(f"{prefix} must contain exactly at and text, and optionally by")
                     continue
+                if "by" in record and not is_single_line_text(record["by"]):
+                    errors.append(f"{prefix}.by must be a non-empty, single-line name")
                 if not isinstance(record.get("at"), str) or not is_metadata_time(record["at"]):
                     errors.append(f"{prefix}.at must be an ISO date or local timestamp")
                 if not isinstance(record.get("text"), str) or not record["text"].strip():

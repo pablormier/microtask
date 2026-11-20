@@ -45,7 +45,8 @@ def clean_text_values(values: list[str]) -> list[str]:
     return [value.strip() for value in values if value.strip()]
 
 
-def append_comments(raw: str, comments: list[str], timestamp: str) -> str:
+def append_comments(raw: str, comments: list[str], timestamp: str, by: str | None = None) -> str:
+    """Add comments to a card. A name in `by` is recorded as their author; without one the record stays {at, text}."""
     cleaned = clean_text_values(comments)
     if not cleaned:
         return raw
@@ -53,7 +54,7 @@ def append_comments(raw: str, comments: list[str], timestamp: str) -> str:
     records = properties.setdefault("comments", [])
     if not isinstance(records, list):
         raise ValueError("comments must be a list")
-    records.extend({"at": timestamp, "text": comment} for comment in cleaned)
+    records.extend({"at": timestamp, "text": comment, **({"by": by} if by else {})} for comment in cleaned)
     return card_format.render_document(properties, body)
 
 

@@ -376,7 +376,7 @@ def allow_host_name(value: str) -> str:
     return text
 
 
-def add_web_arguments(parser: argparse.ArgumentParser) -> None:
+def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -> None:
     """Keep the public CLI and standalone dashboard entry point consistent."""
     parser.add_argument("--no-open", action="store_true", help="do not open a browser")
     parser.add_argument("--host", default="127.0.0.1", help="server host; defaults to 127.0.0.1")
@@ -385,6 +385,19 @@ def add_web_arguments(parser: argparse.ArgumentParser) -> None:
                         help="also accept this Host header name (NAME or NAME:PORT; any port when none is given); "
                              "repeatable. Use it behind a reverse proxy that keeps the public Host; "
                              "otherwise configure the proxy to send the backend address as Host")
+    if shared:
+        parser.add_argument("--trust-proxy-user", action="store_true",
+                            help="serve one shared workspace to several people behind a sign-in proxy: read who is asking "
+                                 "from X-Auth-Request-Email, but only on requests that also carry the proxy secret")
+        parser.add_argument("--proxy-secret-file", metavar="FILE",
+                            help="file holding the secret the proxy sends in X-Microtask-Proxy-Secret "
+                                 "(or set MT_PROXY_SECRET_FILE); required with --trust-proxy-user")
+        parser.add_argument("--user-map", metavar="FILE",
+                            help="lines of 'EMAIL USER' that name the user for an email "
+                                 "(or set MT_USER_MAP); other emails use the part before the @")
+        parser.add_argument("--admin", action="append", default=[], metavar="USER",
+                            help="user name allowed to delete cards, take over claims and rename topics; "
+                                 "repeatable, or set MT_ADMINS to a comma-separated list")
     card_query.add_query_arguments(parser)
 
 

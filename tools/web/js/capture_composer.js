@@ -143,6 +143,7 @@ function createCaptureComposer() {
       if (!draft) return false;
       if (ctx.store.isEmpty(draft)) {
         ctx.store.forgetEmpty(draft);
+        if (ctx.clearStash) ctx.clearStash(draft);
         return false;
       }
       if (draft.state === "conflict" || draft.state === "closed") return false;
@@ -166,6 +167,7 @@ function createCaptureComposer() {
       if (!this.open) return true;
       if (this.draft && ctx.store.isEmpty(this.draft)) {
         ctx.store.forgetEmpty(this.draft);
+        if (ctx.clearStash) ctx.clearStash(this.draft);
         this.draft = null;
       } else if (this.draft) {
         this.persist(ctx);

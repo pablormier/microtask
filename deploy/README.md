@@ -6,7 +6,11 @@ guide is in [docs/hosting.md](../docs/hosting.md).
 - `systemd/mt-web@.service`: one dashboard per user
 - `caddy/Caddyfile` and `caddy/user.caddy.template`: HTTPS and per-user sites
 - `oauth2-proxy/oauth2-proxy.cfg.example`: sign-in
+- `systemd/mt-shared@.service`: one dashboard for a workspace shared by a group of people
+- `caddy/shared.caddy.template`: the site of a shared workspace, with an email allowlist
 - `add-user.sh`: creates a user's workspace folder, port, service and site
+- `add-shared.sh`: creates a shared workspace, its service and site, and the secret that
+  lets Caddy tell the dashboard who is signed in; `--add` and `--remove` change who may use it
 - `upgrade.sh`: installs a release tag in `/opt/microtask`, checks every
   workspace with it, switches `current` and restarts the services; `--rollback`
   goes back to the previous version

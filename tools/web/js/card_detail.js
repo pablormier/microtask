@@ -213,7 +213,7 @@ function createDetailController() {
       if (propDirty || bodyDirty) {
         if (typeof window !== "undefined" && typeof window.confirm === "function" &&
             !window.confirm("Discard unsaved changes?")) return false;
-        if (propDirty) this.propertyEditor.begin(this.selected, this.taskDefaults);
+        if (propDirty) this.propertyEditor.discard(this.selected, this.taskDefaults);
       }
       this.contentEditor.close(this.contentContext(), { force: true });
       return true;
@@ -294,7 +294,9 @@ function createDetailController() {
       this.selectedId = task.id;
       this.selected = task;
       this.moveDestination = task.status || "";
+      this.propertyEditor.workspaceKey = this.workspaceKey;
       this.propertyEditor.begin(task, this.taskDefaults);
+      this.propertyEditor.offerBackup(task);
       this.commentText = "";
       this.actionMessage = "";
       this.actionError = false;
@@ -348,6 +350,13 @@ function createDetailController() {
       } finally {
         if (sequence === this.detailSequence) this.detailLoading = false;
       }
+    },
+
+    // Writes the open property form and body editor to browser storage under the current workspace key,
+    // so that a page restart for another signed-in person loses nothing.
+    keepEditsForReload() {
+      this.propertyEditor.persist(this.workspaceKey, this.selected && this.selected.id);
+      this.contentEditor.persist();
     },
 
     clearSelection(updateUrl = true) {

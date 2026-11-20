@@ -100,17 +100,19 @@ workspace_names() {
 }
 
 restart_services() {
-  local name
+  local name unit
   local failed_services=()
   [[ -z "$no_systemctl" ]] || return 0
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
-    if systemctl is-enabled --quiet "mt-web@$name" 2>/dev/null; then
-      echo "restarting mt-web@$name"
-      if ! systemctl restart "mt-web@$name"; then
-        failed_services+=("mt-web@$name")
+    for unit in mt-web mt-shared; do
+      if systemctl is-enabled --quiet "$unit@$name" 2>/dev/null; then
+        echo "restarting $unit@$name"
+        if ! systemctl restart "$unit@$name"; then
+          failed_services+=("$unit@$name")
+        fi
       fi
-    fi
+    done
   done < <(workspace_names)
   if [[ ${#failed_services[@]} -gt 0 ]]; then
     die "failed to restart service(s): ${failed_services[*]}"

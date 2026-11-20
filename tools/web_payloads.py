@@ -31,12 +31,15 @@ except ImportError:
 MAX_INCLUDED_IDS = 8
 
 
-def workspace_key(ws: Workspace) -> str:
-    return hashlib.sha256(str(ws.root.resolve()).encode("utf-8")).hexdigest()[:16]
+def workspace_key(ws: Workspace, user: str | None = None) -> str:
+    """Names the workspace in browser storage. In a shared workspace it also names the signed-in
+    person, so that one browser profile never offers a person another's unsaved edits."""
+    seed = str(ws.root.resolve()) if user is None else f"{ws.root.resolve()}\n{user}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
-def bootstrap_config(ws: Workspace, token: str) -> dict:
-    return {"api_token": token, "workspace_key": workspace_key(ws)}
+def bootstrap_config(ws: Workspace, token: str, user: str | None = None) -> dict:
+    return {"api_token": token, "workspace_key": workspace_key(ws, user)}
 
 
 def extract_excerpt(text: str, max_len: int = 180) -> str:
@@ -166,6 +169,7 @@ def dashboard_meta(
     items: list[store.Card] | None = None,
     cfg: dict | None = None,
     demo: bool = False,
+    user: str | None = None,
 ) -> dict:
     cfg = cfg if cfg is not None else store.policy(ws)
     default_status, default_priority, default_type = operations.task_defaults(cfg)
@@ -210,7 +214,7 @@ def dashboard_meta(
                 name = str(item.frontmatter[field])
                 usage[field][name] = usage[field].get(name, 0) + 1
     return {
-        "workspace_key": workspace_key(ws),
+        "workspace_key": workspace_key(ws, user),
         "status_labels": status_labels,
         "view_labels": view_labels,
         "priority_order": list(cfg.get("priorities", {}).keys()),
@@ -276,16 +280,20 @@ def draft_to_dict(draft: dict) -> dict:
     return {**draft, "excerpt": extract_excerpt(str(draft.get("body") or ""))}
 
 
-def draft_list_payload(root: Path) -> list[dict]:
-    return [draft_to_dict(draft) for draft in draft_store.list_drafts(root)]
+def draft_list_payload(root: Path, viewer: str | None = None) -> list[dict]:
+    """The drafts to show. In a shared workspace `viewer` limits them to that person's own."""
+    return [draft_to_dict(draft) for draft in draft_store.list_drafts(root, viewer)]
 
 
-def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None, include: object = None, demo: bool = False) -> dict:
+def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None,
+                      include: object = None, demo: bool = False, actor: str | None = None,
+                      hosted: dict | None = None) -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
     ``include`` IDs (the open card and its navigation trail), which are echoed back.
-    Workspace-wide figures are in ``meta``.
+    Workspace-wide figures are in ``meta``. In a shared workspace ``actor`` is the signed-in
+    person: focus, drafts and the doing count are theirs, and ``hosted`` names them in ``meta``.
     """
     transaction.migrate_legacy_timers_if_pending(ws)
     cfg = store.policy(ws)
@@ -298,9 +306,12 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
-    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo)
+    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor)
     now = datetime.now()
-    meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now), ws=ws)
+    meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now),
+                                             actor=actor, focus_user=actor, ws=ws)
+    if hosted is not None:
+        meta["hosted"] = hosted
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
     done_cutoff = card_query.default_done_cutoff(query, store.done_window(ws), date.today())
     collections = collection_results(
@@ -308,7 +319,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
     meta["topic_trees"] = view_topic_trees(ws, ordered, query, now=now, done_cutoff=done_cutoff,
                                            topics=[*meta["workspace_usage"]["topic"], *operations.suggested_topics(cfg)])
-    drafts = draft_list_payload(ws.root)
+    drafts = draft_list_payload(ws.root, actor)
     included = included_ids(include)
     wanted = {identity for ids in collections.values() for identity in ids} | set(included)
     meta["draft_count"] = len(drafts)
@@ -317,8 +328,12 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     for key in ("candidates", "alerts"):
         meta["focus"][key] = [entry for entry in meta["focus"][key] if entry["id"] in shown]
     meta["focus"]["followup_ids"] = [identity for identity in meta["focus"]["followup_ids"] if identity in shown]
-    meta["doing_count"] = len(card_query.select(
-        tasks, card_query.Query(status=("doing",), hidden="include"), now=now))
+    doing = card_query.select(tasks, card_query.Query(status=("doing",), hidden="include"), now=now)
+    if cfg.get("rules", {}).get("doing_limit_scope", "workspace") == "per_claimant":
+        # The limit applies to each person's own doing tasks, so the board counts the signed-in person's.
+        person = store.current_username(actor, ws=ws)
+        doing = [card for card in doing if card.frontmatter.get("claimed_by") == person]
+    meta["doing_count"] = len(doing)
     # Changes when any card is added, removed, renamed or converted, so an open card can refresh its references.
     meta["reference_revision"] = hashlib.sha256(json.dumps(sorted(
         [str(card.frontmatter["id"]), f"@{card.short_ref}", card.title, card.kind] for card in ordered

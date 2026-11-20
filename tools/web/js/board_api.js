@@ -19,6 +19,17 @@ async function readJsonResponse(response) {
   return {};
 }
 
+// The board registers what happens when the server reports that the signed-in account is no longer the
+// one this page was loaded for (a 409 with member_changed). Requests only report it; the board decides.
+let memberChangeHandler = null;
+function setMemberChangeHandler(handler) {
+  memberChangeHandler = typeof handler === "function" ? handler : null;
+}
+function reportMemberChanged() {
+  if (!memberChangeHandler) return;
+  try { memberChangeHandler(); } catch (_) {}
+}
+
 async function postJson(path, body, token) {
   const response = await fetch(path, {
     method: "POST",
@@ -26,10 +37,14 @@ async function postJson(path, body, token) {
     body: JSON.stringify(body || {}),
   });
   const payload = await readJsonResponse(response);
+  // The write was refused before anything changed, so it is neither a conflict nor a failure to retry.
+  const memberChanged = Boolean(payload.member_changed);
+  if (memberChanged) reportMemberChanged();
   return {
     ok: response.ok,
     status: response.status,
-    conflict: Boolean(payload.conflict || response.status === 409),
+    memberChanged,
+    conflict: !memberChanged && Boolean(payload.conflict || response.status === 409),
     missing: response.status === 404,
     error: payload.error || (response.ok ? "" : `Request failed (${response.status})`),
     payload,
@@ -39,6 +54,8 @@ async function postJson(path, body, token) {
 function createBoardApi() {
   return {
     applyPayload(payload, fromQuery = false, sentQuery = {}) {
+      // A payload for another signed-in person is never applied: the page restarts instead.
+      if (this.payloadIsForOtherMember(payload.meta)) return;
       this.now = Date.now();
       this.nowSeconds = null;
       const matchesQuery = fromQuery || JSON.stringify(sentQuery) === JSON.stringify(this.collectionQuery());
@@ -117,6 +134,7 @@ function createBoardApi() {
     },
 
     async refreshItems() {
+      if (this.memberChanging) return;
       clearTimeout(this.queryTimer);
       const sequence = ++this.querySequence;
       const query = this.collectionQuery();
@@ -167,6 +185,7 @@ function createBoardApi() {
     },
 
     async apiPost(path, body) {
+      if (this.memberChanging) return null;
       this._busyCount = (this._busyCount || 0) + 1;
       this.busy = true;
       this.actionMessage = "";
@@ -256,6 +275,7 @@ function createBoardApi() {
     },
 
     async uploadAttachmentsForTarget(target, files, textarea) {
+      if (this.memberChanging) return;
       const accessors = this._attachmentTargetAccessors(target);
       if (!accessors || !files || !files.length) return;
       this._attachmentUploadCount = (this._attachmentUploadCount || 0) + 1;

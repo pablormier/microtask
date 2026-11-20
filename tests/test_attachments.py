@@ -227,6 +227,32 @@ class AttachmentCoreTests(unittest.TestCase):
         result = subprocess.run([node], input=source + "\n" + scenario, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_upload_js_surfaces_the_history_warning(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable")
+        source = (ROOT / "tools" / "web" / "js" / "attachments.js").read_text(encoding="utf-8")
+        scenario = r"""
+(async () => {
+  const assert = require("assert");
+  global.readJsonResponse = async (response) => response.body;
+  global.fetch = async () => ({ok: true, status: 200,
+    body: {attachment: {markdown: "[a](../attachments/a.txt)"}, history_warning: "Local history is unavailable: disk full"}});
+  let text = "";
+  const notes = [];
+  const uploaded = await uploadAndInsertAttachments({
+    files: [{name: "a.txt", type: "text/plain"}], textarea: null,
+    getText: () => text, setText: (t) => { text = t; },
+    notify: (m, e) => notes.push([m, e]),
+  });
+  assert.strictEqual(uploaded.length, 1);
+  assert.strictEqual(text, "[a](../attachments/a.txt)");
+  assert.deepStrictEqual(notes, [["Local history is unavailable: disk full", true]]);
+})().catch(e => { console.error(e); process.exitCode = 1; });
+"""
+        result = subprocess.run([node], input=source + "\n" + scenario, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_sync_commits_attachments(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

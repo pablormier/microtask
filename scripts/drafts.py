@@ -16,7 +16,7 @@ ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 FIELDS = (
     "id", "kind", "mode", "created", "updated", "title",
     "capture_id", "origin", "status", "priority", "type", "project",
-    "topic", "tags", "due", "due_kind", "instructions",
+    "topic", "tags", "due", "due_kind", "instructions", "owner",
 )
 
 
@@ -26,6 +26,19 @@ class DraftConflict(ValueError):
 
 class RetiredDraftError(ValueError):
     pass
+
+
+class DraftNotFound(ValueError):
+    """The draft does not exist, or belongs to someone else in a shared workspace."""
+
+
+def visible_to(draft: dict[str, object], viewer: str | None) -> bool:
+    """A viewer sees only drafts they own. No viewer (a single-user workspace) sees every draft.
+
+    A draft with no owner belongs to nobody, so shared-workspace users never see it
+    until an administrator assigns it (`mt draft assign`).
+    """
+    return viewer is None or draft.get("owner") == viewer
 
 
 def draft_directory(root: Path) -> Path:
@@ -114,24 +127,30 @@ def read_path(path: Path) -> dict[str, object]:
     instructions = metadata.get("instructions")
     if instructions is not None and not isinstance(instructions, str):
         raise ValueError(f"malformed draft instructions: {path}")
+    owner = metadata.get("owner")
+    if owner is not None and not card_format.is_safe_username(owner):
+        raise ValueError(f"malformed draft owner: {path}")
     metadata["body"] = body
     metadata["path"] = str(path)
     metadata["content_hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     return metadata
 
 
-def list_drafts(root: Path) -> list[dict[str, object]]:
+def list_drafts(root: Path, viewer: str | None = None) -> list[dict[str, object]]:
     directory = draft_directory(root)
     if not directory.is_dir():
         return []
     items: list[dict[str, object]] = []
     for path in sorted(directory.glob("*.md")):
         try:
-            items.append(read_path(path))
+            draft = read_path(path)
         except FileNotFoundError:
             continue
         except RetiredDraftError as error:
             print(f"warning: skipping {error}", file=sys.stderr)
+            continue
+        if visible_to(draft, viewer):
+            items.append(draft)
     return items
 
 
@@ -143,9 +162,14 @@ def save(
     body: str,
     now: str,
     expected_content_hash: str | None = None,
+    viewer: str | None = None,
 ) -> dict[str, object]:
+    """Create or update a draft. In a shared workspace `viewer` is the signed-in person:
+    new drafts get them as owner and another person's draft is reported as not found."""
     if not isinstance(fields, dict):
         raise ValueError("draft fields must be a mapping")
+    if viewer is not None and not card_format.is_safe_username(viewer):
+        raise ValueError("draft owner must be a safe user name")
     if expected_content_hash is not None and (not isinstance(expected_content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_content_hash)):
         raise ValueError("expected_content_hash must be a SHA-256 hash or null")
     if not isinstance(body, str):
@@ -162,6 +186,8 @@ def save(
     lock_handle = lock(root)
     try:
         previous = read_path(path) if path.is_file() else None
+        if previous is not None and not visible_to(previous, viewer):
+            raise DraftNotFound("draft not found")
         kind = fields.get("kind", previous.get("kind") if previous else None)
         mode = fields.get("mode", previous.get("mode") if previous else None)
         if not isinstance(kind, str) or kind not in {"note", "task"}:
@@ -211,6 +237,11 @@ def save(
             "capture_id": capture_id,
             "origin": origin,
         }
+        owner = viewer if viewer is not None else (previous.get("owner") if previous else fields.get("owner"))
+        if owner is not None:
+            if not card_format.is_safe_username(owner):
+                raise ValueError("draft owner must be a safe user name")
+            metadata["owner"] = owner
         for field in ("status", "priority", "type", "project", "topic", "tags", "due", "due_kind", "instructions"):
             if field in fields:
                 metadata[field] = fields[field]
@@ -239,6 +270,7 @@ def discard(
     root: Path,
     draft_id: str,
     expected_content_hash: str | None = None,
+    viewer: str | None = None,
 ) -> bool:
     path = draft_path(root, draft_id)
     lock_handle = lock(root)
@@ -247,7 +279,11 @@ def discard(
             return False
         try:
             current = read_path(path)
+            if not visible_to(current, viewer):
+                return False  # Someone else's draft is the same as no draft.
         except RetiredDraftError:
+            if viewer is not None:
+                return False
             if expected_content_hash is not None:
                 raise
             path.unlink()
@@ -260,6 +296,27 @@ def discard(
         unlock(lock_handle)
 
 
-def read(root: Path, draft_id: str) -> dict[str, object]:
-    return read_path(draft_path(root, draft_id))
+def read(root: Path, draft_id: str, viewer: str | None = None) -> dict[str, object]:
+    draft = read_path(draft_path(root, draft_id))
+    if not visible_to(draft, viewer):
+        raise DraftNotFound("draft not found")
+    return draft
+
+
+def assign(root: Path, draft_id: str, owner: str) -> dict[str, object]:
+    """Set the owner of a draft, replacing any previous one. For administrators, not for dashboard users."""
+    if not card_format.is_safe_username(owner):
+        raise ValueError("owner must be lowercase letters, digits, '.', '_' or '-', starting with a letter or digit")
+    path = draft_path(root, draft_id)
+    lock_handle = lock(root)
+    try:
+        if not path.is_file():
+            raise DraftNotFound("draft not found")
+        draft = read_path(path)
+        metadata = {field: draft[field] for field in FIELDS if field in draft}
+        metadata["owner"] = owner
+        atomic_write(path, serialize(metadata, str(draft["body"])))
+        return read_path(path)
+    finally:
+        unlock(lock_handle)
 

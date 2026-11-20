@@ -904,6 +904,303 @@ console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sa
         self.assertFalse(result["reopenedConflict"])
         self.assertEqual(result["baselineHash"], "hash-two")
 
+    def test_property_edits_survive_a_reload_and_are_restored_with_a_notice(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  const key = "mt-unsaved-props:workspace-a:first";
+  const first = { id: "first", title: "First", ref: "@first", kind: "task", status: "active", priority: "none", type: "task",
+    project: "before", topic: "topic", tags: ["one"], due: null, due_kind: null, content_hash: "hash-one", body: "text" };
+  const open = hash => {
+    const app = taskBoard();
+    app.$nextTick = callback => callback(); app.$refs = { preview: null }; app.renderSelectedPreview = () => {};
+    app.workspaceKey = "workspace-a"; app.interactive = true;
+    app.taskDefaults = { status: "inbox", priority: "none", type: "task" };
+    app.taskPriorityPolicy = { none: "Unassigned" }; app.taskTypePolicy = { task: "Action" };
+    app.taskDueKindPolicy = { target: "Soft" };
+    const card = { ...first, content_hash: hash };
+    app.tasks = [card];
+    app.showCard(card);
+    return app;
+  };
+  const edit = (app, project) => { app.propertyEditor.form = { ...app.propertyEditor.form, project };
+    app.propertyEditor.persist("workspace-a", "first"); };
+
+  // A person edits, then the card changes under them (409) and the page is reloaded.
+  let app = open("hash-one");
+  edit(app, "my project");
+  app.propertyEditor.conflict = true;
+  app.propertyEditor.persist("workspace-a", "first");
+  const stored = JSON.parse(localStorage.getItem(key));
+
+  // Same version after reload: offered, then restored without a conflict.
+  app = open("hash-one");
+  const offeredSame = Boolean(app.propertyEditor.offer);
+  const untouched = app.propertyEditor.form.project;
+  app.propertyEditor.restoreBackup();
+  const sameRestore = { project: app.propertyEditor.form.project, conflict: app.propertyEditor.conflict,
+    canSave: app.propertyEditor.canApply(app.propertyContext()) };
+
+  // The card moved on: restored with a conflict, and saving stays blocked.
+  app = open("hash-two");
+  const offeredStale = Boolean(app.propertyEditor.offer);
+  app.propertyEditor.restoreBackup();
+  app.propertyEditor.persist("workspace-a", "first");
+  const staleRestore = { project: app.propertyEditor.form.project, conflict: app.propertyEditor.conflict,
+    canSave: app.propertyEditor.canApply(app.propertyContext()),
+    base: JSON.parse(localStorage.getItem(key)).baseHash };
+
+  // Reset is an explicit discard.
+  app.propertyEditor.discard(app.selected, app.taskDefaults);
+  const afterReset = { stored: localStorage.getItem(key), project: app.propertyEditor.form.project };
+  app = open("hash-two");
+  const offeredAfterReset = Boolean(app.propertyEditor.offer);
+
+  // Dismiss clears it too.
+  edit(app, "again");
+  app = open("hash-two");
+  app.propertyEditor.dismissBackup("first");
+  const afterDismiss = { offer: app.propertyEditor.offer, stored: localStorage.getItem(key) };
+
+  // A successful save clears it.
+  app = open("hash-two");
+  edit(app, "saved project");
+  app.apiPost = async () => ({ ok: true });
+  await app.propertyEditor.apply(app.propertyContext());
+  const afterSave = localStorage.getItem(key);
+
+  // Blocked storage never breaks editing.
+  localStorage.failRead = true; localStorage.failWrite = true;
+  app = open("hash-two");
+  edit(app, "no storage");
+  const blocked = app.propertyEditor.form.project;
+  localStorage.failRead = false; localStorage.failWrite = false;
+  console.log(JSON.stringify({ stored, offeredSame, untouched, sameRestore, offeredStale, staleRestore, afterReset,
+    offeredAfterReset, afterDismiss, afterSave, blocked }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["stored"], {"fields": {"project": "my project"}, "baseHash": "hash-one"})
+        self.assertTrue(result["offeredSame"])
+        self.assertEqual(result["untouched"], "before")
+        self.assertEqual(result["sameRestore"], {"project": "my project", "conflict": False, "canSave": True})
+        self.assertTrue(result["offeredStale"])
+        self.assertEqual(result["staleRestore"], {"project": "my project", "conflict": True, "canSave": False,
+                                                   "base": "hash-one"})
+        self.assertEqual(result["afterReset"], {"stored": None, "project": "before"})
+        self.assertFalse(result["offeredAfterReset"])
+        self.assertEqual(result["afterDismiss"], {"offer": None, "stored": None})
+        self.assertIsNone(result["afterSave"])
+        self.assertEqual(result["blocked"], "no storage")
+
+    MEMBER_SETUP = r"""
+const first = { id: "first", title: "First", ref: "@first", kind: "task", status: "active", priority: "none", type: "task",
+  project: "before", topic: "topic", tags: [], due: null, due_kind: null, content_hash: "hash-one", body: "original" };
+const sessionValues = new Map();
+global.sessionStorage = { getItem: key => sessionValues.has(key) ? sessionValues.get(key) : null,
+  setItem: (key, value) => sessionValues.set(key, value), removeItem: key => sessionValues.delete(key) };
+const requests = [];
+const answer = (body, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body), json: async () => body });
+// What the server answers when a page loads: the board for one person, and no saved drafts.
+const loadingAnswers = key => async url => String(url).startsWith("/api/items")
+  ? answer({ tasks: [], collections: {}, meta: { interactive: true, workspace_key: key, api_token: "token" } })
+  : answer({ drafts: [] });
+global.fetch = async (url, options) => { requests.push([String(url), (options && options.method) || "GET"]); return answer({}); };
+const board = () => {
+  const app = taskBoard();
+  app.$nextTick = callback => callback(); app.$refs = { preview: null }; app.renderSelectedPreview = () => {};
+  app.clearHoverCard = () => {}; app.focusInput = () => {};
+  app.taskDefaults = { status: "inbox", priority: "none", type: "task" };
+  app.taskPriorityPolicy = { none: "Unassigned" }; app.taskTypePolicy = { task: "Action" };
+  app.taskDueKindPolicy = { target: "Soft" };
+  app.reloads = 0; app.reloadPage = () => { app.reloads += 1; };
+  return app;
+};
+// A page with a dirty property form, a dirty body editor and a capture draft that is waiting for its autosave.
+const dirtyBoard = () => {
+  const app = board();
+  app.tasks = [first];
+  app.showCard(first);
+  app.propertyEditor.form = { ...app.propertyEditor.form, project: "my project" };
+  app.contentEditor.begin(app.contentContext());
+  app.contentEditor.text = "my body";
+  app.beginNewCapture();
+  app.captureComposer.draft.title = "My capture";
+  app.captureComposer.draft.body = "capture text";
+  app.captureComposer.draft.taskOptions.project = "capture project";
+  app.captureComposer.persist(app.captureContext());
+  return app;
+};
+const storageKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).sort();
+const nextMember = { tasks: [{ id: "theirs", title: "Theirs", kind: "task", status: "active" }],
+  drafts: [{ id: "their-draft", title: "Not mine" }], meta: { interactive: true, workspace_key: "workspace-b", api_token: "token-b" } };
+"""
+
+    def test_a_payload_for_another_member_keeps_unsaved_work_and_reloads_without_applying_it(self) -> None:
+        result = self.run_node(self.MEMBER_SETUP + r"""
+(async () => {
+  const app = dirtyBoard();
+  const draftId = app.captureComposer.draft.id;
+  const stateBefore = app.captureComposer.draft.state;
+  const unsavedBefore = app.hasUnsavedChanges();
+  app.applyPayload(nextMember);
+  app.refreshDerivedLists(nextMember.meta);
+  await new Promise(resolve => setTimeout(resolve, 700));
+  console.log(JSON.stringify({
+    reloads: app.reloads, taskIds: app.tasks.map(task => task.id), drafts: app.drafts.map(draft => draft.id), draftId,
+    workspaceKey: app.workspaceKey, apiToken: app.apiToken, stateBefore, unsavedBefore, unsavedAfter: app.hasUnsavedChanges(),
+    keys: storageKeys(),
+    props: JSON.parse(localStorage.getItem("mt-unsaved-props:workspace-a:first")),
+    body: JSON.parse(localStorage.getItem("mt-unsaved:workspace-a:first")),
+    capture: JSON.parse(localStorage.getItem("mt-unsaved-capture:workspace-a")),
+    requests, flag: sessionValues.get("mt-member-changed"),
+  }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["reloads"], 1)
+        self.assertEqual(result["taskIds"], ["first"])
+        self.assertNotIn("their-draft", result["drafts"])
+        self.assertEqual((result["workspaceKey"], result["apiToken"]), ("workspace-a", "token"))
+        self.assertTrue(result["unsavedBefore"])
+        self.assertFalse(result["unsavedAfter"])
+        self.assertEqual(result["keys"], ["mt-unsaved-capture:workspace-a", "mt-unsaved-props:workspace-a:first",
+                                          "mt-unsaved:workspace-a:first"])
+        self.assertEqual(result["props"]["fields"], {"project": "my project"})
+        self.assertEqual(result["body"]["text"], "my body")
+        capture = result["capture"]
+        self.assertEqual((capture["title"], capture["body"], capture["kind"], capture["id"]),
+                         ("My capture", "capture text", "task", result["draftId"]))
+        self.assertEqual(capture["capture_id"], result["draftId"])
+        self.assertEqual(capture["taskOptions"]["project"], "capture project")
+        self.assertTrue(capture["created"])
+        self.assertEqual(result["requests"], [], "nothing is sent for the draft after the switch")
+        self.assertEqual(result["flag"], "1")
+
+    def test_the_restart_shows_the_account_notice_once_and_restores_the_capture_draft_for_its_own_key(self) -> None:
+        result = self.run_node(self.MEMBER_SETUP + r"""
+(async () => {
+  dirtyBoard().applyPayload(nextMember);
+  // The page that loads next belongs to workspace-b: nothing of workspace-a's is restored there.
+  global.fetch = loadingAnswers("workspace-b");
+  const other = board(); other.workspaceKey = "workspace-b";
+  await other.loadWorkspace();
+  const restoredForOther = Boolean(other.captureComposer.draft);
+  const otherDraft = other.captureComposer.draft;
+  const notice = other.toast && other.toast.text;
+  const stillStashed = localStorage.getItem("mt-unsaved-capture:workspace-a") !== null;
+  // The previous member signs in again: their draft comes back as a dirty draft and saves itself.
+  global.fetch = loadingAnswers("workspace-a");
+  const back = board();
+  await back.loadWorkspace();
+  const restored = Boolean(back.captureComposer.draft);
+  const draft = back.captureComposer.draft;
+  const state = { restored, open: back.captureComposer.open, title: draft.title, body: draft.body, kind: draft.kind,
+    state: draft.state, project: draft.taskOptions.project, warning: back.captureComposer.recoveryWarning,
+    listed: back.drafts.map(item => item.id) };
+  global.fetch = async (url, options) => { requests.push([String(url), options.method, JSON.parse(options.body)]);
+    return answer({ saved_draft: { id: draft.id, updated: "now", content_hash: "server-hash" } }); };
+  const stashBeforeSave = localStorage.getItem("mt-unsaved-capture:workspace-a") !== null;
+  await back.getDraftStore().flush(draft);
+  console.log(JSON.stringify({ restoredForOther, otherDraft, notice, stillStashed, state, stashBeforeSave,
+    stashAfterSave: localStorage.getItem("mt-unsaved-capture:workspace-a"),
+    sent: requests.map(request => [request[0], request[2] && request[2].body]),
+    noticeAgain: (() => { const again = board(); again.showMemberChangedNotice(); return again.toast; })() }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertFalse(result["restoredForOther"])
+        self.assertIsNone(result["otherDraft"])
+        self.assertIn("account changed", result["notice"])
+        self.assertTrue(result["stillStashed"])
+        self.assertEqual({key: result["state"][key] for key in ("restored", "open", "title", "body", "kind", "state", "project")},
+                         {"restored": True, "open": True, "title": "My capture", "body": "capture text", "kind": "task",
+                          "state": "dirty", "project": "capture project"})
+        self.assertTrue(result["state"]["warning"])
+        self.assertEqual(len(result["state"]["listed"]), 1)
+        self.assertTrue(result["stashBeforeSave"])
+        self.assertIsNone(result["stashAfterSave"])
+        self.assertEqual(result["sent"], [["/api/draft-save", "capture text"]])
+        self.assertIsNone(result["noticeAgain"])
+
+    def test_a_member_changed_answer_to_any_write_runs_the_same_routine(self) -> None:
+        result = self.run_node(self.MEMBER_SETUP + r"""
+(async () => {
+  const unloads = [];
+  window.addEventListener = (type, handler) => { if (type === "beforeunload") unloads.push(handler); };
+  global.fetch = async (url, options) => {
+    requests.push([String(url), (options && options.method) || "GET"]);
+    if (String(url).startsWith("/api/items")) return answer({ tasks: [first], collections: {}, meta });
+    if (String(url) === "/api/drafts") return answer({ drafts: [] });
+    return answer({ error: "The signed-in account changed. Reload the page.", member_changed: true }, 409);
+  };
+  const app = board();
+  app.getDraftStore().load = async () => {};
+  await app.init();
+  app.showCard(first);
+  app.propertyEditor.form = { ...app.propertyEditor.form, project: "my project" };
+  app.beginNewCapture();
+  app.captureComposer.draft.body = "capture text";
+  app.captureComposer.persist(app.captureContext());
+  // The autosave is answered with member_changed: the text is kept, not marked as a conflict.
+  const draft = app.captureComposer.draft;
+  await app.getDraftStore().flush(draft);
+  const afterDraft = { state: draft.state, reloads: app.reloads, warning: app.captureComposer.recoveryWarning };
+  const event = { preventDefault() { this.prevented = true; } };
+  unloads.forEach(handler => handler(event));
+  const promptBlocked = Boolean(event.prevented);
+  const result = await postJson("/api/comment", {}, "token");
+  console.log(JSON.stringify({ afterDraft, promptBlocked, result: { ok: result.ok, conflict: result.conflict, memberChanged: result.memberChanged },
+    reloads: app.reloads, keys: storageKeys().filter(key => key.startsWith("mt-unsaved")), body: JSON.parse(localStorage.getItem("mt-unsaved-capture:workspace-a")).body }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["afterDraft"]["state"], "dirty")
+        self.assertEqual(result["afterDraft"]["reloads"], 1)
+        self.assertFalse(result["afterDraft"]["warning"])
+        self.assertFalse(result["promptBlocked"])
+        self.assertEqual(result["result"], {"ok": False, "conflict": False, "memberChanged": True})
+        self.assertEqual(result["reloads"], 1, "the routine runs once")
+        self.assertEqual(result["keys"], ["mt-unsaved-capture:workspace-a", "mt-unsaved-props:workspace-a:first"])
+        self.assertEqual(result["body"], "capture text")
+
+    def test_a_second_restart_within_seconds_stops_instead_of_looping(self) -> None:
+        result = self.run_node(self.MEMBER_SETUP + r"""
+const first_app = board();
+first_app.leaveForOtherMember();
+// The reloaded page is answered for another member again at once.
+const app = dirtyBoard();
+app.leaveForOtherMember();
+const looped = { reloads: app.reloads, blocked: app.memberChanging, title: document.title };
+app.refreshItems();
+app.apiPost("/api/comment", {});
+// Long after, a real switch restarts the page again.
+sessionValues.set("mt-member-reloaded-at", String(Date.now() - 60000));
+const later = board();
+later.leaveForOtherMember();
+console.log(JSON.stringify({ first: first_app.reloads, looped, later: later.reloads, requests }));
+""")
+        self.assertEqual(result["first"], 1)
+        self.assertEqual(result["looped"]["reloads"], 0)
+        self.assertEqual(result["looped"]["title"], "MicroTask")
+        self.assertEqual(result["requests"], [])
+        self.assertTrue(result["looped"]["blocked"])
+        self.assertEqual(result["later"], 1)
+
+    def test_an_upload_refused_for_a_changed_account_runs_the_routine_after_removing_its_placeholder(self) -> None:
+        result = self.run_node(self.MEMBER_SETUP + r"""
+(async () => {
+  const app = board();
+  setMemberChangeHandler(() => app.leaveForOtherMember());
+  app.beginNewCapture();
+  global.fetch = async () => answer({ error: "The signed-in account changed. Reload the page.", member_changed: true }, 409);
+  const draft = app.captureComposer.draft;
+  draft.body = "before ";
+  await uploadAndInsertAttachments({ files: [{ name: "a.png", type: "image/png" }], textarea: null,
+    getText: () => draft.body, setText: text => { draft.body = text; }, apiToken: "token", notify: () => {}, nextTick: null });
+  console.log(JSON.stringify({ reloads: app.reloads, body: draft.body,
+    stashed: JSON.parse(localStorage.getItem("mt-unsaved-capture:workspace-a") || "null") }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertEqual(result["reloads"], 1)
+        self.assertEqual(result["body"], "before \n")
+        self.assertEqual(result["stashed"]["body"], "before \n")
+
     def test_meeting_template_guard_requires_content(self) -> None:
         result = self.run_node(r"""
 const makeApp=()=>{const app=taskBoard();app.$nextTick=()=>{};app.$refs={};app.scheduleDraftSave=()=>{};return app;};

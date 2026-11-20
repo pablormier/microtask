@@ -224,7 +224,7 @@
               </section>
               <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }">
                 <header class="mt-properties-header"><h3>Properties</h3></header>
-                <form class="mt-properties-form" id="mt-properties-form" @submit.prevent="contentEditor.open && contentEditor.zen ? contentEditor.save(contentContext()) : propertyEditor.apply(propertyContext())">
+                <form class="mt-properties-form" id="mt-properties-form" x-effect="propertyEditor.persist(workspaceKey, selected?.id)" @submit.prevent="contentEditor.open && contentEditor.zen ? contentEditor.save(contentContext()) : propertyEditor.apply(propertyContext())">
                   <!-- Keyed by card so the shared editor re-initializes for each card's kind and values. -->
                   <template x-for="cardId in [selected?.id]" :key="cardId">
                     <div x-data="cardMetadataEditor(propertyEditor.form, false, 'drawer', cardMetadataConfig(), propertyEditor.errors, selected?.kind)"
@@ -233,11 +233,16 @@
                       {card_metadata_editor}
                     </div>
                   </template>
+                  <div class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.offer">
+                    <span>Restore unsaved property changes from your last visit?</span>
+                    <button type="button" class="mt-button mt-button-compact mt-button-primary" @click="propertyEditor.restoreBackup()">Restore</button>
+                    <button type="button" class="mt-button mt-button-compact" @click="propertyEditor.dismissBackup(selected?.id)">Dismiss</button>
+                  </div>
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.conflict">This card changed while you were editing. Your changes are kept here. Reset to load the latest properties.</p>
                   <p class="mt-composer-recovery-warning" role="status" x-show="propertyEditor.error" x-text="propertyEditor.error"></p>
                   <footer class="mt-properties-footer" x-show="propertyEditor.changed()">
                     <span class="mt-unsaved-indicator" role="status" x-text="contentEditor.open && contentEditor.zen ? 'Saved with Save content' : (contentEditor.open ? 'Save or close the content editor first' : 'Unsaved changes')"></span>
-                    <button type="button" class="mt-button" @click="propertyEditor.begin(selected, taskDefaults)" :disabled="busy || draftBusy">Reset</button>
+                    <button type="button" class="mt-button" @click="propertyEditor.discard(selected, taskDefaults)" :disabled="busy || draftBusy">Reset</button>
                     <button type="submit" class="mt-button mt-button-primary" x-show="!(contentEditor.open && contentEditor.zen)" :disabled="!propertyEditor.canApply(propertyContext())" :aria-busy="busy || propertyEditor.saving">Save changes</button>
                   </footer>
                 </form>

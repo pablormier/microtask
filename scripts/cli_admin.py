@@ -672,6 +672,14 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         command.extend(["--port", str(args.port)])
     for name in getattr(args, "allow_host", None) or []:
         command.extend(["--allow-host", name])
+    if getattr(args, "trust_proxy_user", False):
+        command.append("--trust-proxy-user")
+    for flag, value in (("--proxy-secret-file", getattr(args, "proxy_secret_file", None)),
+                        ("--user-map", getattr(args, "user_map", None))):
+        if value:
+            command.extend([flag, value])
+    for name in getattr(args, "admin", None) or []:
+        command.extend(["--admin", name])
     query = command_query(args, ws=resolved)
     if query is None:
         return 2

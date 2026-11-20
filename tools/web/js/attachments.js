@@ -59,7 +59,12 @@ async function uploadAttachmentFile(apiToken, file, options = {}) {
     } catch (_) {}
   }
   if (!response.ok || !payload.attachment) {
-    throw new Error(payload.error || ("Attachment upload failed (" + response.status + ")"));
+    const error = new Error(payload.error || ("Attachment upload failed (" + response.status + ")"));
+    error.memberChanged = Boolean(payload.member_changed);
+    throw error;
+  }
+  if (payload.history_warning && typeof options.onWarning === "function") {
+    options.onWarning(payload.history_warning);
   }
   return payload.attachment;
 }
@@ -90,7 +95,9 @@ async function uploadAndInsertAttachments({ files, textarea, getText, setText, a
   const uploaded = [];
   for (const { file, placeholder } of entries) {
     try {
-      const attachment = await uploadAttachmentFile(apiToken, file);
+      const attachment = await uploadAttachmentFile(apiToken, file, {
+        onWarning: warning => { if (typeof notify === "function") notify(warning, true); },
+      });
       const current = String(getText() || "");
       if (current.includes(placeholder)) {
         setText(current.replace(placeholder, () => attachment.markdown));
@@ -106,6 +113,8 @@ async function uploadAndInsertAttachments({ files, textarea, getText, setText, a
       if (typeof notify === "function") {
         notify(error && error.message ? error.message : "Attachment upload failed", true);
       }
+      // After the placeholder is gone, so the text kept for the previous account has no stray link.
+      if (error && error.memberChanged && typeof reportMemberChanged === "function") reportMemberChanged();
     }
   }
   return uploaded;

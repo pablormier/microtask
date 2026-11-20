@@ -22,8 +22,9 @@
   <script defer src="{katex_auto_render_js}"></script>
   <style>{dashboard_css}</style>
 </head>
-<body>
-  <div class="mt-app" x-data="taskBoard()" x-cloak>
+<body x-data="taskBoard()" x-cloak>
+  <template x-if="!memberChanging">
+  <div class="mt-app">
 {toolbar}
     <main :aria-busy="loading || queryLoading">
       <p class="mt-load-status" role="status" x-show="loading">Loading workspace…</p>
@@ -64,6 +65,14 @@
       </template>
     </div>
   </div>
+  </template>
+  <template x-if="memberChanging">
+    <main class="mt-load-error" aria-labelledby="mt-account-heading">
+      <h1 id="mt-account-heading">Your signed-in account changed</h1>
+      <p>Sign in to the account you want to use, then reload the workspace.</p>
+      <button type="button" class="mt-button" x-init="$nextTick(() => $el.focus())" @click="reloadPage()">Reload workspace</button>
+    </main>
+  </template>
   <script type="application/json" id="mt-config">{config_json}</script>
   <script nonce="{nonce}">{app_script}</script>
 </body>

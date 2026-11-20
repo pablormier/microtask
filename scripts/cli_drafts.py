@@ -28,7 +28,8 @@ def command_draft_list(args: argparse.Namespace, ws: Workspace | None = None) ->
         if len(excerpt) > 110:
             excerpt = excerpt[:107].rstrip() + "..."
         label = str(draft.get("title") or "").strip() or excerpt[:70] or "Untitled draft"
-        print(f"{draft['id']}  {draft['kind']} {draft['mode']}  {label}")
+        owner = f"  (owner {draft['owner']})" if draft.get("owner") else ""
+        print(f"{draft['id']}  {draft['kind']} {draft['mode']}  {label}{owner}")
     return 0
 
 
@@ -168,6 +169,20 @@ def command_draft_discard(args: argparse.Namespace, ws: Workspace | None = None)
         print(json.dumps({"discarded": True, "id": args.draft_id}, ensure_ascii=False))
     else:
         print("Draft discarded.")
+    return 0
+
+
+def command_draft_assign(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    """Give a draft to a user of a shared workspace; drafts without an owner are hidden from them."""
+    try:
+        draft = draft_store.assign(_ws(ws).root, args.draft_id, args.owner)
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    if args.as_json:
+        print(json.dumps(draft, ensure_ascii=False))
+    else:
+        print(f"Draft {draft['id']} now belongs to {args.owner}.")
     return 0
 
 

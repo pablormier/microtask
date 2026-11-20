@@ -7,6 +7,8 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
   const timers = Object.create(null);
   const pendingSaves = Object.create(null);
   const resave = Object.create(null);
+  // Set when the page is about to restart for another signed-in person: nothing more is sent.
+  let suspended = false;
   const CONFLICT_MESSAGE = "This draft changed since you opened it. Copy your text or save as a new draft.";
 
   function setStatus(value) {
@@ -70,10 +72,22 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
       return saved;
     },
 
+    // Stops every pending and future save. The text stays in the draft objects for the caller to keep.
+    suspend() {
+      suspended = true;
+      for (const key of Object.keys(timers)) clearTimer(key);
+    },
+
     async post(path, body) {
+      if (suspended) {
+        const error = new Error("The signed-in account changed. Reload the page.");
+        error.memberChanged = true;
+        throw error;
+      }
       const result = await postJson(path, body, context().apiToken);
       if (!result.ok) {
         const error = new Error(result.error || "Draft action failed");
+        error.memberChanged = result.memberChanged;
         error.conflict = result.conflict;
         error.missing = result.missing;
         throw error;
@@ -177,7 +191,7 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
     },
 
     schedule(draft, delay = 450) {
-      if (!editable(draft) || this.isEmpty(draft) || !this.hasChanges(draft)) return;
+      if (suspended || !editable(draft) || this.isEmpty(draft) || !this.hasChanges(draft)) return;
       draft.state = "dirty";
       const key = String(draft.id);
       clearTimer(key);
@@ -215,7 +229,7 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
     },
 
     async send(draft) {
-      if (this.isEmpty(draft)) return false;
+      if (suspended || this.isEmpty(draft)) return false;
       draft.state = "saving";
       const payload = buildSavePayload(draft, {
         id: draft.id,
@@ -235,7 +249,10 @@ function createDraftStore({ context, captureFields, initialDrafts = [],
         onSaved(draft);
         return true;
       } catch (error) {
-        if (error.conflict || error.missing) {
+        if (error.memberChanged) {
+          // Not a conflict and not a failed save: the text is kept for the page restart.
+          draft.state = "dirty";
+        } else if (error.conflict || error.missing) {
           markConflict(draft);
         } else {
           draft.state = "dirty";

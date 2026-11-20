@@ -1,4 +1,7 @@
 const MT_CONFIG = JSON.parse(document.getElementById("mt-config").textContent);
+const MEMBER_CHANGED_FLAG = "mt-member-changed";
+const MEMBER_RELOADED_AT = "mt-member-reloaded-at";
+const MEMBER_RELOAD_WINDOW_MS = 15000;
 
 
 
@@ -50,6 +53,8 @@ function taskBoard() {
 
     apiToken: MT_CONFIG.api_token || "",
     workspaceKey: MT_CONFIG.workspace_key || "",
+    memberChanging: false,
+    restoredStashId: "",
     demo: false,
     showYearProgress: true,
     showDeadlineProgress: true,
@@ -181,7 +186,9 @@ function taskBoard() {
       }
       this.updatePageTitle();
       window.addEventListener("scroll", () => this.clearHoverCard(), { passive: true, capture: true });
-      window.addEventListener("keydown", event => this.handleQuickSearchShortcut(event));
+      window.addEventListener("keydown", event => {
+        if (!this.memberChanging) this.handleQuickSearchShortcut(event);
+      });
       window.addEventListener("popstate", () => this.readCardLocation());
       window.addEventListener("hashchange", () => this.readCardLocation());
       window.addEventListener("beforeunload", event => {
@@ -204,6 +211,7 @@ function taskBoard() {
       window.addEventListener("focus", refreshVisibleBoard);
       document.addEventListener("visibilitychange", refreshVisibleBoard);
       setInterval(refreshVisibleBoard, 60000);
+      if (typeof setMemberChangeHandler === "function") setMemberChangeHandler(() => this.leaveForOtherMember());
       return this.loadWorkspace();
     },
 
@@ -216,6 +224,8 @@ function taskBoard() {
         await this.refreshItems();
         await this.loadWorkspaceDrafts();
         this.ready = true;
+        this.showMemberChangedNotice();
+        this.restoreCaptureStash();
         this.$nextTick(() => {
           this.readCardLocation();
           const action = this.readyAction;
@@ -232,7 +242,9 @@ function taskBoard() {
 
     updatePageTitle() {
       if (typeof document === "undefined") return;
-      if (this.selected && this.selected.title) {
+      if (this.memberChanging) {
+        document.title = "MicroTask";
+      } else if (this.selected && this.selected.title) {
         document.title = this.selected.title + " · MicroTask";
       } else if (this.mode && this.mode !== "tasks") {
         const label = this.viewLabel(this.mode) || (this.mode.charAt(0).toUpperCase() + this.mode.slice(1));
@@ -413,19 +425,62 @@ function taskBoard() {
     },
 
     hasUnsavedChanges() {
+      // Kept in browser storage already; the restart must not wait for a prompt.
+      if (this.memberChanging) return false;
       if (this.selected && this.propertyEditor.changed()) return true;
       if (this.contentEditor.open && this.contentEditor.text !== this.contentEditor.original) return true;
       return this.captureComposer.hasUnpersisted(this.captureContext());
     },
 
-    refreshDerivedLists(meta) {
-      const incomingWorkspaceKey = meta.workspace_key ? String(meta.workspace_key) : "";
-      if (incomingWorkspaceKey && incomingWorkspaceKey !== this.workspaceKey && this.captureComposer.draft) {
-        this.captureComposer.persist(this.captureContext());
-        this.captureComposer.close(this.captureContext());
-        this.captureComposer.message = "The workspace changed. Your draft is kept with its original workspace; return there to resume it.";
-        this.captureComposer.messageError = true;
+    // A payload names the signed-in person through its workspace key. When that is not the person this
+    // page was loaded for, nothing from it is applied: unsaved work is kept in this browser under the
+    // current key and the page restarts, so that no state of the previous person is left on screen.
+    payloadIsForOtherMember(meta) {
+      if (this.memberChanging) return true;
+      const incoming = meta && meta.workspace_key ? String(meta.workspace_key) : "";
+      if (!incoming || !this.workspaceKey || incoming === this.workspaceKey) return false;
+      this.leaveForOtherMember();
+      return true;
+    },
+
+    leaveForOtherMember() {
+      if (this.memberChanging) return;
+      this.memberChanging = true;
+      this.updatePageTitle();
+      // Each step on its own: a failure in one must not stop the restart or the other saves.
+      for (const step of [() => this.keepEditsForReload(), () => this.stashCaptureDraft(),
+        () => this.getDraftStore().suspend()]) {
+        try { step(); } catch (_) {}
       }
+      // A second restart within a few seconds means the sign-in keeps changing or the page token never
+      // matches. Reloading again would loop, so stop and leave the page blocked with a message instead.
+      let recent = false;
+      try {
+        const last = Number(sessionStorage.getItem(MEMBER_RELOADED_AT) || 0);
+        recent = last > 0 && Date.now() - last < MEMBER_RELOAD_WINDOW_MS;
+        sessionStorage.setItem(MEMBER_RELOADED_AT, String(Date.now()));
+      } catch (_) {}
+      if (recent) return;
+      try { sessionStorage.setItem(MEMBER_CHANGED_FLAG, "1"); } catch (_) {}
+      this.reloadPage();
+    },
+
+    reloadPage() {
+      window.location.reload();
+    },
+
+    showMemberChangedNotice() {
+      let flagged = false;
+      try {
+        flagged = sessionStorage.getItem(MEMBER_CHANGED_FLAG) === "1";
+        if (flagged) sessionStorage.removeItem(MEMBER_CHANGED_FLAG);
+      } catch (_) {}
+      if (flagged) this.notify("The signed-in account changed, so the page was reloaded. Unsaved edits stay in this browser with their account.", true);
+    },
+
+    refreshDerivedLists(meta) {
+      if (this.payloadIsForOtherMember(meta)) return;
+      const incomingWorkspaceKey = meta.workspace_key ? String(meta.workspace_key) : "";
       this.statusLabels = meta.status_labels || this.statusLabels;
       this.viewLabels = meta.view_labels || this.viewLabels;
       this.priorityOrder = meta.priority_order || [];
@@ -450,7 +505,8 @@ function taskBoard() {
       this.showDeadlineProgress = meta.show_deadline_progress !== false;
       this.deadlineProgressStart = meta.deadline_progress_start || "created";
       if (incomingWorkspaceKey) this.workspaceKey = incomingWorkspaceKey;
-      this.apiToken = meta.api_token || this.apiToken;
+      // The write token belongs to the person the page was loaded for; the check above keeps it so.
+      if (!incomingWorkspaceKey || incomingWorkspaceKey === this.workspaceKey) this.apiToken = meta.api_token || this.apiToken;
       this.priorities = meta.priority_order && meta.priority_order.length
         ? meta.priority_order
         : Array.from(new Set(this.tasks.map(t => t.priority).filter(Boolean)));

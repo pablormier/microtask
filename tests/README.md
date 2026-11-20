@@ -34,6 +34,14 @@ from `.mt/time-running`, simultaneous starts and the single-write stop.
 with `--no-systemctl` and local release tags (skipped without bash). The scripts run a clone of this checkout with its uncommitted files laid over it. It checks the files
 they write, the version links, and that a read-only app runs a data-only workspace.
 
+`test_hosted.py` covers a workspace shared through one dashboard (`mt web --trust-proxy-user`): the
+proxy secret and single-identity checks, per-person focus and drafts, comment authors, the
+per-claimant limit on tasks in progress in the CLI, the dashboard and `mt validate`, the
+administrator-only actions, local history for deletes (written under the same hold of the mutation
+lock as the change it records), and stale-edit conflicts. It starts the
+server in-process on a workspace made with `mt init --data` and sends the proxy headers itself.
+The deploy tests also cover `deploy/add-shared.sh`, including `--add` and `--remove`.
+
 `tests/support.py` provides shared CLI execution (`run_cli`) and a deterministic
 `FakeClock` so time-tracking tests avoid wall-clock sleeps. `test_operations_api.py`
 tests core write operations and typed errors directly against a data-only

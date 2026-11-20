@@ -1,0 +1,43 @@
+# Site for the shared workspace @NAME@. Everyone on the allowlist may use it.
+# Rendered by deploy/add-shared.sh. Placeholders are @NAME@, @HOST@, @PORT@, @EMAIL_PATTERN@, @SECRET@.
+# This file holds the secret that tells the dashboard a request came through Caddy. Keep it readable
+# by root and the caddy group only.
+@HOST@ {
+	route {
+		# Remove anything the client sent in the headers that oauth2-proxy and this site set.
+		request_header -X-Auth-Request-User
+		request_header -X-Auth-Request-Email
+		request_header -X-Auth-Request-Preferred-Username
+		request_header -X-Auth-Request-Groups
+		request_header -X-Auth-Request-Access-Token
+		request_header -X-Microtask-Proxy-Secret
+
+		# Sign-in pages and the sign-out endpoint live on every host.
+		reverse_proxy /oauth2/* 127.0.0.1:4180 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Uri {uri}
+		}
+
+		# Ask oauth2-proxy whether the browser is signed in.
+		forward_auth 127.0.0.1:4180 {
+			uri /oauth2/auth
+			header_up X-Real-IP {remote_host}
+			copy_headers X-Auth-Request-Email
+
+			@unauthenticated status 401
+			handle_response @unauthenticated {
+				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+			}
+		}
+
+		# Signed in with an address that is not on this workspace's allowlist.
+		@not_allowed {
+			not header_regexp X-Auth-Request-Email `@EMAIL_PATTERN@`
+		}
+		respond @not_allowed "Forbidden" 403
+
+		# The dashboard trusts X-Auth-Request-Email only together with this secret.
+		request_header X-Microtask-Proxy-Secret "@SECRET@"
+		reverse_proxy 127.0.0.1:@PORT@
+	}
+}

@@ -176,8 +176,8 @@ To let agents in another project track their work here, run
 - [Card files](docs/cards.md): the file format and scripted edits
 - [Install, sync, and updates](docs/sync-and-updates.md)
 - [Using microtask from your phone](docs/mobile.md)
-- [Hosting dashboards on a server](docs/hosting.md): a dashboard per person on
-  a Linux server, behind a sign-in
+- [Hosting dashboards on a server](docs/hosting.md): a dashboard per person, or
+  one shared workspace for a team, on a Linux server behind a sign-in
 - `mt help` and `mt COMMAND --help`: every command and option
 
 To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md) and the

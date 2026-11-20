@@ -180,6 +180,7 @@ function renderPropertyPanels(task, el) {
       const at = comment && comment.at || "";
       return '<article class="mt-comment-entry"><time datetime="' + escapeHtml(at) + '" title="' + escapeHtml(at) + '">' +
         escapeHtml(at ? formatCardDate(at) : "") + "</time>" +
+        (comment && typeof comment.by === "string" && comment.by ? '<span class="mt-comment-author">' + escapeHtml(comment.by) + "</span>" : "") +
         '<div class="mt-comment-body">' + renderMarkdown(task, referenceSource(task, "comments", value, spans[index])) + "</div></article>";
     }).join("");
     sections.push('<details class="mt-history-panel"><summary>Comments (' + comments.length +

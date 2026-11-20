@@ -44,6 +44,7 @@ from cli_cards import (
     parse_edit_tags,
 )
 from cli_drafts import (
+    command_draft_assign,
     command_draft_create,
     command_draft_discard,
     command_draft_edit,
@@ -204,7 +205,7 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
         description="Create a temporary workspace seeded with bundled example cards and open the local "
                     "web dashboard. All changes are deleted when you stop the server.",
     )
-    add_web_arguments(demo)
+    add_web_arguments(demo, shared=False)
     demo.set_defaults(func=command_demo)
 
     imported = sub.add_parser("import-github", help="capture open labeled GitHub issues for later review")
@@ -244,6 +245,14 @@ def _register_draft_parsers(sub: argparse._SubParsersAction) -> None:
     draft_discard.add_argument("--expected-hash", help="refuse if the draft changed since it was read")
     draft_discard.add_argument("--json", dest="as_json", action="store_true", help="print a JSON receipt")
     draft_discard.set_defaults(func=command_draft_discard)
+    draft_assign = draft_sub.add_parser(
+        "assign", help="give a draft to a user of a shared workspace",
+        description="Set the owner of a draft. In a shared workspace (mt web --trust-proxy-user) people see only "
+                    "their own drafts, so a draft with no owner is hidden from everyone until it is assigned.")
+    draft_assign.add_argument("draft_id")
+    draft_assign.add_argument("owner", metavar="USER", help="the user name from the sign-in email, such as alice")
+    draft_assign.add_argument("--json", dest="as_json", action="store_true", help="print the updated draft as JSON")
+    draft_assign.set_defaults(func=command_draft_assign)
     draft_save = draft_sub.add_parser("save", help="create the card represented by a draft")
     draft_save.add_argument("draft_id")
     draft_save.add_argument("--expected-hash", required=True, help="content hash returned by draft read/list")
@@ -622,6 +631,8 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
         "-m", "--message", dest="comments", action="append", required=True,
         help="comment text; may be repeated",
     )
+    comment.add_argument("--by", metavar="USERNAME",
+                         help="record this name as the comment's author; without it the comment has no author")
     add_match_mode_arguments(comment)
     comment.add_argument("--json", dest="as_json", action="store_true", help="return the updated card receipt as JSON")
     comment.set_defaults(func=command_comment)

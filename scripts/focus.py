@@ -86,11 +86,13 @@ def followup_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, int, 
     return due_group, due or "9999-12-31T23:59:59", rank.get(priority, len(rank)), task.path.name
 
 
-def focus_context(tasks: list[Card], *, actor: str | None = None, ws: Workspace | None = None) -> dict:
+def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: str | None = None,
+                  ws: Workspace | None = None) -> dict:
     """One read-only focus snapshot for the CLI, dashboard, and skills.
 
     Callers select visibility and workspace filters before calling this function.
     Saved selection never suppresses alerts or changes the candidate order.
+    focus_user names the person whose saved selection is read in a shared workspace.
     """
     resolved = _ws(ws)
     import store
@@ -108,7 +110,7 @@ def focus_context(tasks: list[Card], *, actor: str | None = None, ws: Workspace 
                 "reason": FOCUS_REASONS[reason_key]}
 
     candidates = [record(task, reason) for task, reason in ranked_focus_candidates(available, rank)]
-    state = read_focus_state(resolved)
+    state = read_focus_state(resolved, focus_user)
     selected = next((item for item in candidates if state and item["id"] == state.task_id), None)
     mode = state.mode if selected and state else "auto"
     if selected:
