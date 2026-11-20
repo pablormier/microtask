@@ -71,7 +71,8 @@
 .mt-menu-label { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .mt-menu-label:not(:first-child) { margin-top: 6px; }
 /* Running timers: a labelled count in the actions, opening a list of each timer's card. */
-.mt-timers-menu > summary.mt-menu-trigger { gap: 6px; width: auto; height: var(--mt-control-size); padding-inline: 10px; font-weight: 600; }
+/* The trigger is a <summary>, so it repeats .mt-button's type and spacing to match Search and Filters. */
+.mt-timers-menu > summary.mt-menu-trigger { gap: 6px; width: auto; height: var(--mt-control-size); padding: var(--mt-space-1) var(--mt-space-3); font-size: var(--mt-font-size-sm); font-weight: 600; line-height: 1.2; white-space: nowrap; }
 .mt-timers-menu-items { gap: 2px; width: min(22rem, calc(100vw - 24px)); padding: 8px; }
 .mt-timers-item { display: grid; gap: 2px; padding: 6px 8px; border-radius: var(--mt-radius-md); color: var(--mt-text); text-decoration: none; }
 .mt-timers-item:hover { background: var(--mt-surface-hover); }
