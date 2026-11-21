@@ -82,6 +82,8 @@ paragraph.
 After presenting the report, ask whether the user wants any adjustments (or
 wants omitted personal topics included) and whether to save the summary as a
 Note:
+- Title the proposed Note `Weekly summary: YYYY-MM-DD to YYYY-MM-DD`, using
+  the first and last dates covered by the report.
 - Reuse an existing weekly/report topic from `mt topic list --paths` if one
   exists (such as a `.../weekly` topic), or suggest a `weekly` subtopic under
   the active scope.
