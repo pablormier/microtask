@@ -1,0 +1,17 @@
+{
+	admin off
+}
+
+:8080 {
+	basic_auth {
+		# Both fixture accounts use the password microtask.
+		alice $2a$06$hS2u8OeQJ0f9ywATOMllLO.4hulj6sMZ9YfZvEJrFqrKSX7kV9eeW
+		bob $2a$06$tCT5GQTA9cLg81RPez8l0eZhLU7v8AttGqCs3V.2SD0wIq0u040J2
+	}
+	reverse_proxy shared:8000 {
+		header_up Host {upstream_hostport}
+		header_up -Authorization
+		header_up X-Auth-Request-Email {http.auth.user.id}@example.test
+		header_up X-Microtask-Proxy-Secret {$MT_PROXY_SECRET}
+	}
+}

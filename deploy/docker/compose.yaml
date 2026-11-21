@@ -1,0 +1,44 @@
+name: microtask-shared-test
+
+x-proxy-secret: &proxy-secret microtask-local-fixture-secret
+
+services:
+  shared:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    init: true
+    environment:
+      MT_PROXY_SECRET: *proxy-secret
+      MT_ADMINS: alice
+      MT_TEST_WORKSPACE: ${MT_TEST_WORKSPACE:-demo}
+      GIT_AUTHOR_NAME: Microtask Test
+      GIT_AUTHOR_EMAIL: microtask@example.test
+      GIT_COMMITTER_NAME: Microtask Test
+      GIT_COMMITTER_EMAIL: microtask@example.test
+    volumes:
+      - workspace:/data
+    command:
+      - bash
+      - -ec
+      - |
+        case "$$MT_TEST_WORKSPACE" in
+          demo) PYTHONPATH=/app/scripts python3 seed.py /data/demo ;;
+          team) ./mt init --data /data/team ;;
+          *) echo 'MT_TEST_WORKSPACE must be demo or team' >&2; exit 2 ;;
+        esac
+        exec ./mt -R "/data/$$MT_TEST_WORKSPACE" web --no-open --host 0.0.0.0 --port 8000 --allow-host shared --trust-proxy-user
+
+  proxy:
+    image: caddy:2.10-alpine
+    depends_on:
+      - shared
+    environment:
+      MT_PROXY_SECRET: *proxy-secret
+    ports:
+      - "127.0.0.1:${MT_TEST_PORT:-8080}:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  workspace:

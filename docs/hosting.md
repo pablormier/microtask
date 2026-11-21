@@ -505,7 +505,8 @@ http://127.0.0.1:8101/api/items` on the server answers 403.
 
 ## What this kit does not cover
 
-- Docker or other container setups.
+- Production container hosting. For local shared-workspace testing, see the
+  [Docker Compose setup](../deploy/docker/README.md).
 - Several workspaces in one process, or per-person permissions beyond the
   administrator list. Everyone on the allowlist can read and edit every card
   of a shared workspace.

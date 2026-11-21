@@ -1,0 +1,11 @@
+**
+!mt
+!scripts/**
+!templates/**
+!tools/**
+!.agents/skills/**
+!examples/**
+!deploy/docker/seed.py
+!deploy/docker/smoke.py
+**/__pycache__
+**/.DS_Store

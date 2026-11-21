@@ -14,3 +14,4 @@ guide is in [docs/hosting.md](../docs/hosting.md).
 - `upgrade.sh`: installs a release tag in `/opt/microtask`, checks every
   workspace with it, switches `current` and restarts the services; `--rollback`
   goes back to the previous version
+- [`docker/`](docker/README.md): local Compose stack and smoke test for a shared workspace
