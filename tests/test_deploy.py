@@ -211,7 +211,8 @@ class AddUserScriptTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(secret_file.stat().st_mode), 0o600)
         self.assertEqual((self.root / "etc/mt/team.env").read_text(),
                          "PORT=8101\nHOST_NAME=team.mt.example.com\nMT_ADMINS=alice\n"
-                         "MT_PROXY_SECRET_FILE=/etc/mt/team.secret\n")
+                         "MT_PROXY_SECRET_FILE=/etc/mt/team.secret\n"
+                         "MT_SIGN_OUT_URL=/oauth2/sign_out\n")
         site = (self.root / "etc/caddy/mt-users/team.caddy").read_text()
         self.assertIn("team.mt.example.com {", site)
         self.assertIn("request_header -X-Auth-Request-Email", site)

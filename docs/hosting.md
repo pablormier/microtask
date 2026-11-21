@@ -303,6 +303,13 @@ because settings are workspace data that people can edit in the dashboard:
 | `--proxy-secret-file FILE` | `MT_PROXY_SECRET_FILE` | the secret, at least 16 characters |
 | `--admin USER` (repeatable) | `MT_ADMINS` (comma-separated) | administrators |
 | `--user-map FILE` | `MT_USER_MAP` | email to user name lines |
+| `--sign-out-url URL` | `MT_SIGN_OUT_URL` | optional Sign out link (relative `/...` or `https://...`) |
+
+In shared mode the toolbar shows an account menu with the signed-in user name,
+email address, and an `Admin` badge for administrators. When `--sign-out-url` or
+`MT_SIGN_OUT_URL` is set, the menu includes a **Sign out** link; `add-shared.sh`
+sets `MT_SIGN_OUT_URL=/oauth2/sign_out`. When it is unset (for example behind
+HTTP Basic Auth or a VPN), the menu shows the signed-in identity without a sign-out link.
 
 ### What is per person
 

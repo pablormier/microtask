@@ -79,6 +79,37 @@
 .mt-timers-item:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 0; }
 .mt-timers-item-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .mt-timers-item-meta { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
+/* Shared-workspace account menu: shows who is signed in, and Sign out when configured. */
+.mt-account-menu { flex: 0 0 auto; }
+.mt-account-menu > summary.mt-menu-trigger {
+  gap: 6px;
+  width: auto;
+  height: var(--mt-control-size);
+  padding: var(--mt-space-1) var(--mt-space-3);
+  font-size: var(--mt-font-size-sm);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.mt-account-name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; }
+.mt-account-menu-items { gap: 4px; min-width: 13rem; max-width: min(20rem, calc(100vw - 24px)); padding: 6px; }
+.mt-account-summary { display: grid; gap: 3px; padding: 4px 6px; }
+.mt-account-identity { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mt-account-user { overflow: hidden; color: var(--mt-text); font-size: var(--mt-font-size-sm); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.mt-account-email { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); overflow-wrap: anywhere; }
+.mt-account-actions { margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--mt-border); }
+.mt-account-signout {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--mt-radius-sm);
+  color: var(--mt-text);
+  font-size: var(--mt-font-size-sm);
+  font-weight: 500;
+  text-decoration: none;
+}
+.mt-account-signout:hover { background: var(--mt-surface-hover); color: var(--mt-text); text-decoration: none; }
+.mt-account-signout:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 0; }
 .mt-toolbar-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -158,8 +189,9 @@
   /* Search and Filters show as icons so the actions fit on the brand row. */
   .mt-title-row { flex-wrap: wrap; }
   .mt-toolbar-actions { gap: 6px; }
-  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label, .mt-timers-label { display: none; }
+  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label, .mt-timers-label, .mt-account-name { display: none; }
   .mt-timers-menu > summary.mt-menu-trigger { padding-inline: 6px; }
+  .mt-account-menu > summary.mt-menu-trigger { width: var(--mt-control-size); padding: 0; }
   /* The timers list spans the action row, below it, so it stays on screen. */
   .mt-toolbar-actions { position: relative; }
   .mt-toolbar-actions .mt-timers-menu { position: static; }

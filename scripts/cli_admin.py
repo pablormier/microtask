@@ -675,7 +675,8 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     if getattr(args, "trust_proxy_user", False):
         command.append("--trust-proxy-user")
     for flag, value in (("--proxy-secret-file", getattr(args, "proxy_secret_file", None)),
-                        ("--user-map", getattr(args, "user_map", None))):
+                        ("--user-map", getattr(args, "user_map", None)),
+                        ("--sign-out-url", getattr(args, "sign_out_url", None))):
         if value:
             command.extend([flag, value])
     for name in getattr(args, "admin", None) or []:

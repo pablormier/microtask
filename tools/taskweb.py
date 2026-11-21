@@ -189,7 +189,13 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         return web_hosted.member_token(self.server.token, actor.user)
 
     def hosted_meta(self, actor: web_hosted.Identity | None) -> dict | None:
-        return {"user": actor.user, "admin": actor.admin} if actor is not None else None
+        if actor is None:
+            return None
+        meta: dict = {"user": actor.user, "email": actor.email, "admin": actor.admin}
+        hosted = getattr(self.server, "hosted", None)
+        if hosted is not None and hosted.sign_out_url:
+            meta["sign_out_url"] = hosted.sign_out_url
+        return meta
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -349,7 +355,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         if url.path in ("/", "/index.html"):
             page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.api_token(actor),
-                                                                         actor.user if actor else None))
+                                                                         actor.user if actor else None,
+                                                                         hosted=self.hosted_meta(actor)))
             self.send_html(page, nonce=nonce)
             return
         if url.path == "/api/item":
@@ -549,7 +556,9 @@ def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig 
     secret = web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
                                     environ.get("MT_PROXY_SECRET"))
     admins = web_hosted.parse_admins(*args.admin, environ.get("MT_ADMINS"))
-    return web_hosted.HostedConfig(secret, admins, web_hosted.read_user_map(args.user_map or environ.get("MT_USER_MAP")))
+    sign_out_url = web_hosted.read_sign_out_url(args.sign_out_url or environ.get("MT_SIGN_OUT_URL"))
+    return web_hosted.HostedConfig(secret, admins, web_hosted.read_user_map(args.user_map or environ.get("MT_USER_MAP")),
+                                   sign_out_url=sign_out_url)
 
 
 def main(argv: list[str]) -> int:

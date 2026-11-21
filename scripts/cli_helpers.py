@@ -398,6 +398,9 @@ def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -
         parser.add_argument("--admin", action="append", default=[], metavar="USER",
                             help="user name allowed to delete cards, take over claims and rename topics; "
                                  "repeatable, or set MT_ADMINS to a comma-separated list")
+        parser.add_argument("--sign-out-url", metavar="URL",
+                            help="URL for the dashboard's Sign out link (or set MT_SIGN_OUT_URL), "
+                                 "such as /oauth2/sign_out; omitted when unset")
     card_query.add_query_arguments(parser)
 
 

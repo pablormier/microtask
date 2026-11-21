@@ -604,8 +604,8 @@ claim_path "$secret_file"
 secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 make_file 600 "$secret_file"
 printf '%s\n' "$secret" > "$secret_file"
-printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\n' \
-  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" > "$env_file"
+printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
+  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" "/oauth2/sign_out" > "$env_file"
 
 make_email_pattern
 

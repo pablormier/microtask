@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import secrets
 import sys
+from urllib.parse import urlsplit
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 if str(APP_ROOT / "scripts") not in sys.path:
@@ -115,6 +116,21 @@ def parse_admins(*values: str | None) -> frozenset[str]:
     return frozenset(names)
 
 
+def read_sign_out_url(value: str | None) -> str:
+    """An optional sign-out URL for the dashboard: a relative path ('/...') or an https:// URL."""
+    url = (value or "").strip()
+    if not url:
+        return ""
+    if any(ch.isspace() or ord(ch) < 32 for ch in url):
+        raise ValueError("sign-out URL must not contain whitespace or control characters")
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    parsed = urlsplit(url)
+    if parsed.scheme == "https" and parsed.netloc:
+        return url
+    raise ValueError("sign-out URL must be a relative path starting with '/' (such as /oauth2/sign_out) or an https:// URL")
+
+
 class HostedConfig:
     """Who may use a shared workspace and who administers it. Set once at startup.
 
@@ -122,10 +138,12 @@ class HostedConfig:
     people can change through the app, and the list of who may change them must not be.
     """
 
-    def __init__(self, secret: str, admins: frozenset[str] = frozenset(), user_map: dict[str, str] | None = None):
+    def __init__(self, secret: str, admins: frozenset[str] = frozenset(),
+                 user_map: dict[str, str] | None = None, sign_out_url: str = ""):
         self.secret = secret
         self.admins = admins
         self.user_map = dict(user_map or {})
+        self.sign_out_url = read_sign_out_url(sign_out_url)
 
     def user_for(self, email: str) -> str:
         """The user name for an email: its entry in the user map, otherwise the part before the @."""

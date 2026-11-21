@@ -53,6 +53,7 @@ function taskBoard() {
 
     apiToken: MT_CONFIG.api_token || "",
     workspaceKey: MT_CONFIG.workspace_key || "",
+    hosted: MT_CONFIG.hosted || null,
     memberChanging: false,
     restoredStashId: "",
     demo: false,
@@ -503,6 +504,7 @@ function taskBoard() {
       this.runningTimers = meta.time_running || {};
       this.timerWarnHours = meta.timer_warn_hours || 8;
       this.demo = Boolean(meta.demo);
+      this.hosted = meta.hosted || null;
       this.showYearProgress = meta.show_year_progress !== false;
       this.showDeadlineProgress = meta.show_deadline_progress !== false;
       this.deadlineProgressStart = meta.deadline_progress_start || "created";

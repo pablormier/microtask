@@ -1,8 +1,9 @@
 # Template unit: one dashboard serving one workspace to a group of people. Start it with
 #   systemctl enable --now mt-shared@team
-# It reads /etc/mt/team.env (PORT, HOST_NAME, MT_ADMINS and MT_PROXY_SECRET_FILE) and serves
-# the workspace folder /srv/mt/team with the app in /opt/microtask/current. Caddy tells the
-# dashboard who is signed in; see docs/hosting.md, "Shared workspace".
+# It reads /etc/mt/team.env (PORT, HOST_NAME, MT_ADMINS, MT_PROXY_SECRET_FILE and optional
+# MT_SIGN_OUT_URL) and serves the workspace folder /srv/mt/team with the app in
+# /opt/microtask/current. Caddy tells the dashboard who is signed in; see docs/hosting.md,
+# "Shared workspace".
 [Unit]
 Description=microtask shared dashboard for %i
 After=network.target

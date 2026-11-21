@@ -70,9 +70,9 @@ class SharedWorkspaceCase(unittest.TestCase):
             self.assertEqual(moved.returncode, 0, moved.stderr)
         return card
 
-    def start(self, hosted: bool = True) -> None:
+    def start(self, hosted: bool = True, *, sign_out_url: str = "") -> None:
         self.hosted_server = hosted
-        config = web_hosted.HostedConfig(SECRET, self.admins, self.user_map) if hosted else None
+        config = web_hosted.HostedConfig(SECRET, self.admins, self.user_map, sign_out_url=sign_out_url) if hosted else None
         server = taskweb.TaskWebServer(("127.0.0.1", 0), TOKEN, self.ws, hosted=config)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -199,6 +199,12 @@ class IdentityTests(SharedWorkspaceCase):
             web_hosted.parse_admins("../root")
         with self.assertRaises(ValueError):
             web_hosted.read_secret(value="short")
+        self.assertEqual(web_hosted.read_sign_out_url(None), "")
+        self.assertEqual(web_hosted.read_sign_out_url("  /oauth2/sign_out?rd=/  "), "/oauth2/sign_out?rd=/")
+        self.assertEqual(web_hosted.read_sign_out_url("https://auth.example.org/logout"), "https://auth.example.org/logout")
+        for bad in ("javascript:alert(1)", "//evil.example/out", "http://example.org/out", "oauth2/sign_out", "/out\nnext"):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                web_hosted.read_sign_out_url(bad)
 
     def test_user_map_with_windows_line_endings_has_clean_names(self) -> None:
         path = Path(self.temporary.name) / "crlf.txt"
@@ -266,6 +272,26 @@ class BrowserKeyTests(SharedWorkspaceCase):
         self.assertIn(alice, self.page("alice"))
         self.assertIn(bob, self.page("bob"))
         self.assertNotIn(bob, self.page("alice"))
+
+    def test_hosted_identity_and_sign_out_url_reach_page_and_api(self) -> None:
+        self.start(sign_out_url="/oauth2/sign_out")
+        root_meta = self.items("root")["meta"]["hosted"]
+        self.assertEqual(root_meta, {
+            "user": "root",
+            "email": "root@example.org",
+            "admin": True,
+            "sign_out_url": "/oauth2/sign_out",
+        })
+        alice_meta = self.items("alice")["meta"]["hosted"]
+        self.assertEqual(alice_meta, {
+            "user": "alice",
+            "email": "alice@example.org",
+            "admin": False,
+            "sign_out_url": "/oauth2/sign_out",
+        })
+        page = self.page("root")
+        self.assertIn('"email": "root@example.org"', page)
+        self.assertIn('"sign_out_url": "/oauth2/sign_out"', page)
 
     def test_the_single_user_key_is_unchanged(self) -> None:
         from tools import web_payloads
@@ -384,7 +410,8 @@ class PerPersonStateTests(SharedWorkspaceCase):
         self.assertEqual(self.post("/api/focus", "bob", {"ref": second["ref"]})[0], 200)
         self.assertEqual(self.items("alice")["meta"]["focus"]["selected"]["ref"], first["ref"])
         self.assertEqual(self.items("bob")["meta"]["focus"]["selected"]["ref"], second["ref"])
-        self.assertEqual(self.items("alice")["meta"]["hosted"], {"user": "alice", "admin": False})
+        self.assertEqual(self.items("alice")["meta"]["hosted"],
+                         {"user": "alice", "email": "alice@example.org", "admin": False})
         self.assertEqual(sorted(path.name for path in (self.root / ".mt" / "focus-users").iterdir()), ["alice", "bob"])
         self.assertFalse((self.root / ".mt" / "focus").exists())
         self.assertEqual(self.post("/api/focus-clear", "alice", {})[0], 200)

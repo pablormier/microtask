@@ -38,8 +38,12 @@ def workspace_key(ws: Workspace, user: str | None = None) -> str:
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
-def bootstrap_config(ws: Workspace, token: str, user: str | None = None) -> dict:
-    return {"api_token": token, "workspace_key": workspace_key(ws, user)}
+def bootstrap_config(ws: Workspace, token: str, user: str | None = None, *,
+                     hosted: dict | None = None) -> dict:
+    config: dict = {"api_token": token, "workspace_key": workspace_key(ws, user)}
+    if hosted is not None:
+        config["hosted"] = hosted
+    return config
 
 
 def extract_excerpt(text: str, max_len: int = 180) -> str:

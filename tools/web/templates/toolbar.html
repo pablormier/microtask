@@ -96,6 +96,31 @@
             <span>New</span>
           </button>
         </div>
+        <template x-if="hosted">
+          <details class="mt-card-menu mt-account-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+            <summary class="mt-menu-trigger mt-account-trigger"
+                     :aria-label="'Signed in as ' + hosted.user + (hosted.email ? ' (' + hosted.email + ')' : '')"
+                     :title="hosted.email ? hosted.user + ' (' + hosted.email + ')' : hosted.user">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/></svg>
+              <span class="mt-account-name" x-text="hosted.user"></span>
+            </summary>
+            <div class="mt-card-menu-items mt-account-menu-items">
+              <div class="mt-account-summary">
+                <span class="mt-menu-label">Signed in as</span>
+                <div class="mt-account-identity">
+                  <span class="mt-account-user" x-text="hosted.user"></span>
+                  <span class="mt-badge mt-badge-neutral" x-show="hosted.admin">Admin</span>
+                </div>
+                <span class="mt-account-email" x-show="hosted.email" x-text="hosted.email"></span>
+              </div>
+              <template x-if="hosted.sign_out_url">
+                <div class="mt-account-actions">
+                  <a class="mt-account-signout" :href="hosted.sign_out_url">Sign out</a>
+                </div>
+              </template>
+            </div>
+          </details>
+        </template>
       </div>
       <search id="mt-filters" class="mt-filters" aria-label="Search and filters" x-show="filtersOpen && filtersApply()" x-cloak>
         <label class="mt-filter-search">
