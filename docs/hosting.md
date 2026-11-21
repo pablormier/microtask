@@ -33,7 +33,7 @@ The app and the data are kept apart:
 /opt/microtask/v0.2.1/
 /opt/microtask/current    link to the active version
 /opt/microtask/previous   link to the version before it
-/srv/mt/alice/            alice's workspace folder: cards, settings, Git
+/srv/mt/alice/            alice's workspace folder: cards, settings, local history (Git optional)
 /srv/mt/bob/
 ```
 
@@ -226,8 +226,13 @@ sudo rm -rf /opt/microtask/v0.2.0
 
 ## Backups
 
-Snapshot `/srv/mt` and the files under `/etc` on a schedule. The cards are plain
-files, so any file backup works. For example, with restic:
+Snapshot `/srv/mt` and the files under `/etc` on a schedule. Cards are plain
+files, while each workspace's local history lives in `.mt/history.sqlite`. For
+a consistent backup of cards and history together, take a filesystem snapshot
+(such as ZFS, Btrfs, or LVM) or stop the `mt-web@*` / `mt-shared@*` services
+first. To back up a live history database on its own without stopping writers,
+use SQLite's online backup command (`sqlite3 /srv/mt/NAME/.mt/history.sqlite
+".backup /path/to/history.sqlite"`). For example, with restic:
 
 ```sh
 restic -r /path/to/repo backup /srv/mt /etc/mt /etc/caddy/mt-users /etc/oauth2-proxy
@@ -255,7 +260,7 @@ or delete a removed user's workspace to keep it out of them.
 A team of up to about a hundred people, few of them active at once, can share
 one workspace served by one `mt web` process. Everyone signs in with their own
 account and sees the same cards. The storage does not change: Markdown files,
-file locks and Git.
+file locks, a local SQLite history log, and optional Git for `mt sync`.
 
 ```
 browser --> Caddy (HTTPS, email allowlist, adds the secret) --> mt web on 127.0.0.1:810x
@@ -356,34 +361,29 @@ the workspace.
 
 ### History
 
-A hosted workspace starts with `auto_sync` off and no remote, so Git would
-otherwise hold nothing newer than the first commit. In the shared mode every
-dashboard write is committed to the workspace's local Git history right after it
-succeeds. There is no fetch or push, and no remote is needed. The commit
-message says `Web change by USER`, but the author is the service account, because
-one `mt sync` can later carry several people's changes. Before a delete, takeover
-or topic rename the dashboard also commits whatever is pending, so the card
-exists in history even if it was only ever created from the shell. Draft
-autosaves are not committed until the next card change. No other dashboard write
-can land between a change and its commit, because both happen under one hold of
-the workspace lock. The commit stages every pending workspace path, so it can
-also contain changes that were already waiting, such as edits made from the
-shell or draft autosaves. If a commit fails, only the person who made that change sees a warning, for
-dashboard writes and uploads alike. It is shown together with any sync warning.
-A delete, takeover or topic rename needs its commit before it runs. If that
-commit fails, the dashboard answers 503, changes nothing and says so. Check
-that the service account can write to `/srv/mt/NAME/.git`, that the disk is not
-full and that no stale `index.lock` is left there, then try again.
+A workspace keeps its local audit and revision history in `.mt/history.sqlite`
+(unless `rules.local_history` is `false` in `settings.yaml`). Git is optional
+and is used only for `mt sync`. Every card mutation (from the dashboard or the
+CLI) records the actor, action, source, and compressed before/after card bytes
+under the same workspace lock hold. Attachment uploads record metadata without
+storing binary blobs in SQLite.
 
-To restore a deleted card:
+If a non-destructive history write fails, only the person who made that change
+sees a warning for that single response (shown alongside any sync warning), and
+the card write is preserved. A delete, takeover, or topic rename requires a
+pre-mutation snapshot in `.mt/history.sqlite` before any card file is touched.
+If that snapshot fails, the dashboard answers `503`, changes nothing, and says
+so. Check that the service account can write to `/srv/mt/NAME/.mt/history.sqlite`,
+that the disk is not full, and that permissions on `.mt/` are intact, then try
+again.
+
+To inspect history or restore a deleted or overwritten card:
 
 ```sh
-git -C /srv/mt/NAME log --diff-filter=D --name-only --format='%h %s'
-git -C /srv/mt/NAME checkout COMMIT~1 -- cards/THE-CARD.md
+/opt/microtask/current/mt -R /srv/mt/NAME history --deleted
+/opt/microtask/current/mt -R /srv/mt/NAME history show EVENT_ID --diff
+/opt/microtask/current/mt -R /srv/mt/NAME restore EVENT_ID
 ```
-
-If the service account has no Git identity, the dashboard commits as
-`microtask <microtask@localhost>`.
 
 ### Conflicting edits
 

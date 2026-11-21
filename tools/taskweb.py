@@ -26,6 +26,7 @@ import card_query  # noqa: E402
 import cli_helpers  # noqa: E402
 import cli_parser  # noqa: E402
 import drafts as draft_store  # noqa: E402
+import history  # noqa: E402
 import operations  # noqa: E402, F401
 import store  # noqa: E402
 import transaction  # noqa: E402
@@ -304,16 +305,17 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         history_warning = ""
         try:
             with self.write_scope(ws, actor):
-                result = operations.op_store_attachment(
-                    ws,
-                    raw_bytes,
-                    filename=filename,
-                    content_type=content_type,
-                    by=actor.user if actor else None,
-                    sync=False,
-                )
-                if result.changed and actor is not None:
-                    history_warning = web_hosted.record_history(ws, f"Web upload by {actor.user}")
+                req_actor = actor.user if actor is not None else store.current_username(ws=ws)
+                with history.capture_context(action="upload", actor=req_actor, source="web") as ctx:
+                    result = operations.op_store_attachment(
+                        ws,
+                        raw_bytes,
+                        filename=filename,
+                        content_type=content_type,
+                        by=actor.user if actor else None,
+                        sync=False,
+                    )
+                history_warning = result.history_warning or ctx.warning
         except store.InputError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
@@ -464,16 +466,23 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         history_warning = ""
         with self.write_scope(ws, actor):
-            if actor is not None and actor.admin and path in SNAPSHOT_BEFORE:
-                history_warning = web_hosted.record_history(ws, f"Before {path[len('/api/'):]}")
-                if history_warning:
-                    self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
-                        "error": f"Nothing was changed: the card could not be saved to local history first. {history_warning}"})
-                    return
-            status, payload = handle_api_action(ws, path, body, actor)
+            req_actor = actor.user if actor is not None else store.current_username(ws=ws)
+            require_snapshot = actor is not None and actor.admin and path in SNAPSHOT_BEFORE
+            try:
+                with history.capture_context(
+                    action=path[len("/api/"):],
+                    actor=req_actor,
+                    source="web",
+                    require=require_snapshot,
+                ) as ctx:
+                    status, payload = handle_api_action(ws, path, body, actor)
+                    history_warning = ctx.warning
+            except store.HistoryRequiredError as error:
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                    "error": f"Nothing was changed: the card could not be saved to local history first. {error}",
+                })
+                return
             wrote = path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed"))
-            if wrote and actor is not None:
-                history_warning = web_hosted.record_history(ws, f"Web change by {actor.user}") or history_warning
         if wrote:
             self.server.sync.request(ws)
         if status == HTTPStatus.OK:
@@ -508,8 +517,6 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
                     allow_hosts: Iterable[str] = (), demo: bool = False,
                     hosted: web_hosted.HostedConfig | None = None) -> int:
     token = secrets.token_urlsafe(24)
-    if hosted is not None:
-        web_hosted.use_default_git_identity(workspace)
     try:
         server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted)
     except OSError as error:

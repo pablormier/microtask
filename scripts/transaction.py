@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ import uuid
 import card_format
 from card_format import atomic_write, parse_frontmatter, parse_yaml
 import git_ops
+import history
 import store
 from store import (
     _ws,
@@ -289,6 +291,13 @@ def apply_item_transaction(
         current = path.read_bytes() if path.is_file() else None
         if current != before:
             raise store.StaleCardError(f"item changed before transaction: {relative}")
+    record_history = base == resolved.root
+    ctx = history.current_context()
+    if record_history and ctx is None:
+        ctx = history.HistoryContext(action="write", actor=current_username(ws=resolved), source="cli")
+    precommitted_event_id: int | None = None
+    if record_history and ctx is not None and ctx.require:
+        precommitted_event_id = history.prepare_transaction(resolved, ctx, original, changes, deletions)
     written: set[str] = set()
     try:
         for relative in deletions:
@@ -303,6 +312,7 @@ def apply_item_transaction(
             written.add(relative)
         validate_data_root(base, changes=changes, deletions=deletions, previous=original, ws=resolved)
     except Exception:
+        rollback_ok = True
         for relative in reversed(sorted(written)):
             path = base / relative
             before = original[relative]
@@ -313,16 +323,33 @@ def apply_item_transaction(
                     expected_after = None
                 # Do not overwrite an unexpected concurrent edit while rolling back,
                 # and avoid rewriting files that already match their pre-transaction bytes.
-                if current != expected_after or current == before:
+                if current == before:
+                    continue
+                if current != expected_after:
+                    rollback_ok = False
                     continue
                 if before is None:
                     path.unlink(missing_ok=True)
                 else:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write(path, before)
+                restored = path.read_bytes() if path.is_file() else None
+                if restored != before:
+                    rollback_ok = False
             except OSError:
-                pass
+                rollback_ok = False
+        if precommitted_event_id is not None and rollback_ok:
+            history.delete_event(resolved, precommitted_event_id)
         raise
+    if precommitted_event_id is not None:
+        finalize_warning = history.finalize_event(resolved, precommitted_event_id)
+        if finalize_warning and ctx is not None and not ctx.warning:
+            ctx.warning = finalize_warning
+    elif record_history and ctx is not None and not ctx.require:
+        try:
+            history.record_transaction(resolved, ctx, original, changes, deletions)
+        except (sqlite3.Error, OSError) as error:
+            ctx.warning = f"Local history is unavailable: {error}"
     for warning in warnings or ():
         print(f"WARNING: {warning}", file=sys.stderr)
 
@@ -583,16 +610,6 @@ def _sync_preflight_branch(resolved: Workspace, *, err: TextIO) -> str | None:
         print("error: sync requires a named current branch", file=err)
         return None
     return branch.stdout.strip()
-
-
-def stage_and_commit_local(
-    resolved: Workspace, note: str = "", *, out: TextIO, err: TextIO
-) -> tuple[int | None, bool]:
-    """Commit pending card changes to the local history only: no fetch, no push, no origin needed.
-
-    The caller holds the mutation lock. `note` is added under the usual commit message.
-    """
-    return _sync_stage_and_commit_local(resolved, None, out=out, err=err, note=note)
 
 
 def _sync_stage_and_commit_local(

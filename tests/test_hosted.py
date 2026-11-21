@@ -6,6 +6,8 @@ import http.client
 import json
 import os
 from pathlib import Path
+import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -22,7 +24,10 @@ from tools import taskweb  # noqa: E402
 from tools import web_actions  # noqa: E402
 from tools import web_hosted  # noqa: E402
 import card_format  # noqa: E402
+import history  # noqa: E402
+import transaction  # noqa: E402
 import validation  # noqa: E402
+from workspace import Workspace  # noqa: E402
 
 SECRET = "test-proxy-secret-0123456789"
 TOKEN = "test-token"
@@ -119,6 +124,24 @@ class SharedWorkspaceCase(unittest.TestCase):
 
     def post(self, path: str, user: str, body: dict, **kwargs) -> tuple[int, dict]:
         return self.request("POST", path, body, email=f"{user}@example.org", **kwargs)
+
+    def upload(self, user: str, token: str | None = None) -> tuple[int, dict]:
+        resolved_token = web_hosted.member_token(TOKEN, user) if token is None else token
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            connection.putrequest("POST", "/api/attachments")
+            connection.putheader(web_hosted.SECRET_HEADER, SECRET)
+            connection.putheader(web_hosted.EMAIL_HEADER, f"{user}@example.org")
+            connection.putheader("X-Microtask-Token", resolved_token)
+            connection.putheader("X-Filename", "note.txt")
+            connection.putheader("Content-Type", "text/plain")
+            connection.putheader("Content-Length", "5")
+            connection.endheaders(b"hello")
+            response = connection.getresponse()
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else {}
+        finally:
+            connection.close()
 
     def items(self, user: str) -> dict:
         status, payload = self.get("/api/items", user)
@@ -319,23 +342,6 @@ class MemberTokenTests(SharedWorkspaceCase):
         import re
         return re.search(r'"api_token":\s*"([^"]+)"', page).group(1)
 
-    def upload(self, user: str, token: str) -> tuple[int, dict]:
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        try:
-            connection.putrequest("POST", "/api/attachments")
-            connection.putheader(web_hosted.SECRET_HEADER, SECRET)
-            connection.putheader(web_hosted.EMAIL_HEADER, f"{user}@example.org")
-            connection.putheader("X-Microtask-Token", token)
-            connection.putheader("X-Filename", "note.txt")
-            connection.putheader("Content-Type", "text/plain")
-            connection.putheader("Content-Length", "5")
-            connection.endheaders(b"hello")
-            response = connection.getresponse()
-            raw = response.read()
-            return response.status, json.loads(raw) if raw else {}
-        finally:
-            connection.close()
-
     def stored_attachments(self) -> list[Path]:
         return [path for path in (self.root / "attachments").rglob("*") if path.is_file()]
 
@@ -354,7 +360,7 @@ class MemberTokenTests(SharedWorkspaceCase):
         alice = self.page_token("alice")
         before = self.card_path(card).read_text()
         drafts_before = sorted(path.name for path in (self.root / "drafts").glob("*")) if (self.root / "drafts").exists() else []
-        commits = self.git("rev-list", "--count", "HEAD")
+        events_before = len(history.list_events(Workspace.at(self.root), limit=100))
         attempts = (
             ("/api/comment", {"ref": card["ref"], "message": "as bob?"}),
             ("/api/draft-save", {"kind": "note", "title": "Idea", "body": "text", "capture_id": str(uuid.uuid4()),
@@ -372,7 +378,7 @@ class MemberTokenTests(SharedWorkspaceCase):
         after = sorted(path.name for path in (self.root / "drafts").glob("*")) if (self.root / "drafts").exists() else []
         self.assertEqual(after, drafts_before)
         self.assertEqual(self.stored_attachments(), [])
-        self.assertEqual(self.git("rev-list", "--count", "HEAD"), commits)
+        self.assertEqual(len(history.list_events(Workspace.at(self.root), limit=100)), events_before)
 
     def test_a_person_writes_with_their_own_token(self) -> None:
         card = self.add_task("Shared card")
@@ -652,100 +658,97 @@ class AdminTests(SharedWorkspaceCase):
 
 class HistoryAndConflictTests(SharedWorkspaceCase):
     def test_a_deleted_card_can_be_restored_from_local_history(self) -> None:
-        # A card made from the shell and never committed is still saved before it is deleted.
+        # A card made from the shell is still saved in .mt/history.sqlite before it is deleted, even without Git.
         card = self.add_task("Keep a copy")
         original = self.card_path(card).read_text()
-        self.assertEqual(subprocess.run(["git", "-C", str(self.root), "remote"], capture_output=True, text=True).stdout, "")
+        shutil.rmtree(self.root / ".git")
         self.start()
         task = next(item for item in self.items("root")["tasks"] if item["ref"] == card["ref"])
         status, payload = self.post("/api/delete", "root", {"ref": card["ref"], "expected_hash": task["content_hash"]})
         self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["sync_warning"], "")
         self.assertFalse(self.card_path(card).exists())
-        self.assertEqual(self.git("show", f"HEAD~1:{card['path']}"), original)
-        self.assertIn(card["path"], self.git("log", "--diff-filter=D", "--name-only", "--format=%s"))
-        self.assertEqual(self.git("status", "--porcelain"), "")
-        self.assertIn("Web change by root", self.git("log", "-1", "--format=%B"))
-        self.git("checkout", "HEAD~1", "--", card["path"])
+        listed = self.mt("history", "--deleted", "--json")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        events = json.loads(listed.stdout)
+        delete_event = next(ev for ev in events if ev["action"] == "delete" and any(r["path"] == card["path"] for r in ev["revisions"]))
+        restored = self.mt("restore", str(delete_event["id"]))
+        self.assertEqual(restored.returncode, 0, restored.stderr)
         self.assertEqual(self.card_path(card).read_text(), original)
 
-    def test_each_web_write_is_one_local_commit_without_a_person_as_author(self) -> None:
+    def test_each_web_write_is_one_local_history_event(self) -> None:
         card = self.add_task("Watch history")
         self.start()
-        before = int(self.git("rev-list", "--count", "HEAD"))
+        ws = Workspace.at(self.root)
+        before = len(history.list_events(ws, limit=100))
         self.assertEqual(self.post("/api/comment", "alice", {"ref": card["ref"], "message": "one"})[0], 200)
         self.assertEqual(self.post("/api/comment", "bob", {"ref": card["ref"], "message": "two"})[0], 200)
-        self.assertEqual(int(self.git("rev-list", "--count", "HEAD")), before + 2)
-        self.assertEqual(self.git("log", "-2", "--format=%an").split(), ["t", "t"])
-        # Draft autosaves are not commits.
+        events = history.list_events(ws, limit=100)
+        self.assertEqual(len(events), before + 2)
+        self.assertEqual([(events[0]["actor"], events[0]["source"], events[0]["action"]),
+                          (events[1]["actor"], events[1]["source"], events[1]["action"])],
+                         [("bob", "web", "comment"), ("alice", "web", "comment")])
+        # Draft autosaves are not history events.
         self.draft("alice", "x")
-        self.assertEqual(int(self.git("rev-list", "--count", "HEAD")), before + 2)
+        self.assertEqual(len(history.list_events(ws, limit=100)), before + 2)
 
-    def test_a_write_and_its_commit_happen_under_one_hold_of_the_lock(self) -> None:
+    def test_a_write_and_its_history_record_happen_under_one_hold_of_the_lock(self) -> None:
         card = self.add_task("Shared lock")
         self.start()
-        real_status = web_hosted.git_ops.workspace_status
-        real_commit = web_hosted.transaction.stage_and_commit_local
+        real_record = history.record_transaction
         held: list[bool] = []
         intruder: list[threading.Thread] = []
         results: list[subprocess.CompletedProcess] = []
 
-        def status_with_a_rival(root):
-            # Runs after the action and before the commit: the moment another person's write could slip in.
+        def record_with_rival(ws, ctx, original, changes, deletions):
+            held.append(transaction._is_lock_held(ws))
             if not intruder:
                 thread = threading.Thread(target=lambda: results.append(
                     self.mt("comment", "Shared lock", "-m", "from the rival", "--by", "bob")))
                 thread.start()
                 intruder.append(thread)
                 thread.join(2)
-                self.assertTrue(thread.is_alive(), "the rival write got in before the commit")
-            return real_status(root)
+                self.assertTrue(thread.is_alive(), "the rival write got in before history was recorded")
+            return real_record(ws, ctx, original, changes, deletions)
 
-        def commit(resolved, note="", **kwargs):
-            held.append(web_hosted.transaction._is_lock_held(resolved))
-            return real_commit(resolved, note, **kwargs)
-
-        with mock.patch.object(web_hosted.git_ops, "workspace_status", status_with_a_rival), \
-                mock.patch.object(web_hosted.transaction, "stage_and_commit_local", commit):
+        with mock.patch.object(history, "record_transaction", record_with_rival):
             self.assertEqual(self.post("/api/comment", "alice", {"ref": card["ref"], "message": "mine"})[0], 200)
         intruder[0].join(10)
         self.assertEqual(results[0].returncode, 0, results[0].stderr)
         self.assertEqual(held, [True])
-        first = self.git("show", "HEAD", "--format=%B", "--", card["path"])
-        self.assertIn("Web change by alice", first)
-        self.assertIn("mine", first)
-        self.assertNotIn("from the rival", first)
+        events = history.list_events(Workspace.at(self.root), limit=10)
+        self.assertEqual([(ev["actor"], ev["action"]) for ev in events[:2]], [("bob", "comment"), ("alice", "comment")])
         self.assertIn("from the rival", self.card_path(card).read_text())
 
     def test_a_delete_and_its_snapshot_share_one_hold_of_the_lock(self) -> None:
         card = self.add_task("Snapshot lock")
         self.start()
         task = next(item for item in self.items("root")["tasks"] if item["ref"] == card["ref"])
-        real = web_hosted.transaction.stage_and_commit_local
+        real = history.prepare_transaction
         held: list[bool] = []
 
-        def commit(resolved, note="", **kwargs):
-            held.append(web_hosted.transaction._is_lock_held(resolved))
-            return real(resolved, note, **kwargs)
+        def prepare(ws, ctx, original, changes, deletions):
+            held.append(transaction._is_lock_held(ws))
+            return real(ws, ctx, original, changes, deletions)
 
-        with mock.patch.object(web_hosted.transaction, "stage_and_commit_local", commit):
+        with mock.patch.object(history, "prepare_transaction", prepare):
             status, payload = self.post("/api/delete", "root", {"ref": card["ref"], "expected_hash": task["content_hash"]})
         self.assertEqual(status, 200, payload)
-        self.assertEqual(held, [True, True])
+        self.assertEqual(held, [True])
 
     def test_a_history_warning_goes_only_to_the_person_whose_write_caused_it(self) -> None:
         card = self.add_task("Warn once")
         self.start()
-        real = web_hosted.transaction.stage_and_commit_local
+        real = history.record_transaction
         calls: list[str] = []
 
-        def fail_once(resolved, note="", *, out, err):
-            calls.append(note)
+        def fail_once(ws, ctx, original, changes, deletions):
+            calls.append(ctx.actor)
             if len(calls) == 1:
-                print("error: disk is full", file=err)
-                return 1, False
-            return real(resolved, note, out=out, err=err)
+                raise sqlite3.OperationalError("disk is full")
+            return real(ws, ctx, original, changes, deletions)
 
-        with mock.patch.object(web_hosted.transaction, "stage_and_commit_local", fail_once):
+        with mock.patch.object(history, "record_transaction", fail_once):
             status, payload = self.post("/api/comment", "alice", {"ref": card["ref"], "message": "one"})
             self.assertEqual(status, 200, payload)
             self.assertIn("disk is full", payload["sync_warning"])
@@ -759,11 +762,7 @@ class HistoryAndConflictTests(SharedWorkspaceCase):
         self.start()
         task = next(item for item in self.items("root")["tasks"] if item["ref"] == card["ref"])
 
-        def fail(resolved, note="", *, out, err):
-            print("error: disk is full", file=err)
-            return 1, False
-
-        with mock.patch.object(web_hosted.transaction, "stage_and_commit_local", fail):
+        with mock.patch.object(history, "_open_db", side_effect=sqlite3.OperationalError("disk is full")):
             status, payload = self.post("/api/delete", "root", {"ref": card["ref"], "expected_hash": task["content_hash"]})
         self.assertEqual(status, 503, payload)
         self.assertIn("Nothing was changed", payload["error"])
@@ -773,16 +772,35 @@ class HistoryAndConflictTests(SharedWorkspaceCase):
         card = self.add_task("Two warnings")
         self.start()
 
-        def fail(resolved, note="", *, out, err):
-            print("error: disk is full", file=err)
-            return 1, False
-
-        with mock.patch.object(web_hosted.transaction, "stage_and_commit_local", fail), \
+        with mock.patch.object(history, "record_transaction", side_effect=sqlite3.OperationalError("disk is full")), \
                 mock.patch.object(web_actions.BackgroundSync, "current_warning", return_value="Sync is behind"):
             status, payload = self.post("/api/comment", "alice", {"ref": card["ref"], "message": "one"})
         self.assertEqual(status, 200, payload)
         self.assertIn("Sync is behind", payload["sync_warning"])
         self.assertIn("disk is full", payload["sync_warning"])
+
+    def test_shared_mode_works_without_git_installed_or_repo(self) -> None:
+        card_a = self.add_task("Alpha")
+        added_b = self.mt("add", "Beta", "--topic", "old-topic", "--json")
+        self.assertEqual(added_b.returncode, 0, added_b.stderr)
+        card_b = json.loads(added_b.stdout)
+        shutil.rmtree(self.root / ".git")
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            self.start()
+            status, payload = self.post("/api/comment", "alice", {"ref": card_a["ref"], "message": "hi"})
+            self.assertEqual((status, payload["sync_warning"]), (200, ""), payload)
+            status, payload = self.upload("alice")
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload.get("history_warning", ""), "")
+            status, payload = self.post("/api/move", "alice", {"ref": card_a["ref"], "status": "doing"})
+            self.assertEqual((status, payload["sync_warning"]), (200, ""), payload)
+            status, payload = self.post("/api/takeover", "root", {"ref": card_a["ref"]})
+            self.assertEqual((status, payload["sync_warning"]), (200, ""), payload)
+            status, payload = self.post("/api/topic-rename", "root", {"old": "old-topic", "new": "new-topic"})
+            self.assertEqual((status, payload["sync_warning"]), (200, ""), payload)
+            task_b = next(item for item in self.items("root")["tasks"] if item["ref"] == card_b["ref"])
+            status, payload = self.post("/api/delete", "root", {"ref": card_b["ref"], "expected_hash": task_b["content_hash"]})
+            self.assertEqual((status, payload["sync_warning"]), (200, ""), payload)
 
     def test_stale_edits_return_409_and_change_nothing(self) -> None:
         card = self.add_task("Contested")

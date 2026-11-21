@@ -553,7 +553,7 @@ def init_data_workspace(destination: Path, origin: str | None, ws: Workspace | N
     print(f"Created a workspace folder in {destination} with your settings (settings.yaml) and no cards.")
     print(f"It has no application of its own; this mt ({resolved.app_root}) runs it.")
     if shutil.which("git") is None:
-        print("Git is not installed, so it has no history or sync; run 'git init' there later.")
+        print("Git is not installed, so sync is unavailable (local history is kept in .mt/history.sqlite); run 'git init' there later to sync.")
     else:
         def git(*arguments: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(["git", "-C", str(destination), *arguments],

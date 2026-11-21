@@ -167,6 +167,10 @@ def load_policy(root: Path) -> dict:
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
         raise ValueError("settings rules.done_window must be an age like 2w, 30d, or 1m")
     rules.setdefault("done_window", "2w")
+    local_history = rules.get("local_history", True)
+    if not isinstance(local_history, bool):
+        raise ValueError("settings rules.local_history must be true or false")
+    rules.setdefault("local_history", True)
     if "calendar" in policy:
         normalized_calendar = normalize_calendar_policy(policy["calendar"])
         if normalized_calendar is None:

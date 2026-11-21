@@ -23,6 +23,7 @@ from cli_admin import (
     command_validate,
     command_web,
 )
+from cli_history import command_history, command_restore
 from cli_cards import (
     command_add,
     command_attach,
@@ -189,6 +190,35 @@ def _register_admin_parsers(sub: argparse._SubParsersAction) -> None:
 
     validate = sub.add_parser("validate", help="validate all cards")
     validate.set_defaults(func=command_validate)
+
+    history_cmd = sub.add_parser(
+        "history",
+        help="inspect local card history",
+        description=(
+            "List recent local history events from .mt/history.sqlite, or inspect one event:\n"
+            "  mt history [QUERY] [--deleted] [--actor USER] [--limit N] [--json]\n"
+            "  mt history show EVENT_ID [--diff] [--json]"
+        ),
+    )
+    history_cmd.add_argument("target", nargs="?", default=None, help="card query, or 'show'")
+    history_cmd.add_argument("event_id", nargs="?", default=None, help="event id for 'history show EVENT_ID'")
+    history_cmd.add_argument("--deleted", action="store_true", help="only show events that deleted a card")
+    history_cmd.add_argument("--actor", help="filter events by actor name")
+    history_cmd.add_argument("--limit", type=int, default=30, help="maximum number of events to list (default: 30)")
+    history_cmd.add_argument("--diff", action="store_true", help="show unified diff when inspecting an event")
+    history_cmd.add_argument("--json", dest="as_json", action="store_true", help="output JSON")
+    history_cmd.set_defaults(func=command_history)
+
+    restore_cmd = sub.add_parser(
+        "restore",
+        help="restore a deleted or overwritten card from local history",
+        description="Restore a card's pre-image from an event in .mt/history.sqlite and validate it.",
+    )
+    restore_cmd.add_argument("event_id", type=int, help="history event id to restore from")
+    restore_cmd.add_argument("--path", help="target card path when an event touched multiple files")
+    restore_cmd.add_argument("--force", action="store_true", help="overwrite an existing card at the target path")
+    restore_cmd.add_argument("--json", dest="as_json", action="store_true", help="output JSON")
+    restore_cmd.set_defaults(func=command_restore)
 
     web = sub.add_parser(
         "web", help="open the local web dashboard",

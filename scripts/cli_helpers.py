@@ -71,16 +71,21 @@ def _cli_print_error(error: TaskError) -> int:
 
 
 def _cli_emit_write_result(result, *, as_json: bool = False) -> int:
+    history_warning = getattr(result, "history_warning", "")
     if as_json:
         payload = dict(result.receipt)
         if result.sync_error:
             payload["sync_error"] = result.sync_error
+        if history_warning:
+            payload["history_warning"] = history_warning
         emit_json(payload)
         return 0
     if result.message:
         print(result.message)
     if result.sync_error:
         print(f"warning: {result.sync_error}", file=sys.stderr)
+    if history_warning:
+        print(f"warning: {history_warning}", file=sys.stderr)
     return result.sync_exit_code
 
 

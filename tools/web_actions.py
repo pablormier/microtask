@@ -104,6 +104,8 @@ def item_by_ref(ws: Workspace, ref: object) -> dict | None:
 def _run_operation(ws: Workspace, action, message: str, *, include_saved_ref: bool = False) -> tuple[HTTPStatus, dict]:
     try:
         result = action(ws)
+    except store.HistoryRequiredError:
+        raise
     except store.ConflictError as error:
         payload: dict[str, object] = {"error": str(error), "conflict": True}
         if error.sync_needed:
@@ -482,6 +484,8 @@ def handle_focus(ws: Workspace, item: dict, body: dict, by: str | None = None) -
     """Choose the signed-in person's own focus card. Other people's focus is not touched."""
     try:
         operations.op_focus(ws, card_query.DEFAULT, query=item["ref"], by=by, focus_user=by)
+    except store.HistoryRequiredError:
+        raise
     except store.ConflictError as error:
         return HTTPStatus.CONFLICT, {"error": str(error), "conflict": True}
     except (store.TaskError, ValueError) as error:
@@ -541,7 +545,7 @@ HOSTED_ADMIN_HANDLERS = {
 HOSTED_HANDLERS = {
     "/api/focus-clear": handle_focus_clear,
 }
-# Actions that remove or overwrite work. A snapshot of the history is taken before they run.
+# Actions that remove or overwrite work. A pre-mutation local history snapshot is required before they run.
 SNAPSHOT_BEFORE = {"/api/delete", "/api/takeover", "/api/topic-rename"}
 
 

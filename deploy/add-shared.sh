@@ -593,9 +593,11 @@ scope_read="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 "$app_dir/mt" -R "$w
   | python3 -c 'import json, sys; print(json.load(sys.stdin).get("rules", {}).get("doing_limit_scope", ""))')" \
   || die "could not read the settings back from the new workspace"
 [[ "$scope_read" == per_claimant ]] || die "the new workspace does not count tasks per person (rules.doing_limit_scope is '$scope_read')"
-if [[ -n "$(env "${git_identity[@]}" git -C "$workspace" status --porcelain -- settings.yaml)" ]]; then
-  env "${git_identity[@]}" git -C "$workspace" add settings.yaml
-  env "${git_identity[@]}" git -C "$workspace" commit -q -m "Count tasks in progress per person"
+if command -v git >/dev/null 2>&1 && [[ -d "$workspace/.git" ]]; then
+  if [[ -n "$(env "${git_identity[@]}" git -C "$workspace" status --porcelain -- settings.yaml)" ]]; then
+    env "${git_identity[@]}" git -C "$workspace" add settings.yaml
+    env "${git_identity[@]}" git -C "$workspace" commit -q -m "Count tasks in progress per person"
+  fi
 fi
 
 mkdir -p "$env_dir"

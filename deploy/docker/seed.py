@@ -1,6 +1,7 @@
 """Create the Compose demo once and preserve it across container restarts."""
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,9 +20,10 @@ def seed(destination: Path) -> None:
         seed_demo_workspace(root)
         with (root / LOCAL_SETTINGS_FILE).open("a", encoding="utf-8") as settings:
             settings.write("  doing_limit_scope: per_claimant\n")
-        subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
-        subprocess.run(["git", "add", "--all"], cwd=root, check=True)
-        subprocess.run(["git", "commit", "--quiet", "-m", "Seed shared demo workspace"], cwd=root, check=True)
+        if shutil.which("git") is not None:
+            subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+            subprocess.run(["git", "add", "--all"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "--quiet", "-m", "Seed shared demo workspace"], cwd=root, check=True)
         root.rename(destination)
 
 

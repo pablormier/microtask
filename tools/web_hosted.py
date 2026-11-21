@@ -12,7 +12,6 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import hmac
-import io
 import os
 from pathlib import Path
 import re
@@ -25,8 +24,6 @@ if str(APP_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "scripts"))
 
 import card_format  # noqa: E402
-import git_ops  # noqa: E402
-import transaction  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 EMAIL_HEADER = "X-Auth-Request-Email"
@@ -183,38 +180,6 @@ def member_token(process_token: str, user: str) -> str:
     """
     return hmac.new(process_token.encode("utf-8"), b"microtask-member-token\n" + user.encode("utf-8"),
                     hashlib.sha256).hexdigest()
-
-
-def use_default_git_identity(ws: Workspace) -> None:
-    """Make local commits work on a server where the service account has no Git identity.
-
-    Only used when Git has none configured; the commits then say microtask@localhost.
-    People are not recorded as authors, because one commit can hold several people's changes.
-    """
-    for key, variable in (("user.name", "NAME"), ("user.email", "EMAIL")):
-        result = git_ops.run_git(ws.root, "config", "--get", key)
-        if result.returncode != 0 or not result.stdout.strip():
-            value = "microtask" if variable == "NAME" else "microtask@localhost"
-            os.environ.setdefault(f"GIT_AUTHOR_{variable}", value)
-            os.environ.setdefault(f"GIT_COMMITTER_{variable}", value)
-
-
-def record_history(ws: Workspace, note: str) -> str:
-    """Commit what changed in the workspace to its local Git history, with no fetch or push.
-
-    Hosted workspaces start with auto_sync off and no remote, so without this a deleted or
-    overwritten card could not be recovered. Returns a warning, or an empty string.
-    """
-    resolved = ws.for_operation()
-    status = git_ops.workspace_status(resolved.root)
-    if status.state != "ready":
-        return f"Local history is unavailable: {status.detail}"
-    out, err = io.StringIO(), io.StringIO()
-    with transaction.time_mutation_lock(resolved):
-        code, committed = transaction.stage_and_commit_local(resolved, note, out=out, err=err)
-    if code is not None and not committed:
-        return (err.getvalue().strip() or "local history commit failed").splitlines()[0]
-    return ""
 
 
 def main(argv: list[str] | None = None) -> int:

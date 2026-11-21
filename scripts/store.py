@@ -97,6 +97,12 @@ class ConflictError(TaskError):
     exit_code = 1
 
 
+class HistoryRequiredError(TaskError):
+    """Required pre-mutation history snapshot could not be written (HTTP 503)."""
+
+    exit_code = 1
+
+
 
 class StaleCardError(ConflictError, ValueError):
     """A card changed on disk after the operation read it, so nothing was written (HTTP 409)."""

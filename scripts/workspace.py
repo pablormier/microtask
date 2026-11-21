@@ -22,7 +22,7 @@ _DETERMINISTIC_POLICY_KEYS = {
 _DETERMINISTIC_RULE_KEYS = {
     "auto_sync", "done_window", "max_doing_tasks", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
-    "allow_public_origin", "max_attachment_mb", "doing_limit_scope",
+    "allow_public_origin", "max_attachment_mb", "doing_limit_scope", "local_history",
 }
 
 
@@ -360,6 +360,9 @@ class Workspace:
 
     def recovery_dir(self) -> Path:
         return self.root / ".mt" / "recovery" / "edit"
+
+    def history_db_path(self) -> Path:
+        return self.root / ".mt" / "history.sqlite"
 
     def env_default(self, name: str) -> str | None:
         return self.environ.get(name)

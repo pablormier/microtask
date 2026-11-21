@@ -183,6 +183,35 @@ class AddUserScriptTests(unittest.TestCase):
             check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
         )
 
+    def test_shared_workspace_provisions_without_git_on_path(self) -> None:
+        no_git_bin = self.root / "no-git-bin"
+        no_git_bin.mkdir()
+        for folder in os.environ.get("PATH", "").split(os.pathsep):
+            src_dir = Path(folder)
+            if not src_dir.is_dir():
+                continue
+            for entry in src_dir.iterdir():
+                if entry.name == "git":
+                    continue
+                target = no_git_bin / entry.name
+                if not target.exists() and os.access(entry, os.X_OK):
+                    try:
+                        target.symlink_to(entry)
+                    except OSError:
+                        pass
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MT_")}
+        env["HOME"] = str(self.root)
+        env["PATH"] = str(no_git_bin)
+        env.pop("OAUTH2_EMAILS_FILE", None)
+        result = subprocess.run(
+            [BASH, str(SHARED_SCRIPT), "--root", str(self.root), "--no-systemctl",
+             "--app", str(self.app), "--admin", "alice", "team", "team.mt.example.com", "alice@example.com"],
+            check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        workspace = self.root / "srv" / "mt" / "team"
+        self.assertIn("doing_limit_scope: per_claimant", (workspace / "settings.yaml").read_text())
+
     def test_shared_workspace_counts_doing_tasks_per_person_and_trusts_only_the_proxy(self) -> None:
         result = self.add_shared("--admin", "alice", "team", "team.mt.example.com",
                               "Alice@Example.com", "bob.smith+x@example.com")

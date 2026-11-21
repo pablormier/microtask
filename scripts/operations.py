@@ -13,6 +13,7 @@ import attachments
 import card_format
 import card_query
 import card_render
+import history
 from card_render import (  # noqa: F401 - re-exported for callers
     _apply_body_edit,
     _apply_bulk_metadata,
@@ -117,6 +118,7 @@ class WriteResult:
     changed: bool = True
     sync_error: str | None = None
     sync_exit_code: int = 0
+    history_warning: str = ""
 
 
 def _run_write_operation(
@@ -125,12 +127,35 @@ def _run_write_operation(
     *,
     sync: bool = True,
     quiet_sync: bool = True,
+    action: str = "write",
+    by: str | None = None,
+    source: str = "cli",
+    require_history: bool = False,
 ) -> WriteResult:
     """Execute one write operation under time_mutation_lock, then run auto-sync if enabled."""
     resolved = _ws(ws)
+    outer_ctx = history.current_context()
     try:
         with time_mutation_lock(resolved):
-            result = operation(resolved)
+            if outer_ctx is not None:
+                if require_history and not outer_ctx.require:
+                    with history.capture_context(
+                        action=outer_ctx.action,
+                        actor=outer_ctx.actor,
+                        source=outer_ctx.source,
+                        note=outer_ctx.note,
+                        require=True,
+                    ) as ctx:
+                        result = operation(resolved)
+                    if ctx.warning and not outer_ctx.warning:
+                        outer_ctx.warning = ctx.warning
+                else:
+                    ctx = outer_ctx
+                    result = operation(resolved)
+            else:
+                actor = by or store.current_username(ws=resolved)
+                with history.capture_context(action=action, actor=actor, source=source, require=require_history) as ctx:
+                    result = operation(resolved)
     except TaskError as error:
         if sync and error.sync_needed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
             if quiet_sync:
@@ -138,6 +163,8 @@ def _run_write_operation(
             else:
                 transaction._run_auto_sync(ws=resolved)
         raise
+    if ctx.warning and not result.history_warning:
+        result = replace(result, history_warning=ctx.warning)
     if sync and result.changed and store.policy(resolved).get("rules", {}).get("auto_sync", False):
         if quiet_sync:
             sync_error = transaction.run_auto_sync_for_receipt(ws=resolved)
@@ -415,7 +442,7 @@ def op_create(
             changed=changed,
         )
 
-    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync, action="create", by=by)
 
 
 def _complete_locked(
@@ -476,6 +503,8 @@ def op_complete(
         ),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="done",
+        by=by,
     )
 
 
@@ -560,6 +589,9 @@ def op_move(
         ),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="takeover" if takeover else "move",
+        by=by,
+        require_history=bool(takeover),
     )
 
 
@@ -611,6 +643,8 @@ def op_comment(
         lambda resolved: _comment_locked(resolved, query, comments, by=by, match_mode=match_mode),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="comment",
+        by=by,
     )
 
 
@@ -735,6 +769,8 @@ def op_edit(
         ),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="edit",
+        by=by,
     )
 
 
@@ -818,6 +854,8 @@ def op_convert(
         ),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="convert",
+        by=by,
     )
 
 
@@ -872,6 +910,9 @@ def op_delete(
         lambda resolved: _delete_locked(resolved, query, by=by, match_mode=match_mode),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="delete",
+        by=by,
+        require_history=True,
     )
 
 
@@ -1004,6 +1045,8 @@ def op_bulk_edit(
         lambda resolved: _bulk_edit_locked(resolved, plan, by=by),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="bulk-edit",
+        by=by,
     )
 
 
@@ -1084,6 +1127,9 @@ def op_topic_rename(
         lambda resolved: _topic_rename_locked(resolved, old, new, merge=merge, dry_run=dry_run, by=by),
         sync=sync and not dry_run,
         quiet_sync=quiet_sync,
+        action="topic-rename",
+        by=by,
+        require_history=not dry_run,
     )
 
 
@@ -1225,6 +1271,8 @@ def op_time_start(
         lambda resolved: _time_start_locked(resolved, query, parallel=parallel, by=by),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="time-start",
+        by=by,
     )
 
 
@@ -1342,6 +1390,8 @@ def op_time_end(
         lambda resolved: _time_end_locked(resolved, query=query, action=action, at=at, duration=duration, by=by),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="time-end",
+        by=by,
     )
 
 
@@ -1395,7 +1445,7 @@ def op_time_remove(ws: Workspace | None, session_id: str, *, by: str | None = No
                    quiet_sync: bool = True) -> WriteResult:
     """Remove a recorded time session from a task. With `by`, a task claimed by someone else is refused."""
     return _run_write_operation(ws, lambda resolved: _time_remove_locked(resolved, session_id, by),
-                                sync=sync, quiet_sync=quiet_sync)
+                                sync=sync, quiet_sync=quiet_sync, action="time-remove", by=by)
 
 
 def _time_add_locked(
@@ -1465,6 +1515,8 @@ def op_time_add(
         lambda resolved: _time_add_locked(resolved, query, duration=duration, start=start, end=end, by=by),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="time-add",
+        by=by,
     )
 
 
@@ -1646,7 +1698,7 @@ def op_draft_save(
             return replace(result, changed=True)
         return result
 
-    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync, action="draft-save", by=by)
 
 
 def op_card_metadata(
@@ -1711,7 +1763,7 @@ def op_card_metadata(
             receipt_fn=lambda saved, updated=True: store.item_receipt(saved, updated=updated, ws=resolved),
         )
 
-    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync)
+    return _run_write_operation(ws, _run, sync=sync, quiet_sync=quiet_sync, action="card-metadata", by=by)
 
 
 def _store_attachment_locked(
@@ -1801,6 +1853,18 @@ def _store_attachment_locked(
         "deduplicated": deduplicated,
     }
 
+    history_warning = ""
+    if file_changed:
+        ctx = history.current_context()
+        history_warning = history.record_attachment_event(
+            resolved,
+            actor=by or (ctx.actor if ctx is not None else store.current_username(ws=resolved)),
+            source=ctx.source if ctx is not None else "cli",
+            path=f"attachments/{stored_name}",
+            size_bytes=len(payload_bytes),
+            filename=stored_name,
+        )
+
     if item is not None:
         properties = dict(item.frontmatter)
         body = item.body
@@ -1828,6 +1892,7 @@ def _store_attachment_locked(
             receipt=card_result.receipt,
             message=card_result.message,
             changed=True,
+            history_warning=card_result.history_warning or history_warning,
         )
 
     return WriteResult(
@@ -1835,6 +1900,7 @@ def _store_attachment_locked(
         receipt=receipt,
         message=f"{markdown}",
         changed=file_changed,
+        history_warning=history_warning,
     )
 
 
@@ -1868,4 +1934,88 @@ def op_store_attachment(
         ),
         sync=sync,
         quiet_sync=quiet_sync,
+        action="upload",
+        by=by,
+    )
+
+
+def op_restore(
+    ws: Workspace | None,
+    event_id: int,
+    *,
+    path: str | None = None,
+    force: bool = False,
+    by: str | None = None,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Restore a deleted or overwritten card from a local history event."""
+
+    def _run(resolved: Workspace) -> WriteResult:
+        event = history.get_event(resolved, event_id, path=path, include_diffs=False)
+        if event is None:
+            raise NotFoundError(f"history event #{event_id} not found")
+        revs = event["revisions"]
+        if path is not None and not revs:
+            raise NotFoundError(f"path {path!r} not found in history event #{event_id}")
+        if not revs:
+            raise InputError(f"history event #{event_id} has no restorable card revisions", exit_code=2)
+        if len(revs) > 1:
+            raise InputError(
+                f"history event #{event_id} touched {len(revs)} files; pass --path to choose one",
+                exit_code=2,
+            )
+        rev = revs[0]
+        before_bytes = rev["before_bytes"]
+        if before_bytes is None:
+            raise InputError(
+                f"history event #{event_id} has no prior version for {rev['path']}",
+                exit_code=2,
+            )
+        target_rel = path or rev["path"]
+        rel_path = Path(target_rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts or not target_rel.startswith("cards/") or rel_path.suffix != ".md":
+            raise InputError(f"invalid restore target path: {target_rel}", exit_code=2)
+        target_file = resolved.root / rel_path
+        current_bytes = target_file.read_bytes() if target_file.is_file() else None
+        if current_bytes is not None:
+            if not force:
+                raise ConflictError(f"card already exists at {target_rel}; pass --force to overwrite")
+            existing = Card.read(target_file)
+            if existing.is_task:
+                try:
+                    check_claim(existing, current_username(by, ws=resolved))
+                    timers = transaction.read_time_timers(resolved)
+                except ValueError as error:
+                    raise ConflictError(str(error), exit_code=1) from error
+                task_id = str(existing.frontmatter.get("id") or existing.path.stem)
+                if task_id in timers:
+                    raise ConflictError("a task with a running timer cannot be overwritten by restore", exit_code=1)
+        try:
+            transaction.apply_item_transaction(
+                {target_rel: before_bytes},
+                expected={target_rel: current_bytes},
+                source_root=resolved.root,
+                ws=resolved,
+            )
+        except (OSError, ValueError) as error:
+            if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
+                raise ConflictError(f"restore failed: {error}") from error
+            raise ValidationError(f"restore failed: {error}") from error
+        saved = Card.read(target_file)
+        return WriteResult(
+            card=saved,
+            receipt=saved_receipt(saved, updated=True, ws=resolved),
+            message=f"Restored: {target_rel}",
+            changed=True,
+        )
+
+    return _run_write_operation(
+        ws,
+        _run,
+        sync=sync,
+        quiet_sync=quiet_sync,
+        action="restore",
+        by=by,
+        require_history=bool(force),
     )

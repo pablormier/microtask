@@ -19,6 +19,7 @@ Prefer small, explicit code and fewer concepts.
   - `store.py`: card reading/discovery, settings, timers, focus state, and typed `TaskError`s.
   - `validation.py`: card/workspace validation (`audit_workspace`, `check_changes`, and `format_audit_report`).
   - `transaction.py`: file locking (`time_mutation_lock`), atomic multi-file writes, and `mt sync`.
+  - `history.py`: local SQLite audit and revision history (`.mt/history.sqlite`).
   - `card_render.py`: card document rendering, body editing, metadata parsing/validation, and topic tree helpers.
   - `focus.py`: read-only focus ranking and context helpers.
   - `timer_ops.py`: timer lifecycle and time-session helpers.
