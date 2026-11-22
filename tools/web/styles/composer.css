@@ -37,6 +37,9 @@
   overflow: auto;
   overscroll-behavior: contain;
 }
+.mt-composer:not(.is-zen) .mt-composer-content > * {
+  flex-shrink: 0;
+}
 .mt-composer-header { flex-wrap: nowrap; margin-bottom: 2px; }
 .mt-composer-header > div:first-child { margin-right: auto; }
 .mt-composer-header h2 {
@@ -85,7 +88,7 @@
 }
 .mt-composer-body.mt-field {
   flex: 0 0 auto;
-  min-height: 9.5rem;
+  min-height: 10.5rem;
   padding: 10px 12px;
   font-size: var(--mt-font-size-md);
   line-height: 1.55;
@@ -183,6 +186,7 @@
 /* Zen mode & shared pluggable editor workspace */
 .mt-zen-workspace {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--mt-space-4);
   min-height: 0;
@@ -329,9 +333,10 @@ li.mt-mention-option.is-active .mt-mention-meta {
 .mt-composer.is-zen .mt-composer-title-field input.mt-field {
   font-size: clamp(1.35rem, 2.2vw, 1.85rem);
 }
+.mt-composer.is-zen .mt-zen-preview { min-height: 0; }
 .mt-composer.is-zen .mt-composer-body.mt-field {
   flex: 1 1 auto;
-  min-height: 50vh;
+  min-height: 0;
   border-color: transparent;
   background: transparent;
   padding: 8px 0;
@@ -347,11 +352,10 @@ li.mt-mention-option.is-active .mt-mention-meta {
   outline-offset: 4px;
 }
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
-  order: -1;
-  max-height: 45vh;
+  flex: 0 0 auto;
+  max-height: 36vh;
   overflow: auto;
-  margin-top: 0;
-  margin-block-end: var(--mt-space-4);
+  margin-top: var(--mt-space-4);
   padding: 14px 16px;
   border: 1px solid var(--mt-border);
   border-radius: var(--mt-radius-lg);
