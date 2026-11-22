@@ -68,6 +68,7 @@ function taskBoard() {
     layout: "vertical",
     settings: normalizeViewSettings({}),
     textSize: "medium",
+    emptyColumns: "collapse",
     theme: "system",
     columnIndex: 0,
     ...createFilterController(),
@@ -139,6 +140,9 @@ function taskBoard() {
       let savedTextSize = "medium";
       try { savedTextSize = localStorage.getItem("mt-text-size-v2") || "medium"; } catch (_) {}
       this.setTextSize(savedTextSize);
+      let savedEmptyColumns = "collapse";
+      try { savedEmptyColumns = localStorage.getItem("mt-empty-columns-v1") || "collapse"; } catch (_) {}
+      this.setEmptyColumns(savedEmptyColumns);
       let savedTheme = "system";
       try { savedTheme = localStorage.getItem("mt-theme-v1") || "system"; } catch (_) {}
       this.setTheme(savedTheme);
@@ -323,6 +327,7 @@ function taskBoard() {
       const view = this.settings.archive;
       view.kind = kind;
       if (!cardGroupOptions(kind).some(option => option.value === view.group)) view.group = "none";
+      if (!cardSortOptions(kind).some(option => option.value === view.sort)) view.sort = "default";
     },
 
     // On phones the board shows one column at a time; the pager follows the column nearest the left edge.
@@ -371,6 +376,11 @@ function taskBoard() {
       this.textSize = ["small", "medium", "large"].includes(size) ? size : "medium";
       document.documentElement.dataset.textSize = this.textSize;
       try { localStorage.setItem("mt-text-size-v2", this.textSize); } catch (_) {}
+    },
+
+    setEmptyColumns(mode) {
+      this.emptyColumns = ["collapse", "hide", "show"].includes(mode) ? mode : "collapse";
+      try { localStorage.setItem("mt-empty-columns-v1", this.emptyColumns); } catch (_) {}
     },
 
     topicTreeOpen() {

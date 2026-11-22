@@ -305,11 +305,49 @@ function createBoardViews() {
     },
 
     groupOptions(kind) { return cardGroupOptions(kind); },
+    sortOptions(kind) { return cardSortOptions(kind); },
+
+    sortCards(items, sort) {
+      if (!sort || sort === "default") return items;
+      const list = items.slice();
+      if (sort === "priority") {
+        const order = this.priorityOrder || [];
+        const rank = value => {
+          const idx = order.indexOf(value);
+          return idx === -1 ? order.length : idx;
+        };
+        return list.sort((a, b) => rank(a.priority) - rank(b.priority));
+      }
+      if (sort === "due") {
+        return list.sort((a, b) => {
+          const da = String(a.due || "");
+          const db = String(b.due || "");
+          if (!da && !db) return 0;
+          if (!da) return 1;
+          if (!db) return -1;
+          return da.localeCompare(db);
+        });
+      }
+      if (sort === "updated") {
+        return list.sort((a, b) => String(b.updated || b.created || "").localeCompare(String(a.updated || a.created || "")));
+      }
+      if (sort === "created_desc") {
+        return list.sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
+      }
+      if (sort === "created_asc") {
+        return list.sort((a, b) => String(a.created || "").localeCompare(String(b.created || "")));
+      }
+      if (sort === "title") {
+        return list.sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" }));
+      }
+      return items;
+    },
 
     viewGroups() {
       const mode = this.mode;
       const kind = this.viewKind();
       const group = this.settings[mode].group;
+      const sort = this.settings[mode].sort || "default";
       const collectionName = this.mode === "archive" ? ARCHIVE_COLLECTIONS[this.viewKind()] : this.mode;
       const ids = this.collections[collectionName];
       const tasks = this.tasks;
@@ -321,18 +359,18 @@ function createBoardViews() {
       const priorityOrder = this.priorityOrder;
       const dueKinds = this.dueKinds;
       const cache = viewGroupsCache;
-      if (cache && cache.mode === mode && cache.kind === kind && cache.group === group &&
+      if (cache && cache.mode === mode && cache.kind === kind && cache.group === group && cache.sort === sort &&
           cache.ids === ids && cache.tasks === tasks && cache.statuses === statuses &&
           cache.topicTree === topicTree && cache.doingTotal === doingTotal &&
           cache.maxDoingTasks === maxDoingTasks && cache.statusLabels === statusLabels &&
           cache.priorityOrder === priorityOrder && cache.dueKinds === dueKinds) {
         return cache.value;
       }
-      const items = this.collectionItems(collectionName);
+      const items = this.sortCards(this.collectionItems(collectionName), sort);
       const groups = this.groupCards(items, group, { workflow: mode !== "archive" });
       const value = groups.length ? groups : this.groupCards([], "none");
       viewGroupsCache = {
-        mode, kind, group, ids, tasks, statuses, topicTree,
+        mode, kind, group, sort, ids, tasks, statuses, topicTree,
         doingTotal, maxDoingTasks, statusLabels, priorityOrder, dueKinds, value,
       };
       return value;

@@ -28,6 +28,12 @@
               <template x-for="option in groupOptions(viewKind())" :key="option.value"><option :value="option.value" :selected="option.value === settings[mode].group" x-text="option.label"></option></template>
             </select>
           </label>
+          <label class="mt-view-control">
+            <span class="mt-filter-heading">Sort by</span>
+            <select class="mt-field mt-field-compact" @change="settings[mode].sort = $event.target.value" aria-label="Sort cards by">
+              <template x-for="option in sortOptions(viewKind())" :key="option.value"><option :value="option.value" :selected="option.value === (settings[mode].sort || 'default')" x-text="option.label"></option></template>
+            </select>
+          </label>
           <div class="mt-segmented mt-segmented-quiet" role="group" aria-label="Group layout" x-show="settings[mode].group !== 'none'">
             <button type="button" class="mt-segment" title="Columns" aria-label="Columns" :aria-pressed="layout === 'vertical'" @click="setLayout('vertical')">
               <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -107,14 +113,16 @@
           </template>
           <nav class="mt-column-pager" aria-label="Board columns" x-show="settings[mode].group !== 'none' && layout !== 'horizontal'">
             <template x-for="(group, index) in viewGroups()" :key="group.key">
-              <button type="button" class="mt-button mt-button-compact mt-column-pager-item" :aria-current="index === columnIndex ? 'true' : null"
+              <button type="button" class="mt-button mt-button-compact mt-column-pager-item"
+                      x-show="group.items.length > 0 || emptyColumns !== 'hide'"
+                      :aria-current="index === columnIndex ? 'true' : null"
                       @click="scrollToColumn(index)">
                 <span x-text="group.label"></span><span class="mt-column-pager-count" x-text="group.items.length"></span>
               </button>
             </template>
           </nav>
-          <div class="mt-groups" x-ref="groups" @scroll.passive="trackColumn($el)" x-effect="mode; settings[mode].group; $nextTick(() => trackColumn($el))"
-               :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal' }">
+          <div class="mt-groups" x-ref="groups" @scroll.passive="trackColumn($el)" x-effect="mode; settings[mode].group; settings[mode].sort; emptyColumns; $nextTick(() => trackColumn($el))"
+               :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal', 'is-empty-hidden': emptyColumns === 'hide', 'is-empty-shown': emptyColumns === 'show' }">
           <template x-for="group in viewGroups()" :key="group.key">
             <div class="mt-column" :class="{ ...group.className, 'is-empty': !group.items.length }">
               <h2 x-show="group.label" :title="group.items.length ? null : group.label + ': ' + group.empty"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>

@@ -110,6 +110,12 @@
                 <button type="button" class="mt-segment mt-text-medium" title="Medium text" aria-label="Medium text" :aria-pressed="textSize === 'medium'" @click="setTextSize('medium')">A</button>
                 <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
               </div>
+              <span class="mt-menu-label" id="mt-empty-columns-label">Empty panels</span>
+              <div class="mt-empty-columns mt-segmented" role="group" aria-labelledby="mt-empty-columns-label">
+                <button type="button" class="mt-segment" :aria-pressed="emptyColumns === 'collapse'" @click="setEmptyColumns('collapse')">Collapse</button>
+                <button type="button" class="mt-segment" :aria-pressed="emptyColumns === 'hide'" @click="setEmptyColumns('hide')">Hide</button>
+                <button type="button" class="mt-segment" :aria-pressed="emptyColumns === 'show'" @click="setEmptyColumns('show')">Show</button>
+              </div>
               <template x-if="(hosted && hosted.sign_out_url) || signOutUrl">
                 <div class="mt-account-actions">
                   <a class="mt-account-signout" :href="(hosted && hosted.sign_out_url) || signOutUrl">Sign out</a>

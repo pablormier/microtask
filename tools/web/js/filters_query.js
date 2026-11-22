@@ -4,6 +4,12 @@ const CARD_GROUPS = [
   ["topic", "Topic"], ["tag", "Tag"], ["type", "Type"], ["due_kind", "Due kind"]
 ];
 const TASK_ONLY_GROUPS = ["status", "type"];
+const CARD_SORTS = [
+  ["default", "Default"], ["priority", "Priority"], ["due", "Due date"],
+  ["updated", "Recently updated"], ["created_desc", "Newest"], ["created_asc", "Oldest"],
+  ["title", "Title"]
+];
+const TASK_ONLY_SORTS = ["priority", "due"];
 const DEADLINE_GROUPS = ["none", "due_kind", "priority", "status", "type", "project", "topic"];
 const CARD_KINDS = ["task", "note", "all"];
 // Tasks and Notes show one kind; only Archive has a Kind setting.
@@ -53,6 +59,11 @@ function cardGroupOptions(kind) {
     .map(([value, label]) => ({ value, label }));
 }
 
+function cardSortOptions(kind) {
+  return CARD_SORTS.filter(([value]) => kind !== "note" || !TASK_ONLY_SORTS.includes(value))
+    .map(([value, label]) => ({ value, label }));
+}
+
 // Fill missing or invalid saved settings from each tab's defaults.
 function normalizeViewSettings(saved) {
   const settings = {};
@@ -61,7 +72,13 @@ function normalizeViewSettings(saved) {
     const kind = tab === "archive" ? (CARD_KINDS.includes(entry.kind) ? entry.kind : defaults.kind) : TAB_KINDS[tab];
     const groups = tab === "deadlines" ? DEADLINE_GROUPS : cardGroupOptions(kind).map(option => option.value);
     const group = [entry.group, defaults.group].find(value => groups.includes(value)) || "none";
-    settings[tab] = tab === "archive" ? { kind, group } : { group };
+    if (tab === "deadlines") {
+      settings[tab] = { group };
+    } else {
+      const sorts = cardSortOptions(kind).map(option => option.value);
+      const sort = sorts.includes(entry.sort) ? entry.sort : "default";
+      settings[tab] = tab === "archive" ? { kind, group, sort } : { group, sort };
+    }
   }
   return settings;
 }
