@@ -410,6 +410,13 @@ under the previous person's key, sends nothing more for them, and reloads. The
 reloaded page shows a notice. The previous person finds their capture draft
 reopened, with a short note, the next time their page loads in that browser.
 
+The write token is derived from the proxy secret and the application version.
+Restarting the dashboard keeps open pages working, and several dashboard
+processes on one machine that share the workspace, the secret and the version
+accept each other's pages, so a proxy can spread requests across them. After
+an upgrade, a page loaded from the older version gets the same 409 and reloads
+before it writes. Changing the secret makes every open page reload.
+
 ### Set it up
 
 Do steps 1 to 5 of [Set up the server](#set-up-the-server) first. Then install

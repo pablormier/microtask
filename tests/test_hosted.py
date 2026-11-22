@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import io
 import json
 import os
 from pathlib import Path
@@ -75,16 +76,18 @@ class SharedWorkspaceCase(unittest.TestCase):
             self.assertEqual(moved.returncode, 0, moved.stderr)
         return card
 
-    def start(self, hosted: bool = True, *, sign_out_url: str = "") -> None:
+    def start(self, hosted: bool = True, *, sign_out_url: str = "", token: str = TOKEN) -> int:
+        """Serve the workspace and send later requests to it; returns the port."""
         self.hosted_server = hosted
         config = web_hosted.HostedConfig(SECRET, self.admins, self.user_map, sign_out_url=sign_out_url) if hosted else None
-        server = taskweb.TaskWebServer(("127.0.0.1", 0), TOKEN, self.ws, hosted=config)
+        server = taskweb.TaskWebServer(("127.0.0.1", 0), token, self.ws, hosted=config)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(thread.join, 5)
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         self.port = server.server_address[1]
+        return self.port
 
     def token_for(self, email: str | None) -> str:
         """The write token the page of this person receives; the process token in a single-user dashboard."""
@@ -409,6 +412,50 @@ class MemberTokenTests(SharedWorkspaceCase):
 
     def items_single(self) -> dict:
         return self.request("GET", "/api/items")[1]
+
+    def test_processes_with_the_same_secret_and_version_accept_each_others_pages(self) -> None:
+        card = self.add_task("Shared card")
+        shared = web_hosted.shared_process_token(SECRET, "version-1")
+        self.start(token=shared)
+        alice = self.page_token("alice")
+        self.start(token=shared)
+        self.assertEqual(self.page_token("alice"), alice)
+        status, payload = self.post("/api/comment", "alice", {"ref": card["ref"], "message": "via another process"},
+                                    token=alice)
+        self.assertEqual(status, 200, payload)
+        status, payload = self.upload("alice", alice)
+        self.assertEqual(status, 200, payload)
+
+    def test_a_page_from_another_version_or_secret_must_reload_before_writing(self) -> None:
+        card = self.add_task("Shared card")
+        self.start(token=web_hosted.shared_process_token(SECRET, "version-1"))
+        alice = self.page_token("alice")
+        for token in (web_hosted.shared_process_token(SECRET, "version-2"),
+                      web_hosted.shared_process_token(SECRET + "-rotated", "version-1")):
+            with self.subTest(token=token):
+                self.start(token=token)
+                before = self.card_path(card).read_text()
+                status, payload = self.post("/api/comment", "alice", {"ref": card["ref"], "message": "stale"},
+                                            token=alice)
+                self.assertEqual((status, payload.get("member_changed")), (409, True), payload)
+                self.assertEqual(self.card_path(card).read_text(), before)
+
+    def test_serve_dashboard_derives_the_shared_token_and_keeps_a_random_one_for_one_person(self) -> None:
+        tokens = []
+
+        def refuse(address, token, *args, **kwargs):
+            tokens.append(token)
+            raise OSError("not started in this test")
+
+        config = web_hosted.HostedConfig(SECRET)
+        with mock.patch.object(taskweb, "TaskWebServer", side_effect=refuse), \
+                mock.patch("sys.stderr", new_callable=io.StringIO):
+            for hosted in (config, config, None, None):
+                self.assertEqual(taskweb.serve_dashboard(self.ws, "127.0.0.1", 0, no_open=True, hosted=hosted), 1)
+        expected = web_hosted.shared_process_token(SECRET, taskweb.application_version(taskweb.APP_ROOT))
+        self.assertEqual(tokens[:2], [expected, expected])
+        self.assertNotIn(expected, tokens[2:])
+        self.assertNotEqual(tokens[2], tokens[3])
 
 
 class PerPersonStateTests(SharedWorkspaceCase):

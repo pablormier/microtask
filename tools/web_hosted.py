@@ -170,6 +170,17 @@ class HostedConfig:
         return Identity(email=email, user=user, admin=user in self.admins)
 
 
+def shared_process_token(secret: str, app_version: str) -> str:
+    """The process token of a shared-workspace dashboard, derived from the proxy secret and the app version.
+
+    Every process that has the same secret and runs the same version derives the same token, so any
+    of them accepts a page another one served. An update changes it, so a page loaded from the older
+    version is told to reload before it writes.
+    """
+    return hmac.new(secret.encode("utf-8"), b"microtask-process-token\n" + app_version.encode("utf-8"),
+                    hashlib.sha256).hexdigest()
+
+
 def member_token(process_token: str, user: str) -> str:
     """The write token of one signed-in person: it proves a request comes from a page loaded for them.
 

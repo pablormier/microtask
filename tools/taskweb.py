@@ -517,7 +517,9 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
 def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
                     allow_hosts: Iterable[str] = (), demo: bool = False,
                     hosted: web_hosted.HostedConfig | None = None) -> int:
-    token = secrets.token_urlsafe(24)
+    # A shared workspace may run several processes behind one proxy, so they all derive the same token.
+    token = (web_hosted.shared_process_token(hosted.secret, application_version(APP_ROOT)) if hosted is not None
+             else secrets.token_urlsafe(24))
     try:
         server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted)
     except OSError as error:
