@@ -26,13 +26,24 @@ Open it as Bob and try saving a description edit. The server rejects the
 edit, but Bob can still leave a comment. As Alice, move the task back to
 **Todo** to release the claim.
 
+The stack also serves a personal dashboard for Alice at `http://127.0.0.1:8081`,
+like the `mt-web@` service of the server kit. Only `alice` can sign in there,
+with the same password. It is a single-user dashboard started with
+`--require-proxy-secret`, so it answers 403 to any request that does not come
+through Caddy with its secret. On first startup it creates an empty workspace.
+To change the host port, set `MT_PERSONAL_PORT`. Its **Sign out** link opens
+`/logout`, which answers 401 so that the browser asks for the password again
+and forgets the stored one. Basic auth has no session to end, so some browsers
+keep the password until you close them.
+
 Run the smoke test against the running stack:
 
 ```sh
 docker compose -f deploy/docker/compose.yaml exec -T shared python3 smoke.py
 ```
 
-The test checks proxy authentication, private drafts and shared card access.
+The test checks proxy authentication, private drafts and shared card access,
+and that the personal dashboard refuses requests that skip Caddy.
 It submits two saves from the same card version and checks for one success and
 one `409 Conflict`. Each run leaves one uniquely named fixture card in the
 workspace for inspection.

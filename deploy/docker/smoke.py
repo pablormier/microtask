@@ -50,10 +50,10 @@ class SharedWorkspaceSmokeTest(unittest.TestCase):
         self.assertEqual(request("/api/items", address="shared:8000", headers=spoofed)[0], 403)
         status, alice = request("/api/items", user="alice", headers=spoofed)
         self.assertEqual(status, 200, alice)
-        self.assertEqual(alice["meta"]["hosted"], {"user": "alice", "admin": True})
+        self.assertEqual(alice["meta"]["hosted"], {"user": "alice", "email": "alice@example.test", "admin": True})
         status, bob = request("/api/items", user="bob")
         self.assertEqual(status, 200, bob)
-        self.assertEqual(bob["meta"]["hosted"], {"user": "bob", "admin": False})
+        self.assertEqual(bob["meta"]["hosted"], {"user": "bob", "email": "bob@example.test", "admin": False})
         tokens = {"alice": alice["meta"]["api_token"], "bob": bob["meta"]["api_token"]}
 
         fixture = uuid.uuid4().hex
@@ -94,6 +94,36 @@ class SharedWorkspaceSmokeTest(unittest.TestCase):
             status, payload = request(path, user=user)
             self.assertEqual(status, 200, payload)
             self.assertEqual(payload["item"]["body"].strip(), f"Saved by {winner}")
+
+
+class PersonalDashboardSmokeTest(unittest.TestCase):
+    def test_only_requests_through_the_proxy_reach_the_personal_dashboard(self):
+        deadline = time.monotonic() + 25
+        while True:
+            try:
+                status, payload = request("/api/items", user="alice", address="proxy:8081")
+                if status == 200:
+                    break
+                failure = f"HTTP {status}: {payload!r}"
+            except OSError as error:
+                failure = str(error)
+            if time.monotonic() >= deadline:
+                self.fail(f"Personal dashboard did not become ready: {failure}")
+            time.sleep(0.25)
+
+        self.assertNotIn("hosted", payload["meta"])
+        self.assertEqual(request("/api/items", address="proxy:8081")[0], 401)
+        self.assertEqual(request("/api/items", user="bob", address="proxy:8081")[0], 401)
+        for headers in ({}, {"X-Microtask-Proxy-Secret": "not-the-secret"}):
+            with self.subTest(headers=headers):
+                self.assertEqual(request("/", address="personal:8000", headers=headers)[0], 403)
+                self.assertEqual(request("/api/items", address="personal:8000", headers=headers)[0], 403)
+        status, saved = request("/api/draft-save", user="alice", address="proxy:8081",
+                                token=payload["meta"]["api_token"], body={
+                                    "kind": "note", "title": f"Personal smoke test {uuid.uuid4().hex}",
+                                    "body": "Through the proxy", "capture_id": str(uuid.uuid4()),
+                                })
+        self.assertEqual(status, 200, saved)
 
 
 if __name__ == "__main__":

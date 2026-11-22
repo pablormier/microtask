@@ -29,20 +29,20 @@
 #                       rename topics; repeatable, and must be one of the EMAIL user names
 #   --emails-file FILE  more addresses, one per line
 #   --root DIR          prefix for /srv, /etc, /opt (or set MT_DEPLOY_ROOT); for tests
-#   --no-systemctl      do not chown, enable the service, or reload Caddy
+#   --no-systemctl      do not create the account, chown, enable the service, or reload Caddy
 #   --dry-run           print what would happen and change nothing
 #   --app DIR           microtask version that creates the workspace and works out the user
 #                       names and administrators for every run (or MT_APP_DIR);
 #                       default is /opt/microtask/current
 #
 # Run it as root. The workspace counts tasks in progress per person (rules.doing_limit_scope
-# per_claimant). The service runs the app from /opt/microtask/current (see upgrade.sh).
+# per_claimant). The service runs the app from /opt/microtask/current (see upgrade.sh) as its
+# own system account, mt-NAME, which owns the workspace and /etc/mt/NAME.secret.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root="${MT_DEPLOY_ROOT:-}"
 app_dir="${MT_APP_DIR:-}"
-service_user="${MT_SERVICE_USER:-mt}"
 first_port=8101
 no_systemctl=""
 dry_run=""
@@ -105,6 +105,10 @@ root="${root%/}"
 # The values end up in a shell-free env file and a Caddyfile, so keep them plain.
 [[ "$name" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] \
   || die "workspace name must be lowercase letters, digits and dashes, not starting or ending with a dash"
+# One Unix account per workspace. Linux account names are at most 32 characters.
+unix_user="mt-$name"
+[[ ${#unix_user} -le 32 ]] \
+  || die "workspace name $name is too long: the account $unix_user would have ${#unix_user} characters and Linux allows 32; use at most 29"
 if [[ "$mode" == create ]]; then
   host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
   [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
@@ -225,6 +229,9 @@ check_existing() {
     for path in "$workspace" "$env_file" "$secret_file" "$caddy_file" "$members_file" "$retired_file"; do
       [[ ! -e "$path" ]] || die "$name already exists ($path is present)"
     done
+    if [[ -z "$no_systemctl" ]]; then
+      ! id "$unix_user" >/dev/null 2>&1 || die "the account $unix_user already exists"
+    fi
   else
     for path in "$env_file" "$secret_file" "$caddy_file"; do
       [[ -f "$path" ]] || die "no shared workspace named $name ($path is missing)"
@@ -278,7 +285,7 @@ else
   check_emails "${raw_emails[@]}"
 fi
 if [[ "$mode" == create && -z "$no_systemctl" && -z "$dry_run" ]]; then
-  id "$service_user" >/dev/null 2>&1 || die "service account $service_user does not exist"
+  command -v useradd >/dev/null 2>&1 || die "useradd is not available, so the account $unix_user cannot be created"
 fi
 
 # Create an empty file that nobody else can read, then give it its final mode, so that content
@@ -326,6 +333,7 @@ claim_path() {
 }
 
 created=()
+created_account=""
 added_emails=()
 enabled_unit=""
 backup_dir=""
@@ -366,6 +374,9 @@ p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
       for path in "${created[@]}"; do
         rm -rf "$path"
       done
+    fi
+    if [[ -n "$created_account" ]]; then
+      userdel "$unix_user" >/dev/null 2>&1 || true
     fi
   fi
   if [[ -n "$backup_dir" ]]; then
@@ -534,6 +545,7 @@ while [[ "$used_ports" == *" $port "* ]]; do
 done
 
 if [[ -n "$dry_run" ]]; then
+  [[ -n "$no_systemctl" ]] || echo "would create the system account $unix_user"
   echo "would create workspace $workspace with rules.doing_limit_scope per_claimant"
   echo "would write $env_file (PORT=$port, HOST_NAME=$host, MT_ADMINS=$admin_list), $secret_file and $members_file"
   echo "would write $caddy_file for ${#emails[@]} address(es)"
@@ -630,8 +642,12 @@ for email in "${emails[@]}"; do
 done
 
 if [[ -z "$no_systemctl" ]]; then
-  chown -R "$service_user:$service_user" "$workspace"
-  chown "$service_user:$service_user" "$secret_file"
+  # A system account of its own, with no login shell and no home outside the workspace, so that
+  # no other dashboard can read these cards or this secret.
+  useradd --system --user-group --no-create-home --home-dir "$workspace" --shell /usr/sbin/nologin "$unix_user"
+  created_account=1
+  chown -R "$unix_user:$unix_user" "$workspace"
+  chown "$unix_user:$unix_user" "$secret_file"
   if getent group caddy >/dev/null 2>&1; then
     chgrp caddy "$caddy_file"
   fi

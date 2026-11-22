@@ -53,7 +53,7 @@ def _workspace_label(ws: Workspace, *, demo: bool = False, hosted: dict | None =
 
 
 def bootstrap_config(ws: Workspace, token: str, user: str | None = None, *,
-                     hosted: dict | None = None, demo: bool = False) -> dict:
+                     hosted: dict | None = None, demo: bool = False, sign_out_url: str = "") -> dict:
     config: dict = {
         "api_token": token,
         "workspace_key": workspace_key(ws, user),
@@ -63,6 +63,8 @@ def bootstrap_config(ws: Workspace, token: str, user: str | None = None, *,
     }
     if hosted is not None:
         config["hosted"] = hosted
+    if sign_out_url:
+        config["sign_out_url"] = sign_out_url
     return config
 
 
@@ -196,6 +198,7 @@ def dashboard_meta(
     demo: bool = False,
     user: str | None = None,
     hosted: dict | None = None,
+    sign_out_url: str = "",
 ) -> dict:
     cfg = cfg if cfg is not None else store.policy(ws)
     default_status, default_priority, default_type = operations.task_defaults(cfg)
@@ -239,7 +242,7 @@ def dashboard_meta(
             if item.frontmatter.get(field):
                 name = str(item.frontmatter[field])
                 usage[field][name] = usage[field].get(name, 0) + 1
-    return {
+    meta = {
         "workspace_key": workspace_key(ws, user),
         "status_labels": status_labels,
         "view_labels": view_labels,
@@ -266,6 +269,9 @@ def dashboard_meta(
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
     }
+    if sign_out_url:
+        meta["sign_out_url"] = sign_out_url
+    return meta
 
 
 def included_ids(value: object) -> list[str]:
@@ -315,7 +321,7 @@ def draft_list_payload(root: Path, viewer: str | None = None) -> list[dict]:
 
 def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str = "", query: card_query.Query | None = None,
                       include: object = None, demo: bool = False, actor: str | None = None,
-                      hosted: dict | None = None) -> dict:
+                      hosted: dict | None = None, sign_out_url: str = "") -> dict:
     """Collections for ``query`` plus only the card summaries a client needs to show them.
 
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
@@ -334,7 +340,8 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
-    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor, hosted=hosted)
+    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor, hosted=hosted,
+                          sign_out_url=sign_out_url)
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now),
                                              actor=actor, focus_user=actor, ws=ws, now=now)

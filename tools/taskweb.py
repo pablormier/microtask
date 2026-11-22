@@ -89,8 +89,13 @@ except ImportError:  # Direct script entry point or file-based test loader.
 
 class TaskWebServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], token: str, workspace: Workspace, allow_hosts: Iterable[str] = (),
-                 *, demo: bool = False, hosted: web_hosted.HostedConfig | None = None):
+                 *, demo: bool = False, hosted: web_hosted.HostedConfig | None = None,
+                 require_secret: str | None = None, sign_out_url: str = ""):
         super().__init__(address, TaskWebHandler)
+        # The Sign out link of a single-user dashboard behind a proxy (a shared one keeps its URL in `hosted`).
+        self.sign_out_url = sign_out_url
+        # Set for a single-user dashboard behind a proxy: every request must carry this secret.
+        self.require_secret = require_secret
         # Set when one dashboard serves a shared workspace: every request must then name a signed-in person.
         self.hosted = hosted
         self.allow_hosts = {name.lower() for name in allow_hosts}  # NAME or NAME:PORT, from --allow-host.
@@ -176,6 +181,10 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         """
         hosted = getattr(self.server, "hosted", None)
         if hosted is None:
+            required = getattr(self.server, "require_secret", None)
+            if required and not web_hosted.secret_header_matches(self.headers, required):
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "This request did not come through the sign-in proxy."})
+                return False, None
             return True, None
         try:
             return True, hosted.identify(self.headers)
@@ -359,7 +368,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.api_token(actor),
                                                                          actor.user if actor else None,
                                                                          hosted=self.hosted_meta(actor),
-                                                                         demo=self.server.demo))
+                                                                         demo=self.server.demo,
+                                                                         sign_out_url=self.server.sign_out_url))
             self.send_html(page, nonce=nonce)
             return
         if url.path == "/api/item":
@@ -384,7 +394,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                 ws = self.server.workspace.for_operation()
                 payload = dashboard_payload(ws, self.server.cache, api_token=self.api_token(actor), include=include,
                                             query=request_query(ws, params), demo=self.server.demo,
-                                            actor=actor.user if actor else None, hosted=self.hosted_meta(actor))
+                                            actor=actor.user if actor else None, hosted=self.hosted_meta(actor),
+                                            sign_out_url=self.server.sign_out_url)
                 payload["sync_warning"] = self.server.sync.current_warning()
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
@@ -491,7 +502,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
                                            api_token=self.api_token(actor), query=query, include=body.get("include"),
                                            demo=self.server.demo, actor=actor.user if actor else None,
-                                           hosted=self.hosted_meta(actor)),
+                                           hosted=self.hosted_meta(actor), sign_out_url=self.server.sign_out_url),
                        "sync_warning": " ".join(part for part in (self.server.sync.current_warning(), history_warning) if part),
                        "restart_notice": self.server.restart_notice(),
                        **payload}
@@ -516,12 +527,14 @@ def dashboard_url(host: str, port: int, filters: dict | None = None) -> str:
 
 def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool, filters: dict | None = None,
                     allow_hosts: Iterable[str] = (), demo: bool = False,
-                    hosted: web_hosted.HostedConfig | None = None) -> int:
+                    hosted: web_hosted.HostedConfig | None = None, require_secret: str | None = None,
+                    sign_out_url: str = "") -> int:
     # A shared workspace may run several processes behind one proxy, so they all derive the same token.
     token = (web_hosted.shared_process_token(hosted.secret, application_version(APP_ROOT)) if hosted is not None
              else secrets.token_urlsafe(24))
     try:
-        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted)
+        server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted,
+                               require_secret=require_secret, sign_out_url=sign_out_url)
     except OSError as error:
         print(f"error: failed to start web server: {error}", file=sys.stderr)
         return 1
@@ -571,6 +584,33 @@ def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig 
                                    sign_out_url=sign_out_url)
 
 
+def required_secret(args: argparse.Namespace, environ) -> str | None:
+    """The proxy secret a single-user dashboard demands on every request, or None without --require-proxy-secret."""
+    if not args.require_proxy_secret:
+        return None
+    if args.trust_proxy_user:
+        raise ValueError("--require-proxy-secret and --trust-proxy-user cannot be combined; "
+                         "--trust-proxy-user already checks the secret")
+    return web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
+                                  environ.get("MT_PROXY_SECRET"), option="--require-proxy-secret")
+
+
+def single_user_sign_out_url(args: argparse.Namespace, environ) -> str:
+    """The Sign out link of a --require-proxy-secret dashboard, or "" when none applies.
+
+    --trust-proxy-user keeps its URL in hosted_config. Plain `mt web` has no sign-in to leave, so an
+    explicit --sign-out-url is refused there, while MT_SIGN_OUT_URL is ignored.
+    """
+    if args.trust_proxy_user:
+        return ""
+    if not args.require_proxy_secret:
+        if args.sign_out_url:
+            raise ValueError("--sign-out-url needs --trust-proxy-user or --require-proxy-secret; "
+                             "without a sign-in proxy there is nothing to sign out of")
+        return ""
+    return web_hosted.read_sign_out_url(args.sign_out_url or environ.get("MT_SIGN_OUT_URL"))
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     # The process edge: `mt web` starts this script with the selected workspace in its environment.
@@ -580,13 +620,16 @@ def main(argv: list[str]) -> int:
         print(f"error: {missing}", file=sys.stderr)
         return 2
     try:
+        required = required_secret(args, workspace.environ)
         hosted = hosted_config(args, workspace.environ)
+        sign_out_url = single_user_sign_out_url(args, workspace.environ)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return serve_dashboard(workspace, args.host, args.port, no_open=args.no_open,
                            filters=board_filters(workspace, args), allow_hosts=args.allow_host,
-                           demo=bool(args.demo), hosted=hosted)
+                           demo=bool(args.demo), hosted=hosted, require_secret=required,
+                           sign_out_url=sign_out_url)
 
 
 if __name__ == "__main__":

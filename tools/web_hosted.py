@@ -47,7 +47,8 @@ class Identity:
     admin: bool
 
 
-def read_secret(path: str | None = None, value: str | None = None) -> str:
+def read_secret(path: str | None = None, value: str | None = None,
+                option: str = "--trust-proxy-user") -> str:
     """The shared secret from a file (preferred) or a value, checked for being long enough."""
     if path:
         try:
@@ -57,7 +58,7 @@ def read_secret(path: str | None = None, value: str | None = None) -> str:
     elif value:
         text = value
     else:
-        raise ValueError("--trust-proxy-user needs the proxy secret: pass --proxy-secret-file FILE "
+        raise ValueError(f"{option} needs the proxy secret: pass --proxy-secret-file FILE "
                          "or set MT_PROXY_SECRET_FILE")
     secret = text.strip()
     if "\n" in secret or "\r" in secret:
@@ -66,6 +67,12 @@ def read_secret(path: str | None = None, value: str | None = None) -> str:
         raise ValueError(f"the proxy secret needs at least {MIN_SECRET_LENGTH} characters; "
                          "generate one with: python3 -c 'import secrets; print(secrets.token_urlsafe(32))'")
     return secret
+
+
+def secret_header_matches(headers, secret: str) -> bool:
+    """True when the request carries exactly one X-Microtask-Proxy-Secret header with this value."""
+    sent = headers.get_all(SECRET_HEADER) or []
+    return len(sent) == 1 and secrets.compare_digest(sent[0].strip().encode("utf-8"), secret.encode("utf-8"))
 
 
 def read_user_map(path: str | None) -> dict[str, str]:
@@ -154,9 +161,7 @@ class HostedConfig:
 
     def identify(self, headers) -> Identity:
         """The person behind a request, or HostedAuthError. `headers` is an email.message.Message."""
-        secrets_sent = headers.get_all(SECRET_HEADER) or []
-        if len(secrets_sent) != 1 or not secrets.compare_digest(
-                secrets_sent[0].strip().encode("utf-8"), self.secret.encode("utf-8")):
+        if not secret_header_matches(headers, self.secret):
             raise HostedAuthError(403, "This request did not come through the sign-in proxy.")
         emails = headers.get_all(EMAIL_HEADER) or []
         if not emails:

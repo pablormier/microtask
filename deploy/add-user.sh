@@ -7,19 +7,21 @@
 #
 # Options:
 #   --root DIR        prefix for /srv, /etc, /opt (or set MT_DEPLOY_ROOT); for tests
-#   --no-systemctl    do not chown, enable the service, or reload Caddy
+#   --no-systemctl    do not create the account, chown, enable the service, or reload Caddy
 #   --dry-run         print what would happen and change nothing
 #   --app DIR         microtask version that creates the workspace (or MT_APP_DIR);
 #                     default is /opt/microtask/current
 #
 # Run it as root. The workspace holds cards, settings and Git only. The
-# service runs the app from /opt/microtask/current (see upgrade.sh).
+# service runs the app from /opt/microtask/current (see upgrade.sh) as its own
+# system account, mt-USER, which owns the workspace and /etc/mt/USER.secret. The
+# secret is the proof that a request came through Caddy; the dashboard answers 403
+# without it.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 root="${MT_DEPLOY_ROOT:-}"
 app_dir="${MT_APP_DIR:-}"
-service_user="${MT_SERVICE_USER:-mt}"
 first_port=8101
 no_systemctl=""
 dry_run=""
@@ -57,6 +59,10 @@ root="${root%/}"
 email="$(printf '%s' "$email" | tr '[:upper:]' '[:lower:]')"
 [[ "$email" =~ ^[a-z0-9._+-]+@[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$ ]] \
   || die "owner email does not look like an address: $email"
+# One Unix account per workspace. Linux account names are at most 32 characters.
+unix_user="mt-$user"
+[[ ${#unix_user} -le 32 ]] \
+  || die "user name $user is too long: the account $unix_user would have ${#unix_user} characters and Linux allows 32; use at most 29"
 host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
 [[ "$host" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
   || die "public host must be a domain name such as alice.mt.example.com: $host"
@@ -80,6 +86,9 @@ retired_file="$env_dir/$user.retired"
 # name in between.
 check_existing() {
   local path
+  if [[ -z "$no_systemctl" ]]; then
+    ! id "$unix_user" >/dev/null 2>&1 || die "the account $unix_user already exists"
+  fi
   for path in "$workspace" "$env_file" "$secret_file" "$caddy_file" "$members_file" "$retired_file"; do
     [[ ! -e "$path" ]] || die "user $user already exists ($path is present)"
   done
@@ -92,8 +101,16 @@ claim_path() {
 }
 check_existing
 if [[ -z "$no_systemctl" && -z "$dry_run" ]]; then
-  id "$service_user" >/dev/null 2>&1 || die "service account $service_user does not exist"
+  command -v useradd >/dev/null 2>&1 || die "useradd is not available, so the account $unix_user cannot be created"
 fi
+
+# Create an empty file that nobody else can read, then give it its final mode, so that content
+# written afterwards (with > or >>, which keep the mode) is never readable by others.
+make_file() {
+  local mode_bits="$1" path="$2"
+  ( umask 077; : > "$path" )
+  chmod "$mode_bits" "$path"
+}
 
 if [[ -z "$dry_run" ]]; then
   mkdir -p "$env_dir"
@@ -107,6 +124,7 @@ if [[ -z "$dry_run" ]]; then
 fi
 
 created=()
+created_account=""
 added_email=""
 enabled_unit=""
 cleanup() {
@@ -129,6 +147,9 @@ p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
       for path in "${created[@]}"; do
         rm -rf "$path"
       done
+    fi
+    if [[ -n "$created_account" ]]; then
+      userdel "$unix_user" >/dev/null 2>&1 || true
     fi
   fi
   if [[ -n "${lock_dir:-}" ]]; then
@@ -155,8 +176,9 @@ while [[ "$used_ports" == *" $port "* ]]; do
 done
 
 if [[ -n "$dry_run" ]]; then
+  [[ -n "$no_systemctl" ]] || echo "would create the system account $unix_user"
   echo "would create workspace $workspace"
-  echo "would write $env_file (PORT=$port, HOST_NAME=$host)"
+  echo "would write $env_file (PORT=$port, HOST_NAME=$host, MT_PROXY_SECRET_FILE=/etc/mt/$user.secret, MT_SIGN_OUT_URL=/oauth2/sign_out) and $secret_file"
   echo "would write $caddy_file for $email"
   echo "would add $email to $emails_file"
   [[ -n "$no_systemctl" ]] || echo "would enable mt-web@$user and reload caddy"
@@ -179,16 +201,23 @@ chmod 700 "$workspace"
 
 mkdir -p "$env_dir"
 claim_path "$env_file"
-printf 'PORT=%s\nHOST_NAME=%s\n' "$port" "$host" > "$env_file"
+claim_path "$secret_file"
+secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+make_file 600 "$secret_file"
+printf '%s\n' "$secret" > "$secret_file"
+printf 'PORT=%s\nHOST_NAME=%s\nMT_PROXY_SECRET_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
+  "$port" "$host" "/etc/mt/$user.secret" "/oauth2/sign_out" > "$env_file"
 
 mkdir -p "$caddy_dir"
 claim_path "$caddy_file"
+make_file 640 "$caddy_file"
 {
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line//@USER@/$user}"
     line="${line//@EMAIL@/$email}"
     line="${line//@HOST@/$host}"
     line="${line//@PORT@/$port}"
+    line="${line//@SECRET@/$secret}"
     printf '%s\n' "$line"
   done < "$template"
 } > "$caddy_file"
@@ -201,7 +230,15 @@ if ! grep -qxF "$email" "$emails_file"; then
 fi
 
 if [[ -z "$no_systemctl" ]]; then
-  chown -R "$service_user:$service_user" "$workspace"
+  # A system account of its own, with no login shell and no home outside the workspace, so that
+  # no other dashboard can read these cards or the secret.
+  useradd --system --user-group --no-create-home --home-dir "$workspace" --shell /usr/sbin/nologin "$unix_user"
+  created_account=1
+  chown -R "$unix_user:$unix_user" "$workspace"
+  chown "$unix_user:$unix_user" "$secret_file"
+  if getent group caddy >/dev/null 2>&1; then
+    chgrp caddy "$caddy_file"
+  fi
   if command -v caddy >/dev/null 2>&1; then
     caddy validate --config /etc/caddy/Caddyfile >/dev/null
   fi

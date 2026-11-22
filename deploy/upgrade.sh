@@ -10,12 +10,12 @@
 #   --source URL      git URL or path to clone from
 #                     (default https://github.com/pablormier/microtask.git)
 #   --root DIR        prefix for /opt and /srv (or set MT_DEPLOY_ROOT); for tests
-#   --no-systemctl    do not run as the mt user, restart services, or chown
+#   --no-systemctl    do not run as the workspace accounts, restart services, or chown
 #   --dry-run         print what would happen and change nothing
 #   --rollback        make the previous version current again
 #   --allow-skip      allow skipping a minor version (see below)
 #
-# Run it as root. Versions live in /opt/microtask/TAG. 'current' and 'previous'
+# Run it as root. Each workspace is checked as its own account, mt-NAME. Versions live in /opt/microtask/TAG. 'current' and 'previous'
 # are symlinks in that folder. Every workspace in /srv/mt is checked with the new
 # version before 'current' moves. Old version folders stay until you remove them.
 #
@@ -26,7 +26,6 @@ set -euo pipefail
 
 root="${MT_DEPLOY_ROOT:-}"
 source_url="${MT_SOURCE:-https://github.com/pablormier/microtask.git}"
-service_user="${MT_SERVICE_USER:-mt}"
 no_systemctl=""
 dry_run=""
 rollback=""
@@ -67,10 +66,6 @@ fi
 
 apps="$root/opt/microtask"
 workspaces="$root/srv/mt"
-
-if [[ -z "$no_systemctl" && -z "$dry_run" ]]; then
-  id "$service_user" >/dev/null 2>&1 || die "service account $service_user does not exist"
-fi
 
 # Name of the folder a link points at, or nothing when the link is missing.
 link_target() {
@@ -226,10 +221,17 @@ while IFS= read -r name; do
   [[ -n "$name" ]] || continue
   ws="$workspaces/$name"
   if [[ -z "$no_systemctl" ]]; then
+    unix_user="mt-$name"
+    if ! id "$unix_user" >/dev/null 2>&1; then
+      echo "FAILED: $name" >&2
+      echo "  the account $unix_user does not exist" >&2
+      failed+=("$name")
+      continue
+    fi
     if command -v runuser >/dev/null 2>&1; then
-      as_user=(runuser -u "$service_user" --)
+      as_user=(runuser -u "$unix_user" --)
     else
-      as_user=(sudo -u "$service_user")
+      as_user=(sudo -u "$unix_user")
     fi
     as_user+=(env HOME="$ws" PYTHONDONTWRITEBYTECODE=1)
   else

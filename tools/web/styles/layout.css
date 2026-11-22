@@ -63,12 +63,23 @@
   width: fit-content;
 }
 .mt-title-row .mt-mode-toggle { margin: 0; }
-.mt-title-row .mt-display-menu { margin-left: auto; }
-.mt-display-menu > summary.mt-menu-trigger { width: var(--mt-control-size); height: var(--mt-control-size); }
-/* Display settings: labelled segmented choices, not a list of commands. */
-.mt-display-menu-items { gap: 6px; min-width: 14rem; padding: 10px; }
-.mt-display-menu-items .mt-segmented { display: flex; width: 100%; }
-.mt-display-menu-items .mt-segment { flex: 1 1 0; }
+.mt-title-row .mt-toolbar-actions { margin-left: auto; }
+/* The settings menu ends the bar: a square icon, or the signed-in name in a shared workspace. */
+.mt-settings-menu { flex: 0 0 auto; }
+.mt-settings-menu > summary.mt-menu-trigger { width: var(--mt-control-size); height: var(--mt-control-size); }
+.mt-settings-menu > summary.mt-menu-trigger.has-name {
+  gap: 6px;
+  width: auto;
+  padding: var(--mt-space-1) var(--mt-space-3);
+  font-size: var(--mt-font-size-sm);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+/* Display settings are labelled segmented choices, not a list of commands. */
+.mt-settings-menu-items { gap: 6px; min-width: 14rem; max-width: min(20rem, calc(100vw - 24px)); padding: 10px; }
+.mt-settings-menu-items .mt-segmented { display: flex; width: 100%; }
+.mt-settings-menu-items .mt-segment { flex: 1 1 0; }
 .mt-menu-label { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .mt-menu-label:not(:first-child) { margin-top: 6px; }
 /* Running timers: a labelled count in the actions, opening a list of each timer's card. */
@@ -80,25 +91,13 @@
 .mt-timers-item:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 0; }
 .mt-timers-item-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .mt-timers-item-meta { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
-/* Shared-workspace account menu: shows who is signed in, and Sign out when configured. */
-.mt-account-menu { flex: 0 0 auto; }
-.mt-account-menu > summary.mt-menu-trigger {
-  gap: 6px;
-  width: auto;
-  height: var(--mt-control-size);
-  padding: var(--mt-space-1) var(--mt-space-3);
-  font-size: var(--mt-font-size-sm);
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-}
+/* In the settings menu: who is signed in, above the display settings, and Sign out below them. */
 .mt-account-name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; }
-.mt-account-menu-items { gap: 4px; min-width: 13rem; max-width: min(20rem, calc(100vw - 24px)); padding: 6px; }
-.mt-account-summary { display: grid; gap: 3px; padding: 4px 6px; }
+.mt-account-summary { display: grid; gap: 3px; margin-bottom: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--mt-border); }
 .mt-account-identity { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .mt-account-user { overflow: hidden; color: var(--mt-text); font-size: var(--mt-font-size-sm); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .mt-account-email { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); overflow-wrap: anywhere; }
-.mt-account-actions { margin-top: 2px; padding-top: 4px; border-top: 1px solid var(--mt-border); }
+.mt-account-actions { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--mt-border); }
 .mt-account-signout {
   display: flex;
   align-items: center;
@@ -219,9 +218,9 @@
   /* Search and Filters show as icons so the actions fit on the brand row. */
   .mt-title-row { flex-wrap: wrap; }
   .mt-toolbar-actions { gap: 6px; }
-  .mt-filter-toggle-label, .mt-filter-count-label, .mt-filter-clear-label, .mt-timers-label, .mt-account-name { display: none; }
+  .mt-filter-toggle-label, .mt-filter-count-label, .mt-timers-label, .mt-account-name, .mt-capture-resume-label { display: none; }
   .mt-timers-menu > summary.mt-menu-trigger { padding-inline: 6px; }
-  .mt-account-menu > summary.mt-menu-trigger { width: var(--mt-control-size); padding: 0; }
+  .mt-settings-menu > summary.mt-menu-trigger.has-name { width: var(--mt-control-size); padding: 0; }
   /* The timers list spans the action row, below it, so it stays on screen. */
   .mt-toolbar-actions { position: relative; }
   .mt-toolbar-actions .mt-timers-menu { position: static; }
@@ -230,7 +229,7 @@
   .mt-brand-wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .mt-filter-toggle .mt-badge { min-width: 1.25rem; padding-inline: 5px; }
   /* Icon-only toolbar buttons are square, matching the Display trigger. */
-  .mt-toolbar-actions .mt-quick-search-trigger, .mt-toolbar-actions .mt-filter-toggle { min-width: var(--mt-control-size); padding-inline: 6px; }
+  .mt-toolbar-actions .mt-quick-search-trigger, .mt-toolbar-actions .mt-filter-toggle, .mt-toolbar-actions .mt-capture-resume { min-width: var(--mt-control-size); padding-inline: 6px; }
   .mt-filter-search { flex-basis: 100%; }
   /* Filter menus span the wrapped row, below it, so chips near the edge stay on screen. */
   .mt-filters { position: relative; }

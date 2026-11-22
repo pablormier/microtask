@@ -15,3 +15,24 @@
 		header_up X-Microtask-Proxy-Secret {$MT_PROXY_SECRET}
 	}
 }
+
+# Personal dashboard for alice only. Like the mt-web@ service, it is a single-user
+# dashboard that answers 403 to any request without the proxy secret.
+:8081 {
+	# The dashboard's Sign out link. Basic auth has no session to end, so this asks the
+	# browser for the password again, which makes most browsers forget the stored one.
+	handle /logout {
+		header WWW-Authenticate "Basic realm=\"restricted\""
+		respond "Signed out. Close this tab, or reload to sign in again." 401
+	}
+	handle {
+		basic_auth {
+			alice $2a$06$hS2u8OeQJ0f9ywATOMllLO.4hulj6sMZ9YfZvEJrFqrKSX7kV9eeW
+		}
+		reverse_proxy personal:8000 {
+			header_up Host {upstream_hostport}
+			header_up -Authorization
+			header_up X-Microtask-Proxy-Secret {$MT_PERSONAL_SECRET}
+		}
+	}
+}

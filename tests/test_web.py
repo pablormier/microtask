@@ -430,7 +430,7 @@ view_labels:
         rendered = self.output.read_text(encoding="utf-8")
         self.assertIn('<h1 class="mt-brand">', rendered)
         self.assertIn('<span class="mt-brand-mark" aria-hidden="true">', rendered)
-        self.assertIn('id="mt-logo-bg"', rendered)
+        self.assertIn('<clipPath id="mt-logo-clip">', rendered)
         self.assertIn('<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,', rendered)
         self.assertIn('<span class="mt-brand-wordmark">MicroTask</span>', rendered)
         self.assertIn("<title>MicroTask</title>", rendered)
@@ -2486,7 +2486,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         rendered = self.output.read_text()
         self.assertIn('<nav class="mt-column-pager" aria-label="Board columns"', rendered)
         self.assertIn('@scroll.passive="trackColumn($el)"', rendered)
-        self.assertIn('Clear<span class="mt-filter-clear-label"> filters</span>', rendered)
+        self.assertIn('@click="clearFilters()">Clear filters</button>', rendered)
         node = shutil.which("node")
         if not node:
             self.skipTest("Node.js is unavailable")
@@ -2587,6 +2587,15 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         toolbar = rendered[rendered.index('class="mt-toolbar-actions"'):rendered.index('<search id="mt-filters"')]
         # New, Search and Filters never look disabled while loading; a click waits for the workspace.
         self.assertNotIn(':disabled="!ready"', toolbar)
+        # Buttons that come and go sit first, so Search, Filters and New keep their places, and the one
+        # settings menu that ends the bar is always there. Clear filters lives in the filter row.
+        order = [toolbar.index(marker) for marker in (
+            "mt-capture-resume", "mt-timers-menu", "mt-quick-search-trigger", "mt-filter-toggle", "mt-capture-new",
+            "mt-settings-menu")]
+        self.assertEqual(order, sorted(order))
+        self.assertNotIn("clearFilters()", toolbar)
+        self.assertNotIn("mt-account-menu", rendered)
+        self.assertEqual(rendered.count('class="mt-card-menu mt-settings-menu"'), 1)
         self.assertIn('@click="whenReady(() => beginNewCapture({ currentTarget: $el }))"', toolbar)
         self.assertIn("captureComposer.hasContent(captureContext())", rendered)
         self.assertIn('id="mt-focus-attention-title">Needs attention', rendered)

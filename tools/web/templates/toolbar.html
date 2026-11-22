@@ -29,26 +29,13 @@
           <button class="mt-segment" type="button" :aria-pressed="mode === 'archive'" @click="mode = 'archive'" x-text="viewLabel('archive')"></button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'deadlines'" @click="mode = 'deadlines'">Deadlines</button>
         </div>
-        <details class="mt-card-menu mt-display-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
-          <summary class="mt-menu-trigger" aria-label="Display settings" title="Display settings">
-            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/></svg>
-          </summary>
-          <div class="mt-card-menu-items mt-display-menu-items">
-            <span class="mt-menu-label" id="mt-theme-label">Theme</span>
-            <div class="mt-theme-choice mt-segmented" role="group" aria-labelledby="mt-theme-label">
-              <button type="button" class="mt-segment" :aria-pressed="theme === 'system'" @click="setTheme('system')">System</button>
-              <button type="button" class="mt-segment" :aria-pressed="theme === 'light'" @click="setTheme('light')">Light</button>
-              <button type="button" class="mt-segment" :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Dark</button>
-            </div>
-            <span class="mt-menu-label" id="mt-text-size-label">Text size</span>
-            <div class="mt-text-size mt-segmented mt-segmented-quiet" role="group" aria-labelledby="mt-text-size-label">
-              <button type="button" class="mt-segment mt-text-small" title="Small text" aria-label="Small text" :aria-pressed="textSize === 'small'" @click="setTextSize('small')">A</button>
-              <button type="button" class="mt-segment mt-text-medium" title="Medium text" aria-label="Medium text" :aria-pressed="textSize === 'medium'" @click="setTextSize('medium')">A</button>
-              <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
-            </div>
-          </div>
-        </details>
+        <!-- Buttons that come and go sit first, so Search, Filters and New stay in place. -->
         <div class="mt-toolbar-actions">
+          <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
+                  aria-label="Resume draft" title="Resume draft" @click="captureComposer.resume(captureContext(), $event)">
+            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13 7l4 4"/></svg>
+            <span class="mt-capture-resume-label">Resume draft</span>
+          </button>
           <details class="mt-card-menu mt-timers-menu" x-show="runningTimerList().length" x-cloak
                    @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
             <summary class="mt-menu-trigger mt-timers-trigger"
@@ -86,41 +73,52 @@
             <span class="mt-filter-toggle-label">Filters</span>
             <span class="mt-badge mt-badge-accent" x-show="activeFilterCount() > 0"><span x-text="activeFilterCount()"></span><span class="mt-filter-count-label"> active</span></span>
           </button>
-          <button type="button" class="mt-button mt-filter-clear" x-show="filtersApply() && activeFilterCount() > 0" @click="clearFilters()">Clear<span class="mt-filter-clear-label"> filters</span></button>
-          <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
-                  @click="captureComposer.resume(captureContext(), $event)">Resume draft</button>
           <button type="button" class="mt-button mt-button-primary mt-capture-new" @click="whenReady(() => beginNewCapture({ currentTarget: $el }))">
             <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M12 5v14M5 12h14"/>
             </svg>
             <span>New</span>
           </button>
-        </div>
-        <template x-if="hosted">
-          <details class="mt-card-menu mt-account-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
-            <summary class="mt-menu-trigger mt-account-trigger"
-                     :aria-label="'Signed in as ' + hosted.user + (hosted.email ? ' (' + hosted.email + ')' : '')"
-                     :title="hosted.email ? hosted.user + ' (' + hosted.email + ')' : hosted.user">
-              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="8.5" r="3.5"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/></svg>
-              <span class="mt-account-name" x-text="hosted.user"></span>
+          <!-- Always present, so New keeps its place: display settings, and the account behind a sign-in proxy. -->
+          <details class="mt-card-menu mt-settings-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+            <summary class="mt-menu-trigger mt-settings-trigger" :class="{ 'has-name': hosted }" aria-label="Display settings" title="Display settings"
+                     :aria-label="hosted ? 'Signed in as ' + hosted.user + (hosted.email ? ' (' + hosted.email + ')' : '') + ', display settings' : (signOutUrl ? 'Account and display settings' : 'Display settings')"
+                     :title="hosted ? (hosted.email ? hosted.user + ' (' + hosted.email + ')' : hosted.user) : (signOutUrl ? 'Account and display settings' : 'Display settings')">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" x-show="!hosted && !signOutUrl"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/></svg>
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" x-show="hosted || signOutUrl" x-cloak><circle cx="12" cy="8.5" r="3.5"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/></svg>
+              <span class="mt-account-name" x-show="hosted" x-text="hosted ? hosted.user : ''"></span>
             </summary>
-            <div class="mt-card-menu-items mt-account-menu-items">
-              <div class="mt-account-summary">
-                <span class="mt-menu-label">Signed in as</span>
-                <div class="mt-account-identity">
-                  <span class="mt-account-user" x-text="hosted.user"></span>
-                  <span class="mt-badge mt-badge-neutral" x-show="hosted.admin">Admin</span>
+            <div class="mt-card-menu-items mt-settings-menu-items">
+              <template x-if="hosted">
+                <div class="mt-account-summary">
+                  <span class="mt-menu-label">Signed in as</span>
+                  <div class="mt-account-identity">
+                    <span class="mt-account-user" x-text="hosted.user"></span>
+                    <span class="mt-badge mt-badge-neutral" x-show="hosted.admin">Admin</span>
+                  </div>
+                  <span class="mt-account-email" x-show="hosted.email" x-text="hosted.email"></span>
                 </div>
-                <span class="mt-account-email" x-show="hosted.email" x-text="hosted.email"></span>
+              </template>
+              <span class="mt-menu-label" id="mt-theme-label">Theme</span>
+              <div class="mt-theme-choice mt-segmented" role="group" aria-labelledby="mt-theme-label">
+                <button type="button" class="mt-segment" :aria-pressed="theme === 'system'" @click="setTheme('system')">System</button>
+                <button type="button" class="mt-segment" :aria-pressed="theme === 'light'" @click="setTheme('light')">Light</button>
+                <button type="button" class="mt-segment" :aria-pressed="theme === 'dark'" @click="setTheme('dark')">Dark</button>
               </div>
-              <template x-if="hosted.sign_out_url">
+              <span class="mt-menu-label" id="mt-text-size-label">Text size</span>
+              <div class="mt-text-size mt-segmented mt-segmented-quiet" role="group" aria-labelledby="mt-text-size-label">
+                <button type="button" class="mt-segment mt-text-small" title="Small text" aria-label="Small text" :aria-pressed="textSize === 'small'" @click="setTextSize('small')">A</button>
+                <button type="button" class="mt-segment mt-text-medium" title="Medium text" aria-label="Medium text" :aria-pressed="textSize === 'medium'" @click="setTextSize('medium')">A</button>
+                <button type="button" class="mt-segment mt-text-large" title="Large text" aria-label="Large text" :aria-pressed="textSize === 'large'" @click="setTextSize('large')">A</button>
+              </div>
+              <template x-if="(hosted && hosted.sign_out_url) || signOutUrl">
                 <div class="mt-account-actions">
-                  <a class="mt-account-signout" :href="hosted.sign_out_url">Sign out</a>
+                  <a class="mt-account-signout" :href="(hosted && hosted.sign_out_url) || signOutUrl">Sign out</a>
                 </div>
               </template>
             </div>
           </details>
-        </template>
+        </div>
       </div>
       <search id="mt-filters" class="mt-filters" aria-label="Search and filters" x-show="filtersOpen && filtersApply()" x-cloak>
         <label class="mt-filter-search">
@@ -177,5 +175,6 @@
             <label class="mt-checkbox-filter"><input type="checkbox" x-model="needsReviewOnly"> Needs review only</label>
           </div>
         </details>
+        <button type="button" class="mt-button mt-button-compact mt-filter-clear" x-show="activeFilterCount() > 0" @click="clearFilters()">Clear filters</button>
       </search>
     </header>

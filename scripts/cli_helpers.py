@@ -384,9 +384,14 @@ def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -
         parser.add_argument("--trust-proxy-user", action="store_true",
                             help="serve one shared workspace to several people behind a sign-in proxy: read who is asking "
                                  "from X-Auth-Request-Email, but only on requests that also carry the proxy secret")
+        parser.add_argument("--require-proxy-secret", action="store_true",
+                            help="keep the single-user dashboard but answer 403 to any request that lacks the proxy "
+                                 "secret in X-Microtask-Proxy-Secret, so other programs on this machine cannot use it; "
+                                 "needs the secret like --trust-proxy-user and cannot be combined with it")
         parser.add_argument("--proxy-secret-file", metavar="FILE",
                             help="file holding the secret the proxy sends in X-Microtask-Proxy-Secret "
-                                 "(or set MT_PROXY_SECRET_FILE); required with --trust-proxy-user")
+                                 "(or set MT_PROXY_SECRET_FILE); required with --trust-proxy-user "
+                                 "or --require-proxy-secret")
         parser.add_argument("--user-map", metavar="FILE",
                             help="lines of 'EMAIL USER' that name the user for an email "
                                  "(or set MT_USER_MAP); other emails use the part before the @")
@@ -395,7 +400,9 @@ def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -
                                  "repeatable, or set MT_ADMINS to a comma-separated list")
         parser.add_argument("--sign-out-url", metavar="URL",
                             help="URL for the dashboard's Sign out link (or set MT_SIGN_OUT_URL), "
-                                 "such as /oauth2/sign_out; omitted when unset")
+                                 "such as /oauth2/sign_out: a path starting with / or an https:// URL. "
+                                 "Works with --trust-proxy-user or --require-proxy-secret, and is refused "
+                                 "without one of them; no link is shown when unset")
     card_query.add_query_arguments(parser)
 
 

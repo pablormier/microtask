@@ -109,7 +109,8 @@ class AddUserScriptTests(unittest.TestCase):
         self.assertIn("auto_sync: false", policy)
 
         self.assertEqual((self.root / "etc/mt/alice.env").read_text(),
-                         "PORT=8101\nHOST_NAME=alice.mt.example.com\n")
+                         "PORT=8101\nHOST_NAME=alice.mt.example.com\nMT_PROXY_SECRET_FILE=/etc/mt/alice.secret\n"
+                         "MT_SIGN_OUT_URL=/oauth2/sign_out\n")
         site = (self.root / "etc/caddy/mt-users/alice.caddy").read_text()
         self.assertIn("alice.mt.example.com {", site)
         self.assertIn("not header X-Auth-Request-Email alice@example.com", site)
@@ -126,7 +127,10 @@ class AddUserScriptTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.root / "etc/mt/bob.env").read_text(),
-                         "PORT=8102\nHOST_NAME=bob.mt.example.com\n")
+                         "PORT=8102\nHOST_NAME=bob.mt.example.com\nMT_PROXY_SECRET_FILE=/etc/mt/bob.secret\n"
+                         "MT_SIGN_OUT_URL=/oauth2/sign_out\n")
+        self.assertNotEqual((self.root / "etc/mt/bob.secret").read_text(),
+                            (self.root / "etc/mt/alice.secret").read_text())
         self.assertIn("reverse_proxy 127.0.0.1:8102",
                       (self.root / "etc/caddy/mt-users/bob.caddy").read_text())
         self.assertEqual((self.root / "etc/oauth2-proxy/emails.txt").read_text(),
@@ -171,7 +175,177 @@ class AddUserScriptTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PORT=8101", result.stdout)
+        self.assertIn("MT_SIGN_OUT_URL=/oauth2/sign_out", result.stdout)
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_the_personal_dashboard_gets_a_secret_that_only_caddy_and_the_dashboard_know(self) -> None:
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MT_")}
+        env["HOME"] = str(self.root)
+        result = subprocess.run(
+            [BASH, "-c", 'umask 022; exec "$@"', "bash", BASH, str(SCRIPT), "--root", str(self.root),
+             "--no-systemctl", "--app", str(self.app), "alice", "alice@example.com", "alice.mt.example.com"],
+            check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        secret_file = self.root / "etc/mt/alice.secret"
+        secret = secret_file.read_text().strip()
+        self.assertGreaterEqual(len(secret), 32)
+        self.assertEqual(stat.S_IMODE(secret_file.stat().st_mode), 0o600)
+        caddy = self.root / "etc/caddy/mt-users/alice.caddy"
+        self.assertEqual(stat.S_IMODE(caddy.stat().st_mode) & ~0o640, 0)
+        site = caddy.read_text()
+        self.assertIn(f'request_header X-Microtask-Proxy-Secret "{secret}"', site)
+        self.assertIn("request_header -X-Microtask-Proxy-Secret", site)
+        self.assertLess(site.index("request_header -X-Microtask-Proxy-Secret"),
+                        site.index(f'request_header X-Microtask-Proxy-Secret "{secret}"'))
+        self.assertNotIn("@SECRET@", site)
+        self.assertIn("MT_PROXY_SECRET_FILE=/etc/mt/alice.secret", (self.root / "etc/mt/alice.env").read_text())
+        # The unit passes the flag, so the dashboard refuses a request without the secret.
+        unit = (SOURCE_ROOT / "deploy/systemd/mt-web@.service").read_text()
+        self.assertIn("--require-proxy-secret", unit)
+        self.assertNotIn("--trust-proxy-user", unit)
+
+    def test_every_workspace_runs_as_its_own_account(self) -> None:
+        for name, flag in (("mt-web@.service", "--require-proxy-secret"), ("mt-shared@.service", "--trust-proxy-user")):
+            unit = (SOURCE_ROOT / "deploy/systemd" / name).read_text()
+            with self.subTest(name):
+                self.assertIn("\nUser=mt-%i\n", unit)
+                self.assertIn("\nGroup=mt-%i\n", unit)
+                self.assertNotRegex(unit, r"(?m)^(User|Group)=mt$")
+                self.assertIn(flag, unit)
+                for sandbox in ("NoNewPrivileges=true", "PrivateTmp=true", "ProtectSystem=strict",
+                                "TemporaryFileSystem=/srv/mt", "BindPaths=/srv/mt/%i", "ReadWritePaths=/srv/mt/%i"):
+                    self.assertIn(sandbox, unit)
+        for script in (SCRIPT, SHARED_SCRIPT, UPGRADE):
+            text = script.read_text()
+            self.assertNotIn("MT_SERVICE_USER", text)
+            self.assertNotIn("service_user", text)
+
+    def test_names_that_would_make_an_account_name_over_32_characters_are_refused(self) -> None:
+        longest = "a" * 29
+        too_long = "a" * 30
+        for script, arguments in ((SCRIPT, lambda n: (n, f"{n}@example.com", "x.mt.example.com")),
+                                  (SHARED_SCRIPT, lambda n: (n, "x.mt.example.com", "bob@example.com"))):
+            with self.subTest(script=script.name):
+                refused = subprocess.run(
+                    [BASH, str(script), "--root", str(self.root), "--no-systemctl", "--app", str(self.app),
+                     *arguments(too_long)], check=False, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("mt-" + too_long, refused.stderr)
+                self.assertIn("32", refused.stderr)
+                self.assertEqual(list(self.root.iterdir()), [])
+                allowed = subprocess.run(
+                    [BASH, str(script), "--root", str(self.root), "--no-systemctl", "--dry-run", "--app", str(self.app),
+                     *arguments(longest)], check=False, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+                self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+    def fake_commands(self, **failing: str) -> tuple[dict[str, str], Path]:
+        """An environment whose id, useradd, userdel, chown, chgrp, getent, systemctl, caddy and runuser only log.
+
+        A command named in `failing` exits 1 when its first argument is the given word. Returns the
+        environment and the log file, one line per call.
+        """
+        fake = Path(tempfile.mkdtemp(dir=self.base))
+        accounts = Path(tempfile.mkdtemp(dir=self.base))
+        log = fake / "calls.log"
+        log.write_text("")
+        scripts = {
+            "id": 'test -e "$FAKE_ACCOUNTS/$1"',
+            "useradd": 'echo "useradd $*" >> "$FAKE_LOG"; for last; do :; done; touch "$FAKE_ACCOUNTS/$last"',
+            "userdel": 'echo "userdel $*" >> "$FAKE_LOG"; rm -f "$FAKE_ACCOUNTS/$1"',
+            "chown": 'echo "chown $*" >> "$FAKE_LOG"',
+            "chgrp": 'echo "chgrp $*" >> "$FAKE_LOG"',
+            "getent": "exit 1",
+            "caddy": "exit 0",
+            "systemctl": 'echo "systemctl $*" >> "$FAKE_LOG"; test "$1" != "$FAKE_FAIL_SYSTEMCTL"',
+            "runuser": 'echo "runuser $*" >> "$FAKE_LOG"; shift 3; exec "$@"',
+        }
+        for name, body in scripts.items():
+            path = fake / name
+            path.write_text(f"#!/bin/sh\n{body}\n")
+            path.chmod(0o755)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("MT_")}
+        env.update(HOME=str(self.root), PATH=f"{fake}{os.pathsep}{os.environ['PATH']}", FAKE_LOG=str(log),
+                   FAKE_ACCOUNTS=str(accounts), FAKE_FAIL_SYSTEMCTL=failing.get("systemctl", "never"))
+        env.pop("OAUTH2_EMAILS_FILE", None)
+        return env, log
+
+    def run_with_accounts(self, script: Path, env: dict[str, str], *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([BASH, str(script), "--root", str(self.root), "--app", str(self.app), *arguments],
+                              check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+
+    def test_each_workspace_gets_a_system_account_that_owns_its_files(self) -> None:
+        env, log = self.fake_commands()
+        cases = (
+            (SCRIPT, ("alice", "alice@example.com", "alice.mt.example.com"), "alice", "mt-web@alice"),
+            (SHARED_SCRIPT, ("team", "team.mt.example.com", "bob@example.com"), "team", "mt-shared@team"),
+        )
+        for script, arguments, name, unit in cases:
+            with self.subTest(script=script.name):
+                result = self.run_with_accounts(script, env, *arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text().splitlines()
+        workspace = self.root / "srv/mt"
+        for name, unit in (("alice", "mt-web@alice"), ("team", "mt-shared@team")):
+            self.assertIn(f"useradd --system --user-group --no-create-home --home-dir {workspace / name} "
+                          f"--shell /usr/sbin/nologin mt-{name}", calls)
+            self.assertIn(f"chown -R mt-{name}:mt-{name} {workspace / name}", calls)
+            self.assertIn(f"chown mt-{name}:mt-{name} {self.root / 'etc/mt' / (name + '.secret')}", calls)
+            self.assertIn(f"systemctl enable --now {unit}", calls)
+            self.assertLess(calls.index(f"useradd --system --user-group --no-create-home --home-dir "
+                                        f"{workspace / name} --shell /usr/sbin/nologin mt-{name}"),
+                            calls.index(f"chown -R mt-{name}:mt-{name} {workspace / name}"))
+        # No call names a shared account, and each workspace's files go to its own account only.
+        self.assertFalse([call for call in calls if call.startswith("chown") and " mt:mt" in call])
+        self.assertFalse([call for call in calls if "mt-team" in call and "alice" in call])
+        # A second run for an existing account is refused before anything changes.
+        again = self.run_with_accounts(SCRIPT, env, "alice", "alice@example.com", "alice.mt.example.com")
+        self.assertNotEqual(again.returncode, 0)
+        self.assertIn("already exists", again.stderr)
+
+    def test_an_existing_account_with_the_workspace_name_is_refused(self) -> None:
+        env, log = self.fake_commands()
+        Path(env["FAKE_ACCOUNTS"], "mt-alice").touch()
+        result = self.run_with_accounts(SCRIPT, env, "alice", "alice@example.com", "alice.mt.example.com")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mt-alice already exists", result.stderr)
+        result = self.run_with_accounts(SHARED_SCRIPT, env, "alice", "alice.mt.example.com", "bob@example.com")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mt-alice already exists", result.stderr)
+        self.assertEqual(log.read_text(), "")
+        self.assertFalse((self.root / "srv").exists())
+
+    def test_dry_runs_mention_the_account_and_create_nothing(self) -> None:
+        env, log = self.fake_commands()
+        for script, arguments, account in (
+            (SCRIPT, ("alice", "alice@example.com", "alice.mt.example.com"), "mt-alice"),
+            (SHARED_SCRIPT, ("team", "team.mt.example.com", "bob@example.com"), "mt-team"),
+        ):
+            with self.subTest(script=script.name):
+                result = self.run_with_accounts(script, env, "--dry-run", *arguments)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"would create the system account {account}", result.stdout)
+        self.assertEqual(log.read_text(), "")
+        self.assertFalse((self.root / "srv").exists())
+        skipped = self.add_user("--dry-run", "alice", "alice@example.com", "alice.mt.example.com")
+        self.assertNotIn("system account", skipped.stdout)
+
+    def test_a_failed_setup_removes_the_account_with_the_files(self) -> None:
+        for script, arguments, name in (
+            (SCRIPT, ("alice", "alice@example.com", "alice.mt.example.com"), "alice"),
+            (SHARED_SCRIPT, ("team", "team.mt.example.com", "bob@example.com"), "team"),
+        ):
+            env, log = self.fake_commands(systemctl="enable")
+            with self.subTest(script=script.name):
+                result = self.run_with_accounts(script, env, *arguments)
+                self.assertNotEqual(result.returncode, 0)
+                calls = log.read_text().splitlines()
+                self.assertTrue(any(call.startswith(f"useradd ") and call.endswith(f"mt-{name}") for call in calls))
+                self.assertIn(f"userdel mt-{name}", calls)
+                self.assertFalse(Path(env["FAKE_ACCOUNTS"], f"mt-{name}").exists())
+                self.assertFalse((self.root / "srv/mt" / name).exists())
+                self.assertFalse((self.root / "etc/mt" / f"{name}.secret").exists())
+            shutil.rmtree(self.root / "etc", ignore_errors=True)
+            shutil.rmtree(self.root / "srv", ignore_errors=True)
 
     def add_shared(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         env = {key: value for key, value in os.environ.items() if not key.startswith("MT_")}
@@ -772,6 +946,41 @@ class UpgradeScriptTests(unittest.TestCase):
         path = self.apps / name
         return os.readlink(path) if path.is_symlink() else None
 
+    def test_each_workspace_is_checked_as_its_own_account(self) -> None:
+        self.assertEqual(self.upgrade("v1.0.0").returncode, 0)
+        self.add_user("alice")
+        self.add_user("bob")
+        fake = self.root / "fake-bin"
+        fake.mkdir()
+        log = fake / "calls.log"
+        stubs = {
+            "id": "exit 0",
+            "runuser": 'echo "runuser $*" >> "$FAKE_LOG"; shift 3; exec "$@"',
+            "chown": "exit 0",
+            "systemctl": "exit 1",
+        }
+        for name, body in stubs.items():
+            (fake / name).write_text(f"#!/bin/sh\n{body}\n")
+            (fake / name).chmod(0o755)
+        env = self.environment()
+        env.update(PATH=f"{fake}{os.pathsep}{os.environ['PATH']}", FAKE_LOG=str(log))
+        result = subprocess.run(
+            [BASH, str(UPGRADE), "--root", str(self.root), "--source", str(self.source), "v1.1.0"],
+            check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text()
+        self.assertIn("runuser -u mt-alice -- env HOME=", calls)
+        self.assertIn("runuser -u mt-bob -- env HOME=", calls)
+        self.assertNotIn("runuser -u mt ", calls)
+        # A workspace without its account stops the switch.
+        (fake / "id").write_text('#!/bin/sh\ntest "$1" != mt-bob\n')
+        result = subprocess.run(
+            [BASH, str(UPGRADE), "--root", str(self.root), "--source", str(self.source), "--allow-skip", "v1.3.0"],
+            check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("mt-bob does not exist", result.stderr)
+        self.assertEqual(self.link("current"), "v1.1.0")
+
     def test_first_install_creates_version_and_current_only(self) -> None:
         result = self.upgrade("v1.0.0")
 
@@ -995,7 +1204,8 @@ class UpgradeScriptTests(unittest.TestCase):
 
 class DeployFilesTests(unittest.TestCase):
     def test_kit_has_no_real_hosts_or_secrets(self) -> None:
-        text = "\n".join(path.read_text() for path in (SOURCE_ROOT / "deploy").rglob("*") if path.is_file())
+        text = "\n".join(path.read_text() for path in (SOURCE_ROOT / "deploy").rglob("*")
+                         if path.is_file() and "__pycache__" not in path.parts)
         self.assertIn("example.com", text)
         self.assertNotIn("BEGIN PRIVATE KEY", text)
         self.assertNotRegex(text, r"[A-Za-z0-9._-]+@(?!example\.com)[a-z0-9-]+\.(com|org|net|io)\b")

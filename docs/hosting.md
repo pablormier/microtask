@@ -35,15 +35,46 @@ The app and the data are kept apart:
 /opt/microtask/previous   link to the version before it
 /srv/mt/alice/            alice's workspace folder: cards, settings, local history (Git optional)
 /srv/mt/bob/
+/etc/mt/alice.env         port, public host, the path of the secret and the sign-out path
+/etc/mt/alice.secret      the secret Caddy sends to alice's dashboard
 ```
 
 - Every user runs the same app from `/opt/microtask/current`. A workspace in
   `/srv/mt/NAME` holds cards, `settings.yaml`, Git and `.mt/` state, and no app
   files. The service `mt-web@NAME` runs
   `/opt/microtask/current/mt -R /srv/mt/NAME web` on a local port.
-- The service sees an empty `/srv/mt` with only its own workspace inside, so a
-  dashboard cannot read another user's cards. `/opt/microtask` is read-only to
-  the service.
+- Every workspace has its own system account, `mt-NAME` (`mt-alice` for
+  `alice`), with no login shell. `add-user.sh` creates it. The workspace folder
+  and `/etc/mt/NAME.secret` belong to that account, and the service
+  `mt-web@NAME` runs as it. No account can read another workspace's folder or
+  secret, even if a dashboard is compromised. Because the account name has at
+  most 32 characters, a workspace name can have at most 29.
+- The service also sees an empty `/srv/mt` with only its own workspace inside.
+  `/opt/microtask` is read-only to the service.
+- Caddy adds a secret in the `X-Microtask-Proxy-Secret` header to every request
+  it forwards, and removes any such header the client sent. The service starts
+  `mt web --require-proxy-secret`, which answers 403 to a request without the
+  secret before it reads or changes anything. A program on the server that calls
+  `127.0.0.1:810x` directly gets 403, so it cannot read the page or write to the
+  cards. The secret is in `/etc/mt/NAME.secret` (mode 600, owned by the
+  workspace's account), and Caddy keeps its own copy in the site file, which is
+  readable by root and the `caddy` group.
+  The flag works with `--proxy-secret-file FILE`, `MT_PROXY_SECRET_FILE` or
+  `MT_PROXY_SECRET`, as `--trust-proxy-user` does. It changes nothing else about
+  the single-user dashboard, and `mt web` refuses to start with both flags,
+  because shared mode already checks the secret. Without the flag, `mt web`
+  accepts any local caller, as before.
+- The dashboard shows a **Sign out** link, which leads to oauth2-proxy's
+  `/oauth2/sign_out`. `add-user.sh` sets `MT_SIGN_OUT_URL=/oauth2/sign_out` in
+  `/etc/mt/NAME.env`. With `--require-proxy-secret`, `--sign-out-url` and
+  `MT_SIGN_OUT_URL` take the same values as in shared mode (a path starting with
+  `/` or an `https://` URL). The link sits at the bottom of the settings menu
+  at the right end of the toolbar, below the theme and text size. The menu
+  shows no name or email because the dashboard has a single owner. Remove the variable from the env file and restart the service
+  to hide the link. For a dashboard made before this existed, add the line to its env
+  file and restart the service. `mt web --sign-out-url` without `--trust-proxy-user` or
+  `--require-proxy-secret` is refused, and `MT_SIGN_OUT_URL` is ignored without
+  one of them.
 - Caddy gets a certificate for each user's name and asks oauth2-proxy who the
   visitor is. Only the owner's email reaches the dashboard. Anyone else gets 403.
 - Caddy removes any `X-Auth-Request-*` headers the client sends, so they cannot
@@ -70,10 +101,10 @@ The app and the data are kept apart:
 
 Replace `mt.example.com` with your domain in every file below.
 
-1. Create the service account and the folders.
+1. Create the folders. There is no shared service account: `add-user.sh` creates
+   one account per workspace.
 
    ```sh
-   sudo useradd --system --home-dir /srv/mt --shell /usr/sbin/nologin mt
    sudo mkdir -p /srv/mt /etc/mt /etc/caddy/mt-users /etc/oauth2-proxy
    ```
 
@@ -121,17 +152,22 @@ sudo /opt/microtask/current/deploy/add-user.sh alice alice@example.com alice.mt.
 ```
 
 The script checks the name, refuses to overwrite an existing user, creates the
+system account `mt-alice` (no login shell, home `/srv/mt/alice`), creates the
 workspace `/srv/mt/alice` with `mt init --data`, picks the next free port from
-8101, writes `/etc/mt/alice.env` and `/etc/caddy/mt-users/alice.caddy`, adds the
-email to `/etc/oauth2-proxy/emails.txt`, starts `mt-web@alice` and reloads Caddy.
-It needs no network.
+8101, writes a new random secret to `/etc/mt/alice.secret` (mode 600),
+writes `/etc/mt/alice.env` (port, host, the secret's path and
+`MT_SIGN_OUT_URL=/oauth2/sign_out`) and
+`/etc/caddy/mt-users/alice.caddy` (mode 640, with a copy of the secret), adds
+the email to `/etc/oauth2-proxy/emails.txt`, gives the workspace and the secret
+to `mt-alice`, starts `mt-web@alice` and reloads Caddy. It needs no network. If a
+step fails, the script removes the account and the files it created.
 
 Then open `https://alice.mt.example.com`. The first visit asks for a Google
 sign-in. oauth2-proxy may need a restart to read a new line in the emails file.
 
 Useful options: `--dry-run` prints the plan and writes nothing. `--root DIR`
-puts every path under `DIR`, and `--no-systemctl` skips the chown, systemd and
-Caddy steps. These two are for trying the script on another machine. `--app DIR`
+puts every path under `DIR`, and `--no-systemctl` skips creating the account,
+the chown, and the systemd and Caddy steps. These two are for trying the script on another machine. `--app DIR`
 (or `MT_APP_DIR`) sets which version creates the workspace. The default is
 `/opt/microtask/current`.
 
@@ -161,7 +197,7 @@ step, and stop the dashboards while you do it:
 ```sh
 git clone --branch v0.2.0 https://github.com/pablormier/microtask.git /tmp/microtask-0.2.0
 sudo systemctl stop 'mt-web@*'
-sudo -u mt /tmp/microtask-0.2.0/mt -R /srv/mt/NAME migrate     # for each NAME in /srv/mt
+sudo -u mt-NAME /tmp/microtask-0.2.0/mt -R /srv/mt/NAME migrate     # for each NAME in /srv/mt
 sudo /tmp/microtask-0.2.0/deploy/upgrade.sh v0.2.0
 ```
 
@@ -181,8 +217,9 @@ The script does this in order:
    a temporary directory and renames it into place, so a failed clone leaves
    nothing behind.
 2. Runs `mt -R /srv/mt/NAME validate` with the new version for every workspace.
-   It runs as the `mt` user with `runuser` (or `sudo -u` where `runuser` is
-   missing). If any workspace fails, the script names it and stops. `current`
+   It runs as that workspace's own account, `mt-NAME`, with `runuser` (or
+   `sudo -u` where `runuser` is missing). A workspace whose account is missing
+   fails the check. If any workspace fails, the script names it and stops. `current`
    stays where it was and no service restarts. The new folder stays in place.
 3. Points `previous` at the old version, then replaces `current` with a link to
    the new one in a single atomic rename.
@@ -247,13 +284,17 @@ different machine or provider. Restore by putting the files back, running
 
 ```sh
 sudo systemctl disable --now mt-web@alice
-sudo rm /etc/mt/alice.env /etc/caddy/mt-users/alice.caddy
+sudo rm /etc/mt/alice.env /etc/mt/alice.secret /etc/caddy/mt-users/alice.caddy
 sudo systemctl reload caddy
+sudo userdel mt-alice
 ```
 
 Remove the email from `/etc/oauth2-proxy/emails.txt`. Delete `/srv/mt/alice` only
 after you have a backup of it. Upgrades check every folder in `/srv/mt`, so move
-or delete a removed user's workspace to keep it out of them.
+or delete a removed user's workspace to keep it out of them. `userdel` leaves
+the files in `/srv/mt/alice` owned by a numeric id that no account has any more,
+and a later account could be given the same id, so delete or move the folder
+before you create new accounts.
 
 ## Shared workspace
 
@@ -308,11 +349,12 @@ because settings are workspace data that people can edit in the dashboard:
 | `--proxy-secret-file FILE` | `MT_PROXY_SECRET_FILE` | the secret, at least 16 characters |
 | `--admin USER` (repeatable) | `MT_ADMINS` (comma-separated) | administrators |
 | `--user-map FILE` | `MT_USER_MAP` | email to user name lines |
-| `--sign-out-url URL` | `MT_SIGN_OUT_URL` | optional Sign out link (relative `/...` or `https://...`) |
+| `--sign-out-url URL` | `MT_SIGN_OUT_URL` | optional Sign out link (relative `/...` or `https://...`); also read with `--require-proxy-secret` |
 
-In shared mode the toolbar shows an account menu with the signed-in user name,
-email address, and an `Admin` badge for administrators. When `--sign-out-url` or
-`MT_SIGN_OUT_URL` is set, the menu includes a **Sign out** link; `add-shared.sh`
+In shared mode the settings menu at the right end of the toolbar shows the
+signed-in user name, email address, and an `Admin` badge for administrators,
+above the theme and text size. When `--sign-out-url` or `MT_SIGN_OUT_URL` is
+set, the menu ends with a **Sign out** link; `add-shared.sh`
 sets `MT_SIGN_OUT_URL=/oauth2/sign_out`. When it is unset (for example behind
 HTTP Basic Auth or a VPN), the menu shows the signed-in identity without a sign-out link.
 
@@ -431,18 +473,22 @@ sudo /opt/microtask/current/deploy/add-shared.sh --admin alice team team.mt.exam
 
 `add-shared.sh` takes a workspace name, a public host name and the allowed email
 addresses (more with `--emails-file FILE`). It creates `/srv/mt/team` with
-`mt init --data`, sets `rules.doing_limit_scope: per_claimant` with the
+`mt init --data` and the system account `mt-team` (no login shell, home
+`/srv/mt/team`) that owns it, sets `rules.doing_limit_scope: per_claimant` with the
 indentation of the other entries under `rules:`, checks with `mt validate` and
 `mt settings --json` that the workspace accepts it, and commits that,
 writes `/etc/mt/team.env` (port, host, administrators and the path of the
-secret) and a new random secret in `/etc/mt/team.secret` (mode 600), writes
+secret) and a new random secret in `/etc/mt/team.secret` (mode 600, owned by
+`mt-team`), writes
 `/etc/caddy/mt-users/team.caddy`, adds the addresses to the oauth2-proxy emails
 file, starts `mt-shared@team` and reloads Caddy. `--dry-run`, `--root`,
 `--no-systemctl` and `--app` work as in `add-user.sh`. `upgrade.sh` restarts
 `mt-shared@NAME` services too and validates the workspace with the new version.
 
-The Caddy file holds a copy of the secret and is readable by root and the
-`caddy` group. The allowlist is the `header_regexp` line in that file. Anyone
+No other workspace's account can read `/etc/mt/team.secret`, so a compromised
+dashboard cannot send requests as the proxy to another shared workspace. The
+Caddy file holds a copy of the secret and is readable by root and the `caddy`
+group. The allowlist is the `header_regexp` line in that file. Anyone
 who signs in with an address outside the list gets 403 from Caddy. The
 dashboard has no list of its own and accepts whoever Caddy lets through, so
 Caddy's line is the one that decides.
@@ -502,7 +548,8 @@ claims on tasks also stay. An administrator takes one over with
 `mt -R /srv/mt/NAME move TASK doing --by USER --takeover`, which is not
 restricted by the administrator list.
 
-To rotate the secret, write a new one to `/etc/mt/team.secret`, put the same
+To rotate the secret, write a new one to `/etc/mt/team.secret` as root (writing
+into the file keeps its owner and mode), put the same
 value in the `request_header X-Microtask-Proxy-Secret` line of the Caddy file,
 restart `mt-shared@team` and reload Caddy.
 

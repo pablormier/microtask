@@ -898,5 +898,265 @@ class HistoryAndConflictTests(SharedWorkspaceCase):
         self.assertNotIn("conflict", payload)
 
 
+class RequireProxySecretTests(SharedWorkspaceCase):
+    """A single-user dashboard behind a proxy: --require-proxy-secret, with no shared-workspace behavior."""
+
+    def start_required(self, secret: str | None = SECRET, sign_out_url: str = "") -> int:
+        self.hosted_server = False
+        server = taskweb.TaskWebServer(("127.0.0.1", 0), TOKEN, self.ws, require_secret=secret, sign_out_url=sign_out_url)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.port = server.server_address[1]
+        return self.port
+
+    def snapshot(self) -> dict[str, bytes]:
+        """Every file in the workspace, so a refused request can be shown to have changed nothing."""
+        return {str(path.relative_to(self.root)): path.read_bytes()
+                for path in sorted(self.root.rglob("*")) if path.is_file() and ".git" not in path.parts
+                and path.name != "history.sqlite-wal" and path.name != "history.sqlite-shm"}
+
+    def history_events(self) -> int:
+        database = self.root / ".mt" / "history.sqlite"
+        if not database.exists():
+            return 0
+        connection = sqlite3.connect(database)
+        try:
+            return connection.execute("select count(*) from events").fetchone()[0]
+        finally:
+            connection.close()
+
+    def upload_single(self, secret: str | None) -> tuple[int, dict]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            connection.putrequest("POST", "/api/attachments")
+            if secret is not None:
+                connection.putheader(web_hosted.SECRET_HEADER, secret)
+            connection.putheader("X-Microtask-Token", TOKEN)
+            connection.putheader("X-Filename", "note.txt")
+            connection.putheader("Content-Type", "text/plain")
+            connection.putheader("Content-Length", "5")
+            connection.endheaders(b"hello")
+            response = connection.getresponse()
+            raw = response.read()
+            return response.status, json.loads(raw) if raw else {}
+        finally:
+            connection.close()
+
+    def raw_get(self, path: str, secret: str | None = None) -> tuple[int, bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            connection.putrequest("GET", path)
+            if secret is not None:
+                connection.putheader(web_hosted.SECRET_HEADER, secret)
+            connection.endheaders()
+            response = connection.getresponse()
+            return response.status, response.read()
+        finally:
+            connection.close()
+
+    def bad_secrets(self) -> dict[str, dict]:
+        return {
+            "no secret": {"secret": None},
+            "wrong secret": {"secret": SECRET[:-1] + "x"},
+            "empty secret": {"secret": ""},
+            "two secrets": {"extra": [(web_hosted.SECRET_HEADER, SECRET)]},
+            "email header instead": {"secret": None, "email": "alice@example.org"},
+        }
+
+    def test_requests_without_the_secret_get_403_and_change_nothing(self) -> None:
+        card = self.add_task("Plain task")
+        self.start_required()
+        before, events = self.snapshot(), self.history_events()
+        for label, kwargs in self.bad_secrets().items():
+            with self.subTest(label):
+                for path in ("/", "/api/items", "/api/drafts", "/api/focus", "/vendor/alpinejs/dist/cdn.min.js",
+                             "/attachments/x.png", "/nothing-here"):
+                    self.assertEqual(self.request("GET", path, **kwargs)[0], 403, path)
+                writes = {
+                    "/api/comment": {"ref": card["ref"], "message": "note"},
+                    "/api/done": {"ref": card["ref"]},
+                    "/api/draft-save": {"kind": "note", "title": "Idea", "body": "text",
+                                        "capture_id": str(uuid.uuid4()), "created": "2026-01-01T10:00:00"},
+                }
+                for path, body in writes.items():
+                    # With the right dashboard token, so only the secret stands in the way.
+                    status, payload = self.request("POST", path, body, **kwargs)
+                    self.assertEqual((status, "error" in payload), (403, True), path)
+                kwargs_upload = {"secret": kwargs.get("secret", SECRET)}
+                if "extra" in kwargs:
+                    continue
+                self.assertEqual(self.upload_single(kwargs_upload["secret"])[0], 403)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.history_events(), events)
+        self.assertFalse((self.root / "attachments").exists())
+        self.assertFalse((self.root / ".mt" / "drafts").exists())
+
+    def test_the_wrong_secret_is_refused_before_the_dashboard_token_is_looked_at(self) -> None:
+        self.start_required()
+        status, payload = self.request("POST", "/api/done", {"ref": "@00000000"}, secret="wrong", token="bad-token")
+        self.assertEqual(status, 403)
+        self.assertNotIn("member_changed", payload)
+
+    def test_with_the_secret_it_is_the_ordinary_single_user_dashboard(self) -> None:
+        card = self.add_task("Plain task")
+        self.start_required()
+        status, payload = self.request("GET", "/api/items")
+        self.assertEqual(status, 200, payload)
+        self.assertNotIn("hosted", payload["meta"])
+        self.assertEqual(payload["meta"]["api_token"], TOKEN)
+        status, page = self.raw_get("/", SECRET)
+        self.assertEqual(status, 200)
+        self.assertIn(TOKEN, page.decode("utf-8"))
+        self.assertEqual(self.raw_get("/vendor/alpinejs/dist/cdn.min.js", SECRET)[0], 200)
+        # The shared-workspace routes stay closed, as in any single-user dashboard.
+        for path in ("/api/delete", "/api/takeover", "/api/topic-rename", "/api/focus"):
+            self.assertEqual(self.request("POST", path, {"ref": card["ref"]})[0], 404, path)
+        # An email header means nothing: the same single-user dashboard answers.
+        self.assertEqual(self.request("GET", "/api/items", email="alice@example.org")[0], 200)
+        status, payload = self.request("POST", "/api/comment", {"ref": card["ref"], "message": "note"})
+        self.assertEqual(status, 200, payload)
+        comments = card_format.parse_document(self.card_path(card).read_text())[0]["comments"]
+        self.assertEqual(comments[0].keys(), {"at", "text"})
+        status, payload = self.request("POST", "/api/draft-save", {
+            "kind": "note", "title": "Idea", "body": "text", "capture_id": str(uuid.uuid4()),
+            "created": "2026-01-01T10:00:00"})
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(self.request("GET", "/api/drafts")[0], 200)
+        status, payload = self.upload_single(SECRET)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(self.request("POST", "/api/done", {"ref": card["ref"]}, token="wrong-token")[0], 403)
+        self.assertFalse((self.root / ".mt" / "focus-users").exists())
+
+    def test_the_secret_is_compared_with_the_stripped_value_only(self) -> None:
+        self.start_required()
+        self.assertEqual(self.request("GET", "/api/items", secret=f"  {SECRET}  ")[0], 200)
+        self.assertEqual(self.request("GET", "/api/items", secret=SECRET + "x")[0], 403)
+        self.assertEqual(self.request("GET", "/api/items", secret=SECRET[:-1])[0], 403)
+
+    def test_without_the_flag_nothing_is_required(self) -> None:
+        self.start(hosted=False)
+        self.assertEqual(self.request("GET", "/api/items", secret=None)[0], 200)
+        self.assertEqual(self.request("GET", "/api/items", secret="anything")[0], 200)
+        self.assertEqual(self.raw_get("/")[0], 200)
+
+    def parse(self, *argv: str, environ: dict[str, str] | None = None) -> str | None:
+        return taskweb.required_secret(taskweb.parse_args(list(argv)), environ or {})
+
+    def test_the_flag_reads_the_secret_like_trust_proxy_user_and_refuses_that_flag(self) -> None:
+        path = Path(self.temporary.name) / "secret"
+        path.write_text(SECRET + "\n")
+        self.assertIsNone(self.parse())
+        self.assertIsNone(self.parse("--proxy-secret-file", str(path)))
+        self.assertEqual(self.parse("--require-proxy-secret", "--proxy-secret-file", str(path)), SECRET)
+        self.assertEqual(self.parse("--require-proxy-secret", environ={"MT_PROXY_SECRET_FILE": str(path)}), SECRET)
+        self.assertEqual(self.parse("--require-proxy-secret", environ={"MT_PROXY_SECRET": SECRET}), SECRET)
+        for argv, environ in (
+            (("--require-proxy-secret",), {}),
+            (("--require-proxy-secret", "--proxy-secret-file", str(path) + ".missing"), {}),
+            (("--require-proxy-secret",), {"MT_PROXY_SECRET": "short"}),
+        ):
+            with self.subTest(argv=argv, environ=environ):
+                with self.assertRaises(ValueError) as caught:
+                    self.parse(*argv, environ=environ)
+                self.assertTrue(str(caught.exception))
+        with self.assertRaises(ValueError) as missing:
+            self.parse("--require-proxy-secret")
+        self.assertIn("--require-proxy-secret needs the proxy secret", str(missing.exception))
+        with self.assertRaises(ValueError) as combined:
+            self.parse("--require-proxy-secret", "--trust-proxy-user", "--proxy-secret-file", str(path))
+        self.assertIn("cannot be combined", str(combined.exception))
+
+    def test_the_command_starts_only_with_a_usable_secret_and_not_with_trust_proxy_user(self) -> None:
+        path = Path(self.temporary.name) / "secret"
+        path.write_text(SECRET + "\n")
+        for arguments, message in (
+            (("--require-proxy-secret",), "needs the proxy secret"),
+            (("--require-proxy-secret", "--trust-proxy-user", "--proxy-secret-file", str(path)), "cannot be combined"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.mt("web", "--no-open", "--port", "0", *arguments)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn(message, result.stderr)
+        help_text = self.mt("web", "--help").stdout
+        self.assertIn("--require-proxy-secret", help_text)
+        self.assertIn("cannot be combined", " ".join(help_text.split()))
+
+    def test_sign_out_url_reaches_the_single_user_page_and_api(self) -> None:
+        self.start_required(sign_out_url="/oauth2/sign_out")
+        meta = self.request("GET", "/api/items")[1]["meta"]
+        self.assertEqual(meta["sign_out_url"], "/oauth2/sign_out")
+        self.assertNotIn("hosted", meta)
+        status, page = self.raw_get("/", SECRET)
+        page = page.decode("utf-8")
+        self.assertEqual(status, 200)
+        self.assertIn('"sign_out_url": "/oauth2/sign_out"', page)
+        self.assertIn('class="mt-account-signout" :href="(hosted && hosted.sign_out_url) || signOutUrl"', page)
+        self.assertIn("'Account and display settings'", page)
+        self.assertNotIn('"email"', page)
+        card = self.add_task("Plain task")
+        status, payload = self.request("POST", "/api/comment", {"ref": card["ref"], "message": "note"})
+        self.assertEqual(payload["meta"]["sign_out_url"], "/oauth2/sign_out")
+        self.assertEqual(self.request("GET", "/api/items", secret=None)[0], 403)
+
+    def test_without_a_sign_out_url_the_single_user_page_has_no_link_setting(self) -> None:
+        self.start_required()
+        self.assertNotIn("sign_out_url", self.request("GET", "/api/items")[1]["meta"])
+        self.assertNotIn('"sign_out_url"', self.raw_get("/", SECRET)[1].decode("utf-8"))
+
+    def test_a_plain_dashboard_never_carries_a_sign_out_url(self) -> None:
+        self.start(hosted=False)
+        self.assertNotIn("sign_out_url", self.request("GET", "/api/items")[1]["meta"])
+        self.assertNotIn('"sign_out_url"', self.raw_get("/")[1].decode("utf-8"))
+
+    def sign_out(self, *argv: str, environ: dict[str, str] | None = None) -> str:
+        return taskweb.single_user_sign_out_url(taskweb.parse_args(list(argv)), environ or {})
+
+    def test_the_sign_out_url_comes_from_the_flag_or_the_variable_and_is_checked(self) -> None:
+        self.assertEqual(self.sign_out("--require-proxy-secret", "--sign-out-url", "/oauth2/sign_out"), "/oauth2/sign_out")
+        self.assertEqual(self.sign_out("--require-proxy-secret", environ={"MT_SIGN_OUT_URL": "https://auth.example.org/out"}),
+                         "https://auth.example.org/out")
+        self.assertEqual(self.sign_out("--require-proxy-secret", "--sign-out-url", "/a",
+                                       environ={"MT_SIGN_OUT_URL": "/b"}), "/a")
+        self.assertEqual(self.sign_out("--require-proxy-secret"), "")
+        for bad in ("javascript:alert(1)", "//evil.example/out", "http://example.org/out", "out"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    self.sign_out("--require-proxy-secret", "--sign-out-url", bad)
+                with self.assertRaises(ValueError):
+                    self.sign_out("--require-proxy-secret", environ={"MT_SIGN_OUT_URL": bad})
+        # Shared mode reads its own URL, and plain mode ignores the variable.
+        self.assertEqual(self.sign_out("--trust-proxy-user", "--sign-out-url", "/x"), "")
+        self.assertEqual(self.sign_out(environ={"MT_SIGN_OUT_URL": "/oauth2/sign_out"}), "")
+        self.assertEqual(self.sign_out(environ={"MT_SIGN_OUT_URL": "javascript:bad"}), "")
+
+    def test_the_command_refuses_a_bad_or_unused_sign_out_url_and_ignores_the_variable(self) -> None:
+        path = Path(self.temporary.name) / "secret"
+        path.write_text(SECRET + "\n")
+        for arguments, message in (
+            (("--sign-out-url", "/oauth2/sign_out"), "--sign-out-url needs --trust-proxy-user or --require-proxy-secret"),
+            (("--require-proxy-secret", "--proxy-secret-file", str(path), "--sign-out-url", "javascript:alert(1)"),
+             "sign-out URL must be"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.mt("web", "--no-open", "--port", "0", *arguments)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn(message, result.stderr)
+        # The variable alone does not stop a plain dashboard from starting (it is only ignored).
+        env = {**clean_env(), "MT_SIGN_OUT_URL": "/oauth2/sign_out"}
+        process = subprocess.Popen([str(ROOT / "mt"), "-R", str(self.root), "web", "--no-open", "--port", "0"],
+                                   env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   stdin=subprocess.DEVNULL)
+        try:
+            self.assertTrue(process.stdout.readline().startswith("http://127.0.0.1:"))
+        finally:
+            process.terminate()
+            process.communicate(timeout=30)
+        help_text = " ".join(self.mt("web", "--help").stdout.split())
+        self.assertIn("--require-proxy-secret", help_text[help_text.index("--sign-out-url"):])
+
+
 if __name__ == "__main__":
     unittest.main()

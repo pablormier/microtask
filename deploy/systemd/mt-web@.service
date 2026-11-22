@@ -1,21 +1,25 @@
 # Template unit: one dashboard per user. Start it with
 #   systemctl enable --now mt-web@alice
-# It reads /etc/mt/alice.env (PORT and HOST_NAME) and serves the
-# workspace folder /srv/mt/alice with the app in /opt/microtask/current.
+# It runs as the account mt-alice, which add-user.sh creates. It reads /etc/mt/alice.env
+# (PORT, HOST_NAME, MT_PROXY_SECRET_FILE and MT_SIGN_OUT_URL) and serves the workspace folder
+# /srv/mt/alice with the app in /opt/microtask/current. Caddy adds the secret in
+# /etc/mt/alice.secret to every request, and the dashboard answers 403 without it.
+# MT_SIGN_OUT_URL is the oauth2-proxy sign-out path, which the page shows as a Sign out link.
 [Unit]
 Description=microtask dashboard for %i
 After=network.target
 
 [Service]
 Type=simple
-User=mt
-Group=mt
+User=mt-%i
+Group=mt-%i
 EnvironmentFile=/etc/mt/%i.env
 WorkingDirectory=/srv/mt/%i
 Environment=HOME=/srv/mt/%i
 Environment=PYTHONDONTWRITEBYTECODE=1
 # One shared, read-only app. upgrade.sh moves the 'current' link and restarts the services.
-ExecStart=/opt/microtask/current/mt -R /srv/mt/%i web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME}
+# --require-proxy-secret reads the secret from MT_PROXY_SECRET_FILE.
+ExecStart=/opt/microtask/current/mt -R /srv/mt/%i web --no-open --host 127.0.0.1 --port ${PORT} --allow-host ${HOST_NAME} --require-proxy-secret
 Restart=on-failure
 RestartSec=3
 UMask=0077
@@ -27,10 +31,9 @@ PrivateTmp=true
 # strict leaves /opt/microtask read-only, which is what we want for the app.
 ProtectSystem=strict
 ProtectHome=true
-# All dashboards run as the same account. These two lines give this service an
-# empty /srv/mt with only its own workspace bound in, so it cannot read the
-# other users' workspaces. ReadWritePaths stays because ProtectSystem=strict
-# also makes the bind mount read-only.
+# Every workspace has its own account, and its files are not readable by the others. These
+# two lines also give this service an empty /srv/mt with only its own workspace bound in.
+# ReadWritePaths stays because ProtectSystem=strict also makes the bind mount read-only.
 TemporaryFileSystem=/srv/mt
 BindPaths=/srv/mt/%i
 ReadWritePaths=/srv/mt/%i

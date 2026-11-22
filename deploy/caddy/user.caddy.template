@@ -1,13 +1,16 @@
 # Site for @USER@. Only @EMAIL@ may use it.
-# Rendered by deploy/add-user.sh. Placeholders are @USER@, @EMAIL@, @HOST@, @PORT@.
+# Rendered by deploy/add-user.sh. Placeholders are @USER@, @EMAIL@, @HOST@, @PORT@, @SECRET@.
+# This file holds the secret that tells the dashboard a request came through Caddy. Keep it readable
+# by root and the caddy group only.
 @HOST@ {
 	route {
-		# Remove anything the client sent in the headers that oauth2-proxy sets.
+		# Remove anything the client sent in the headers that oauth2-proxy and this site set.
 		request_header -X-Auth-Request-User
 		request_header -X-Auth-Request-Email
 		request_header -X-Auth-Request-Preferred-Username
 		request_header -X-Auth-Request-Groups
 		request_header -X-Auth-Request-Access-Token
+		request_header -X-Microtask-Proxy-Secret
 
 		# Sign-in pages and the sign-out endpoint live on every host.
 		reverse_proxy /oauth2/* 127.0.0.1:4180 {
@@ -33,6 +36,9 @@
 		}
 		respond @not_owner "Forbidden" 403
 
+		# The dashboard answers 403 to any request without this secret, such as one from another
+		# program on this machine.
+		request_header X-Microtask-Proxy-Secret "@SECRET@"
 		reverse_proxy 127.0.0.1:@PORT@
 	}
 }

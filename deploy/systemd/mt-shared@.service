@@ -1,7 +1,7 @@
 # Template unit: one dashboard serving one workspace to a group of people. Start it with
 #   systemctl enable --now mt-shared@team
-# It reads /etc/mt/team.env (PORT, HOST_NAME, MT_ADMINS, MT_PROXY_SECRET_FILE and optional
-# MT_SIGN_OUT_URL) and serves the workspace folder /srv/mt/team with the app in
+# It runs as the account mt-team, which add-shared.sh creates. It reads /etc/mt/team.env
+# (PORT, HOST_NAME, MT_ADMINS, MT_PROXY_SECRET_FILE and optional MT_SIGN_OUT_URL) and serves the workspace folder /srv/mt/team with the app in
 # /opt/microtask/current. Caddy tells the dashboard who is signed in; see docs/hosting.md,
 # "Shared workspace".
 [Unit]
@@ -10,8 +10,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=mt
-Group=mt
+User=mt-%i
+Group=mt-%i
 EnvironmentFile=/etc/mt/%i.env
 WorkingDirectory=/srv/mt/%i
 Environment=HOME=/srv/mt/%i

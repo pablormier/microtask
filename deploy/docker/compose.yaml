@@ -1,6 +1,7 @@
 name: microtask-shared-test
 
 x-proxy-secret: &proxy-secret microtask-local-fixture-secret
+x-personal-secret: &personal-secret microtask-local-personal-secret
 
 services:
   shared:
@@ -29,14 +30,38 @@ services:
         esac
         exec ./mt -R "/data/$$MT_TEST_WORKSPACE" web --no-open --host 0.0.0.0 --port 8000 --allow-host shared --trust-proxy-user
 
+  personal:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    init: true
+    environment:
+      MT_PROXY_SECRET: *personal-secret
+      MT_SIGN_OUT_URL: /logout
+      GIT_AUTHOR_NAME: Microtask Test
+      GIT_AUTHOR_EMAIL: microtask@example.test
+      GIT_COMMITTER_NAME: Microtask Test
+      GIT_COMMITTER_EMAIL: microtask@example.test
+    volumes:
+      - workspace:/data
+    command:
+      - bash
+      - -ec
+      - |
+        [ -e /data/personal ] || ./mt init --data /data/personal
+        exec ./mt -R /data/personal web --no-open --host 0.0.0.0 --port 8000 --allow-host personal --require-proxy-secret
+
   proxy:
     image: caddy:2.10-alpine
     depends_on:
       - shared
+      - personal
     environment:
       MT_PROXY_SECRET: *proxy-secret
+      MT_PERSONAL_SECRET: *personal-secret
     ports:
       - "127.0.0.1:${MT_TEST_PORT:-8080}:8080"
+      - "127.0.0.1:${MT_PERSONAL_PORT:-8081}:8081"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 

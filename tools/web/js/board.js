@@ -55,6 +55,7 @@ function taskBoard() {
     apiToken: MT_CONFIG.api_token || "",
     workspaceKey: MT_CONFIG.workspace_key || "",
     hosted: MT_CONFIG.hosted || null,
+    signOutUrl: MT_CONFIG.sign_out_url || "",
     memberChanging: false,
     restoredStashId: "",
     demo: Boolean(MT_CONFIG.demo),
@@ -508,6 +509,7 @@ function taskBoard() {
       this.timerWarnHours = meta.timer_warn_hours || 8;
       this.demo = Boolean(meta.demo);
       this.hosted = meta.hosted || null;
+      this.signOutUrl = meta.sign_out_url || "";
       if (meta.version) this.appVersion = meta.version;
       if (Object.prototype.hasOwnProperty.call(meta, "workspace_name")) {
         this.workspaceName = meta.workspace_name || "";
