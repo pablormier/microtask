@@ -118,6 +118,18 @@ imports. Do not add symlinks: the installer and `mt update` accept regular files
 Do not stage or commit card data by hand; `mt sync` owns the workspace's Git
 operations, and `mt migrate` makes one commit there.
 
+## Releasing
+
+`mt update` reads published **GitHub Releases** (not raw Git tags alone) and
+expects `vX.Y.Z` version tags:
+
+1. Verify tests pass on `main` and commit all changes.
+2. Create and push an annotated tag:
+   `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin main vX.Y.Z`
+3. Publish the GitHub Release summarizing the main changes since the previous
+   version:
+   `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."`
+
 ## Later cleanups
 
 These wait until after 0.2.0, so that 0.1.x installs can still update and
