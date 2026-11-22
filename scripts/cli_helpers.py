@@ -91,23 +91,51 @@ def _cli_print_error(error: TaskError) -> int:
     return error.exit_code
 
 
-def _cli_emit_write_result(result, *, as_json: bool = False) -> int:
-    history_warning = getattr(result, "history_warning", "")
+def emit_receipt(
+    receipt: dict[str, object],
+    *,
+    as_json: bool = False,
+    message: str | None = None,
+    sync_error: str = "",
+    history_warning: str = "",
+    exit_code: int = 0,
+) -> int:
+    """Print a write receipt as JSON or a human-readable line plus warnings."""
+    resolved_history_warning = history_warning or str(receipt.get("history_warning") or "")
+    resolved_sync_error = sync_error or str(receipt.get("sync_error") or "")
     if as_json:
-        payload = dict(result.receipt)
-        if result.sync_error:
-            payload["sync_error"] = result.sync_error
-        if history_warning:
-            payload["history_warning"] = history_warning
+        payload = dict(receipt)
+        if resolved_sync_error:
+            payload["sync_error"] = resolved_sync_error
+        if resolved_history_warning:
+            payload["history_warning"] = resolved_history_warning
         emit_json(payload)
         return 0
-    if result.message:
-        print(result.message)
-    if result.sync_error:
-        print(f"warning: {result.sync_error}", file=sys.stderr)
-    if history_warning:
-        print(f"warning: {history_warning}", file=sys.stderr)
-    return result.sync_exit_code
+    if message is not None:
+        if message:
+            print(message)
+    else:
+        ref, card_path = receipt.get("ref") or "", receipt.get("path") or ""
+        if receipt.get("changed", True):
+            print(f"{ref}: {card_path}" if ref and card_path else str(ref or card_path or "Saved."))
+        else:
+            print(f"No changes: {ref}" if ref else "No changes.")
+    if resolved_sync_error:
+        print(f"warning: {resolved_sync_error}", file=sys.stderr)
+    if resolved_history_warning:
+        print(f"warning: {resolved_history_warning}", file=sys.stderr)
+    return exit_code
+
+
+def _cli_emit_write_result(result, *, as_json: bool = False) -> int:
+    return emit_receipt(
+        result.receipt,
+        as_json=as_json,
+        message=result.message,
+        sync_error=result.sync_error,
+        history_warning=getattr(result, "history_warning", ""),
+        exit_code=result.sync_exit_code,
+    )
 
 
 def _cli_call_op(op_call, *, as_json: bool = False) -> int:

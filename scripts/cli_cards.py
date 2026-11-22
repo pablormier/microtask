@@ -115,33 +115,47 @@ def prepare_command_inputs(root_parser: argparse.ArgumentParser, args: argparse.
         root_parser.error("an empty body requires --title")
 
 
-def command_create(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+def create_params_from_args(args: argparse.Namespace) -> dict[str, object]:
+    """Build shared card-creation parameters from parsed CLI arguments."""
     kind = getattr(args, "kind", "task")
-    as_json = getattr(args, "as_json", False)
     text = " ".join(args.text)
     is_capture = bool(getattr(args, "capture", False))
-    needs_review = getattr(args, "needs_review", None)
+    raw_title = getattr(args, "title", None)
+    return {
+        "kind": kind,
+        "text": text,
+        "title": raw_title if is_capture else (raw_title or capture_title(text)),
+        "capture": is_capture,
+        "capture_id": getattr(args, "capture_id", None) if is_capture else None,
+        "created_at": getattr(args, "created_at", None) if is_capture else None,
+        "status": getattr(args, "status", None) if kind == "task" else None,
+        "task_type": getattr(args, "task_type", None) if kind == "task" else None,
+        "next_action": card_text_option(args, "next_action") if kind == "task" else "",
+        "instructions": card_text_option(args, "instructions"),
+        "priority": getattr(args, "priority", None),
+        "project": getattr(args, "project", None),
+        "topic": getattr(args, "topic", None),
+        "due": getattr(args, "due", None),
+        "due_kind": getattr(args, "due_kind", None),
+        "tags": list(getattr(args, "tags", None) or []),
+        "needs_review": resolve_needs_review(kind, is_capture, getattr(args, "needs_review", None)),
+        "archived": bool(getattr(args, "archived", False)),
+        "hidden": bool(getattr(args, "hidden", False)),
+    }
+
+
+def command_create(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    as_json = getattr(args, "as_json", False)
+    params = create_params_from_args(args)
+    kind = str(params.pop("kind"))
+    text = str(params.pop("text"))
+    params.pop("capture")
     return _cli_call_op(
         lambda: op_create(
             ws,
             kind,
             text,
-            title=getattr(args, "title", None) if is_capture else (getattr(args, "title", None) or capture_title(text)),
-            capture_id=getattr(args, "capture_id", None) if is_capture else None,
-            created_at=getattr(args, "created_at", None) if is_capture else None,
-            status=getattr(args, "status", None) if kind == "task" else None,
-            task_type=getattr(args, "task_type", None) if kind == "task" else None,
-            next_action=card_text_option(args, "next_action") if kind == "task" else "",
-            instructions=card_text_option(args, "instructions"),
-            priority=getattr(args, "priority", None),
-            project=getattr(args, "project", None),
-            topic=getattr(args, "topic", None),
-            due=getattr(args, "due", None),
-            due_kind=getattr(args, "due_kind", None),
-            tags=getattr(args, "tags", None),
-            needs_review=resolve_needs_review(kind, is_capture, needs_review),
-            archived=bool(getattr(args, "archived", False)),
-            hidden=bool(getattr(args, "hidden", False)),
+            **params,
             by=getattr(args, "by", None) if kind == "task" else None,
             quiet_sync=as_json,
         ),

@@ -13,11 +13,10 @@ import card_query
 from cli_cards import (
     _edit_body_mode_from_args,
     _edit_metadata_from_args,
-    card_text_option,
+    create_params_from_args,
     prepare_command_inputs,
-    resolve_needs_review,
 )
-from cli_helpers import emit_json, emit_query_output, query_output_format
+from cli_helpers import emit_json, emit_query_output, emit_receipt, query_output_format
 
 SUPPORTED_REMOTE_COMMANDS = {"add", "note", "list", "search", "read", "move", "edit", "comment", "done"}
 
@@ -72,17 +71,18 @@ def _request_json(
 
 def _post_receipt(base_url: str, token: str, path: str, payload: dict[str, object], *, as_json: bool) -> int:
     receipt = _request_json(base_url, token, "POST", path, payload=payload)
-    if as_json:
-        emit_json(receipt)
-        return 0
-    ref, card_path = receipt.get("ref") or "", receipt.get("path") or ""
-    if receipt.get("changed", True):
-        print(f"{ref}: {card_path}" if ref and card_path else str(ref or card_path or "Saved."))
-    else:
-        print(f"No changes: {ref}" if ref else "No changes.")
-    if receipt.get("history_warning"):
-        print(f"warning: {receipt['history_warning']}", file=sys.stderr)
-    return 0
+    return emit_receipt(receipt, as_json=as_json)
+
+
+def _remote_post(
+    base_url: str,
+    token: str,
+    args: argparse.Namespace,
+    path: str,
+    extra: dict[str, object],
+) -> int:
+    payload: dict[str, object] = {"query": _require_query(args), "match_mode": args.match_mode, **extra}
+    return _post_receipt(base_url, token, path, payload, as_json=bool(getattr(args, "as_json", False)))
 
 
 def _require_query(args: argparse.Namespace) -> str:
@@ -97,30 +97,10 @@ def _remote_add(base_url: str, token: str, args: argparse.Namespace) -> int:
         value = os.environ.get(variable, "").strip()
         if value and getattr(args, field, None) is None:
             setattr(args, field, value)
-    kind = getattr(args, "kind", "task")
-    is_capture = bool(getattr(args, "capture", False))
-    payload: dict[str, object] = {
-        "kind": kind,
-        "text": " ".join(args.text),
-        "title": getattr(args, "title", None),
-        "capture": is_capture,
-        "capture_id": getattr(args, "capture_id", None) if is_capture else None,
-        "created_at": getattr(args, "created_at", None) if is_capture else None,
-        "status": getattr(args, "status", None) if kind == "task" else None,
-        "task_type": getattr(args, "task_type", None) if kind == "task" else None,
-        "next_action": card_text_option(args, "next_action") if kind == "task" else "",
-        "instructions": card_text_option(args, "instructions"),
-        "priority": getattr(args, "priority", None),
-        "project": getattr(args, "project", None),
-        "topic": getattr(args, "topic", None),
-        "due": getattr(args, "due", None),
-        "due_kind": getattr(args, "due_kind", None),
-        "tags": list(getattr(args, "tags", None) or []),
-        "needs_review": resolve_needs_review(kind, is_capture, getattr(args, "needs_review", None)),
-        "archived": bool(getattr(args, "archived", False)),
-        "hidden": bool(getattr(args, "hidden", False)),
-    }
-    return _post_receipt(base_url, token, "/api/v1/add", payload, as_json=bool(getattr(args, "as_json", False)))
+    return _post_receipt(
+        base_url, token, "/api/v1/add", create_params_from_args(args),
+        as_json=bool(getattr(args, "as_json", False)),
+    )
 
 
 def _remote_list_or_search(base_url: str, token: str, args: argparse.Namespace, *, search: bool) -> int:
@@ -193,7 +173,6 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
         print("error: 'mt note' in remote mode requires text, --file, or piped stdin", file=sys.stderr)
         return 2
     prepare_command_inputs(root_parser, args)
-    as_json = bool(getattr(args, "as_json", False))
     try:
         if args.command in {"add", "note"}:
             return _remote_add(remote_url, token, args)
@@ -202,14 +181,13 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
         if args.command == "read":
             return _remote_read(remote_url, token, args)
         if args.command == "move":
-            return _post_receipt(remote_url, token, "/api/v1/move", {
-                "query": _require_query(args), "destination": args.destination,
-                "comments": list(args.comments or []), "takeover": bool(getattr(args, "takeover", False)),
-                "match_mode": args.match_mode,
-            }, as_json=as_json)
+            return _remote_post(remote_url, token, args, "/api/v1/move", {
+                "destination": args.destination,
+                "comments": list(args.comments or []),
+                "takeover": bool(getattr(args, "takeover", False)),
+            })
         if args.command == "edit":
-            return _post_receipt(remote_url, token, "/api/v1/edit", {
-                "query": _require_query(args), "match_mode": args.match_mode,
+            return _remote_post(remote_url, token, args, "/api/v1/edit", {
                 "expected_hash": getattr(args, "expected_hash", None),
                 "body_mode": _edit_body_mode_from_args(args),
                 "body_text": getattr(args, "file_text", ""),
@@ -219,16 +197,16 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
                 "assignments": list(args.assignments or []),
                 "tag_add": list(args.tag_add) if getattr(args, "tag_add", None) is not None else None,
                 "tag_remove": list(args.tag_remove) if getattr(args, "tag_remove", None) is not None else None,
-            }, as_json=as_json)
+            })
         if args.command == "comment":
-            return _post_receipt(remote_url, token, "/api/v1/comment", {
-                "query": _require_query(args), "comments": list(args.comments or []), "match_mode": args.match_mode,
-            }, as_json=as_json)
+            return _remote_post(remote_url, token, args, "/api/v1/comment", {
+                "comments": list(args.comments or []),
+            })
         if args.command == "done":
-            return _post_receipt(remote_url, token, "/api/v1/done", {
-                "query": _require_query(args), "notes": list(args.notes or []),
-                "comments": list(args.comments or []), "match_mode": args.match_mode,
-            }, as_json=as_json)
+            return _remote_post(remote_url, token, args, "/api/v1/done", {
+                "notes": list(args.notes or []),
+                "comments": list(args.comments or []),
+            })
     except RemoteError as error:
         print(f"error: {error.message}", file=sys.stderr)
         return error.exit_code
