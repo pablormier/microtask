@@ -12,7 +12,6 @@ import uuid
 import attachments
 import card_format
 import card_query
-import card_render
 import history
 from card_render import (  # noqa: F401 - re-exported for callers
     _apply_body_edit,
@@ -21,6 +20,7 @@ from card_render import (  # noqa: F401 - re-exported for callers
     _bulk_edit_assignments,
     _bulk_plan_item,
     _plan_query,
+    allocate_card_id,
     append_comments,
     apply_body_replacements,
     apply_exact_body_replacements,
@@ -41,13 +41,11 @@ from card_render import (  # noqa: F401 - re-exported for callers
     topic_rename_plan,
     transition_claim,
     unassigned_priority,
-    unique_item_timestamp,
     validate_shared_metadata,
     workspace_topic_counts,
     workspace_topic_tree,
 )
 import drafts as draft_store
-import focus
 from focus import (  # noqa: F401 - re-exported for callers
     focus_context,
     focus_sort_key,
@@ -88,13 +86,11 @@ from store import (
     parse_yaml,
     saved_receipt,
     select_cards,
-    slugify,
     time_log_entries,
     timer_session_saved,
     write_focus_state,
     write_focus_task_id,
 )
-import timer_ops
 from timer_ops import (  # noqa: F401 - re-exported for callers
     append_time_entry,
     save_time_session,
@@ -286,7 +282,7 @@ def create_card(
             raise CardInputError(
                 "conflict: capture ID already exists with different kind, title, body, created-at, or metadata"
             )
-    card_id = f"{unique_item_timestamp(ws=resolved)}-{slugify(title)}"
+    card_id = allocate_card_id(title, ws=resolved)
     destination = cards_root(resolved) / f"{card_id}.md"
     if destination.exists():
         raise CardInputError(f"{kind} file already exists: {destination}")

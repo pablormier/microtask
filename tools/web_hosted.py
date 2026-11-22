@@ -12,7 +12,6 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import hmac
-import os
 from pathlib import Path
 import re
 import secrets

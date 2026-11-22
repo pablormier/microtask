@@ -1,11 +1,12 @@
 """Card document rendering, body editing, metadata parsing, and topic tree helpers."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
 import re
+import secrets
 import shlex
 
 import card_format
@@ -30,15 +31,19 @@ from store import (
 from workspace import Workspace
 
 
-def unique_item_timestamp(*, ws: Workspace | None = None) -> str:
+def allocate_card_id(title: str, *, ws: Workspace | None = None, now: datetime | None = None) -> str:
+    """Allocate a card ID using the real timestamp and slug, appending a short suffix only on collision."""
     resolved = _ws(ws)
-    current = datetime.now().replace(microsecond=0)
+    root = resolved.cards_root()
+    current = now if now is not None else datetime.now()
+    timestamp = current.replace(microsecond=0).strftime("%Y-%m-%d-%H%M%S")
+    base = f"{timestamp}-{store.slugify(title)}"
+    if not (root / f"{base}.md").exists():
+        return base
     while True:
-        timestamp = current.strftime("%Y-%m-%d-%H%M%S")
-        root = resolved.cards_root()
-        if not any(path.name.startswith(f"{timestamp}-") for path in root.glob("*.md")):
-            return timestamp
-        current += timedelta(seconds=1)
+        candidate = f"{base}-{secrets.token_hex(3)}"
+        if not (root / f"{candidate}.md").exists():
+            return candidate
 
 
 def clean_text_values(values: list[str]) -> list[str]:

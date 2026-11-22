@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -119,6 +119,7 @@ def task_to_dict(
     detail: bool = True,
     cfg: dict | None = None,
     rank: dict[str, int] | None = None,
+    now: datetime | None = None,
 ) -> dict:
     cfg = cfg if cfg is not None else store.policy(ws)
     fm = task.frontmatter
@@ -153,7 +154,7 @@ def task_to_dict(
         "title": task.title,
         "next_action": task.next_action,
         "needs_restart": operations.next_action_needs_restart_step(task),
-        "display_rank": operations.task_display_sort_key(task, rank),
+        "display_rank": operations.task_display_sort_key(task, rank, now=now),
         "excerpt": excerpt,
         "content_hash": content_hash,
         "needs_review": fm.get("needs_review") is True,
@@ -336,18 +337,18 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor, hosted=hosted)
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now),
-                                             actor=actor, focus_user=actor, ws=ws)
+                                             actor=actor, focus_user=actor, ws=ws, now=now)
     if hosted is not None:
         meta["hosted"] = hosted
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
-    done_cutoff = card_query.default_done_cutoff(query, store.done_window(ws), date.today())
+    done_cutoff = card_query.default_done_cutoff(query, store.done_window(ws), now.date())
     collections = collection_results(
         ordered, query, now=now, open_statuses=store.open_statuses(ws), done_cutoff=done_cutoff,
-        display_rank=lambda card: operations.task_display_sort_key(card, rank))
+        display_rank=lambda card: operations.task_display_sort_key(card, rank, now=now))
     if query == card_query.DEFAULT:
         unfiltered = collections
     else:
-        default_cutoff = card_query.default_done_cutoff(card_query.DEFAULT, store.done_window(ws), date.today())
+        default_cutoff = card_query.default_done_cutoff(card_query.DEFAULT, store.done_window(ws), now.date())
         unfiltered = collection_results(
             ordered, card_query.DEFAULT, now=now, open_statuses=store.open_statuses(ws), done_cutoff=default_cutoff)
     meta["collection_totals"] = {name: len(ids) for name, ids in unfiltered.items()}
@@ -378,7 +379,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         if str(card.frontmatter["id"]) in wanted
     ]
     return {
-        "tasks": [task_to_dict(card, ws=ws, detail=False, cfg=cfg, rank=rank) for card in selected_cards],
+        "tasks": [task_to_dict(card, ws=ws, detail=False, cfg=cfg, rank=rank, now=now) for card in selected_cards],
         "statuses": statuses,
         "meta": meta,
         "query": card_query.query_to_mapping(query),

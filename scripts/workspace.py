@@ -205,10 +205,10 @@ def rebase_demo_dates(text: str) -> str:
     offset = (date.today() - DEMO_DATE_ANCHOR).days
     if offset == 0:
         return text
-    return re.sub(
-        r"\b(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}:\d{2})?\b",
-        lambda match: _shift_demo_date(match, offset),
-        text,
+    pattern = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})(T\d{2}:\d{2}:\d{2})?\b")
+    return "".join(
+        line if line.startswith("id:") else pattern.sub(lambda match: _shift_demo_date(match, offset), line)
+        for line in text.splitlines(keepends=True)
     )
 
 

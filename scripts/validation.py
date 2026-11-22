@@ -34,7 +34,6 @@ def _decode_text(value: bytes | str) -> str:
 def _check_item(
     data_root: Path,
     path: Path,
-    seen_ids: dict[str, Path],
     seen_time_sessions: dict[str, Path],
     seen_capture_ids: dict[str, Path],
     errors: list[str],
@@ -101,13 +100,8 @@ def _check_item(
             else:
                 seen_time_sessions[session_id] = path
     item_id = fm.get("id")
-    if isinstance(item_id, str) and item_id:
-        if item_id in seen_ids:
-            errors.append(
-                f"{rel}: duplicate id '{item_id}' (also in {seen_ids[item_id].relative_to(data_root)})"
-            )
-        else:
-            seen_ids[item_id] = path
+    if isinstance(item_id, str) and item_id.strip() and item_id != path.stem:
+        errors.append(f"{rel}: id '{item_id}' must match filename stem '{path.stem}'")
     capture_id = fm.get("capture_id")
     if isinstance(capture_id, str):
         if capture_id in seen_capture_ids:
@@ -131,18 +125,19 @@ def _item_identity(
     strict_time: bool = False,
     fm: dict | None = None,
     check_time: bool = True,
-) -> tuple[dict[str, set[str]], str | None]:
+) -> tuple[dict[str, set[str]], str | None, str | None]:
     """Only the values that can introduce cross-card conflicts.
 
-    The second value is None unless the card is a doing task. For a doing task it is the
-    claimant's name, or "" when nobody holds the claim.
+    Returns (unique_keys, doing_claimant, topic). The second value is None unless the card
+    is a doing task, in which case it is the claimant's name or "" when unclaimed.
     """
     if raw is None:
-        return {"id": set(), "capture_id": set(), "time session id": set()}, None
+        return {"capture_id": set(), "time session id": set()}, None, None
     if fm is None:
         fm_text, _body = card_format.parse_frontmatter(raw)
         fm = card_format.parse_yaml(fm_text) if fm_text is not None else {}
     capture = fm.get("capture_id")
+    topic = fm.get("topic")
     sessions: set[str] = set()
     if check_time and fm.get("kind") == "task":
         try:
@@ -152,10 +147,9 @@ def _item_identity(
                 raise ValueError(f"{path.relative_to(data_root)}: cannot check time-session uniqueness: {error}") from error
             sessions = set()  # The changed card's validators report malformed time logs.
     return {
-        "id": {str(fm["id"])} if fm.get("id") else set(),
         "capture_id": {capture} if isinstance(capture, str) else set(),
         "time session id": sessions,
-    }, _doing_claimant(fm)
+    }, _doing_claimant(fm), topic if isinstance(topic, str) else None
 
 
 def _doing_claimant(fm: dict) -> str | None:
@@ -179,6 +173,28 @@ def _doing_limit_message(policy: dict, bucket: str, count: int, limit: int) -> s
         return f"doing task limit exceeded: {count} tasks, maximum {limit}"
     owner = f"claimed by {bucket}" if bucket else "with no claimant"
     return f"doing task limit exceeded: {count} tasks {owner}, maximum {limit} per claimant"
+
+
+def _may_affect_cross_card(
+    fm_text: str,
+    *,
+    check_doing: bool,
+    topic_roots: set[str],
+    capture_targets: set[str],
+    session_targets: set[str],
+) -> bool:
+    """Conservative raw-frontmatter filter; returns False only if no active check can match."""
+    if check_doing and "doing" in fm_text:
+        return True
+    if topic_roots and "topic" in fm_text:
+        lowered = fm_text.casefold()
+        if any(root in lowered for root in topic_roots):
+            return True
+    if capture_targets and any(cid in fm_text for cid in capture_targets):
+        return True
+    if session_targets and any(sid in fm_text for sid in session_targets):
+        return True
+    return False
 
 
 def check_changes(
@@ -211,7 +227,7 @@ def check_changes(
     errors: list[str] = []
     warnings: list[str] = []
     changed_topics: list[str] = []
-    seen: dict[str, dict[str, Path]] = {"id": {}, "capture_id": {}, "time session id": {}}
+    seen: dict[str, dict[str, Path]] = {"capture_id": {}, "time session id": {}}
     added: dict[str, set[str]] = {key: set() for key in seen}
     doing_delta: dict[str, int] = {}
     changed_doing: dict[str, int] = {}
@@ -225,11 +241,11 @@ def check_changes(
             else (path.read_text(encoding="utf-8") if path.exists() else None)
         )
         try:
-            before_keys, before_doing = _item_identity(before, path, data_root=root)
+            before_keys, before_doing, before_topic = _item_identity(before, path, data_root=root)
         except ValueError:
-            before_keys, before_doing = {key: set() for key in seen}, None
+            before_keys, before_doing, before_topic = {key: set() for key in seen}, None, None
         after = decoded_changes.get(relative)
-        after_keys, after_doing = _item_identity(after, path, data_root=root)
+        after_keys, after_doing, after_topic = _item_identity(after, path, data_root=root)
         for key in added:
             added[key].update(after_keys[key] - before_keys[key])
         if before_doing is not None:
@@ -241,10 +257,12 @@ def check_changes(
             changed_doing[bucket] = changed_doing.get(bucket, 0) + 1
         if after is not None:
             _check_item(
-                root, path, seen["id"], seen["time session id"],
+                root, path, seen["time session id"],
                 seen["capture_id"], errors, policy, raw=after,
-                collect={"topics": changed_topics}, warnings=warnings,
+                warnings=warnings,
             )
+            if after_topic is not None and after_topic != before_topic:
+                changed_topics.append(after_topic)
     need_topic_scan = bool(changed_topics) and card_linter.rule_level(policy, "topic_case") != "off"
     grown = {bucket for bucket, delta in doing_delta.items() if delta > 0}
     if errors or (not any(added.values()) and not grown and not need_topic_scan):
@@ -254,6 +272,12 @@ def check_changes(
     # require checking their time logs. Do not validate unrelated card bodies.
     other_doing: dict[str, int] = {}
     other_topics: list[str] = []
+    check_added = any(added.values())
+    check_time = bool(added["time session id"])
+    check_doing = bool(grown)
+    topic_roots = {card_format.topic_key(topic)[0] for topic in changed_topics} if need_topic_scan else set()
+    capture_targets = added["capture_id"]
+    session_targets = added["time session id"]
     for path in sorted((root / "cards").glob("*.md")):
         relative = str(path.relative_to(root))
         if relative in affected:
@@ -262,6 +286,14 @@ def check_changes(
         fm_text, _body = card_format.parse_frontmatter(raw)
         if fm_text is None:
             raise ValueError(f"cannot check cross-card invariants: {relative} has no frontmatter; run mt validate")
+        if not _may_affect_cross_card(
+            fm_text,
+            check_doing=check_doing,
+            topic_roots=topic_roots,
+            capture_targets=capture_targets,
+            session_targets=session_targets,
+        ):
+            continue
         fm = card_format.parse_yaml(fm_text)
         claimant = _doing_claimant(fm)
         if claimant is not None:
@@ -269,17 +301,18 @@ def check_changes(
             other_doing[bucket] = other_doing.get(bucket, 0) + 1
         if need_topic_scan and isinstance(fm.get("topic"), str):
             other_topics.append(fm["topic"])
-        identity, _ = _item_identity(
-            raw,
-            path,
-            data_root=root,
-            strict_time=bool(added["time session id"]),
-            fm=fm,
-            check_time=bool(added["time session id"]),
-        )
-        for key, values in added.items():
-            for value in values & identity[key]:
-                errors.append(f"{relative}: duplicate {key} '{value}' introduced by card changes")
+        if check_added:
+            identity, _, _ = _item_identity(
+                raw,
+                path,
+                data_root=root,
+                strict_time=check_time,
+                fm=fm,
+                check_time=check_time,
+            )
+            for key, values in added.items():
+                for value in values & identity[key]:
+                    errors.append(f"{relative}: duplicate {key} '{value}' introduced by card changes")
     limit = int(str(policy.get("rules", {}).get("max_doing_tasks") or 0))
     if limit > 0:
         for bucket in sorted(grown):
@@ -316,7 +349,6 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
     """Validate every card and draft in root against settings."""
     cards_root = root / "cards"
     errors: list[str] = []
-    seen_ids: dict[str, Path] = {}
     seen_time_sessions: dict[str, Path] = {}
     seen_capture_ids: dict[str, Path] = {}
     rules = policy.get("rules", {})
@@ -353,7 +385,7 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
     kind_counts = {"task": 0, "note": 0}
     for path in md_files:
         kind, status = _check_item(
-            root, path, seen_ids, seen_time_sessions, seen_capture_ids, errors, policy,
+            root, path, seen_time_sessions, seen_capture_ids, errors, policy,
             collect=collected, warnings=warnings,
         )
         if kind is not None:

@@ -25,7 +25,6 @@ import history
 import store
 from store import (
     _ws,
-    cards_root,
     current_username,
     task_by_id,
 )

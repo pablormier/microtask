@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
-import os
 from pathlib import Path
 import re
 import sys

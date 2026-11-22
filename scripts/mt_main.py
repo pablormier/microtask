@@ -2,8 +2,6 @@
 """Thin CLI entry point so cli.py is imported and bytecode-cached."""
 from __future__ import annotations
 
-import sys
-
 import cli
 
 if hasattr(cli, "main"):

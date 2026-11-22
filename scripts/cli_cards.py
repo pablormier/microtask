@@ -3,14 +3,12 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
-import time as clock_time
 import uuid
 
 import attachments
@@ -50,10 +48,8 @@ import store
 from store import (
     RESTART_COMMANDS,
     Card,
-    CardInputError,
     ReferenceIndex,
     _ws,
-    current_username,
     discover,
     done_window,
     is_due_value,
@@ -62,11 +58,8 @@ from store import (
     item_json_record,
     item_outline_json_record,
     item_read_record,
-    item_receipt,
     item_state_suffix,
     now_stamp,
-    open_statuses,
-    saved_receipt,
     select_cards,
     sort_card_items,
 )

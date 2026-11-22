@@ -22,11 +22,6 @@ from store import (
     _ws,
     atomic_write,
 )
-from transaction import (
-    _run_auto_sync,
-    run_auto_sync_for_receipt,
-    time_mutation_lock,
-)
 from workspace import (
     OLD_SETTINGS_FILE,
     Workspace,
@@ -37,11 +32,6 @@ from workspace import (
 
 REPO_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 TIME_QUERY_DEFAULTS = {"archived": "include", "hidden": "include"}
-
-
-def supports_color(stream=None) -> bool:
-    target = sys.stdout if stream is None else stream
-    return bool(hasattr(target, "isatty") and target.isatty() and not os.environ.get("NO_COLOR"))
 
 
 def emit_json(payload: object, *, indent: int | None = None) -> None:

@@ -127,9 +127,9 @@ def now_stamp() -> str:
 
 
 
-def due_sort_value(value: object) -> str:
+def due_sort_value(value: object, *, now: datetime | None = None) -> str:
     """A sortable local ISO time for a due value (a date alone counts as the end of its day); "" when none."""
-    moment = card_query.due_moment(value, datetime.now()) if value else None
+    moment = card_query.due_moment(value, now if now is not None else datetime.now()) if value else None
     return moment.isoformat() if moment else ""
 
 
@@ -374,13 +374,40 @@ def card_task_id(card: Card) -> str:
 
 
 
+def _frontmatter_text(path: Path) -> str | None:
+    """Read only the YAML frontmatter block; None when missing, unclosed, or unreadable."""
+    try:
+        with path.open(encoding="utf-8", newline="") as source_file:
+            if source_file.readline().rstrip("\r\n") != "---":
+                return None
+            lines: list[str] = []
+            for line in source_file:
+                if line.rstrip("\r\n") == "---":
+                    return "".join(lines)
+                lines.append(line)
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
 def running_timer_cards(ws: Workspace | None = None) -> list[tuple[Card, dict[str, object]]]:
     """Every task card that holds a running timer, with that timer."""
-    return [
-        (card, timer)
-        for card in discover("task", ws=ws)
-        if (timer := card_format.timer_from(card.frontmatter)) is not None
-    ]
+    root = cards_root(ws)
+    if not root.is_dir():
+        return []
+    allowed = set(statuses(ws))
+    running: list[tuple[Card, dict[str, object]]] = []
+    for path in sorted(root.glob("*.md")):
+        fm_text = _frontmatter_text(path)
+        if fm_text is not None and "timer" not in fm_text:
+            continue
+        card = Card.read(path)
+        if not card.is_task:
+            continue
+        _validate_task_status(card, allowed)
+        if (timer := card_format.timer_from(card.frontmatter)) is not None:
+            running.append((card, timer))
+    return running
 
 
 
@@ -680,7 +707,16 @@ class CardInputError(InputError):
 
 def card_by_capture_id(capture_id: str, ws: Workspace | None = None) -> Card | None:
     # Search both kinds, including archived/hidden cards.
-    for card in read_cards(cards_root(ws), ws=ws):
+    root = cards_root(ws)
+    if not root.is_dir():
+        return None
+    allowed = set(statuses(ws))
+    for path in sorted(root.glob("*.md")):
+        fm_text = _frontmatter_text(path)
+        if fm_text is not None and capture_id not in fm_text:
+            continue
+        card = Card.read(path)
+        _validate_task_status(card, allowed)
         if card.frontmatter.get("capture_id") == capture_id:
             return card
     return None

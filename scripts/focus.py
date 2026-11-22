@@ -19,9 +19,9 @@ from store import (
 from workspace import Workspace
 
 
-def focus_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, str]:
+def focus_sort_key(task: Card, rank: dict[str, int], *, now: datetime | None = None) -> tuple[int, str, str]:
     priority = str(task.frontmatter.get("priority") or "medium")
-    due = due_sort_value(task.frontmatter.get("due")) or "9999-12-31T23:59:59"
+    due = due_sort_value(task.frontmatter.get("due"), now=now) or "9999-12-31T23:59:59"
     return rank.get(priority, len(rank)), due, task.path.name
 
 
@@ -34,17 +34,19 @@ def has_deadline_due(task: Card) -> bool:
     return due_kind_value(task.frontmatter) == "deadline"
 
 
-def ranked_focus_candidates(tasks: list[Card], rank: dict[str, int]) -> list[tuple[Card, str]]:
+def ranked_focus_candidates(
+    tasks: list[Card], rank: dict[str, int], *, now: datetime | None = None
+) -> list[tuple[Card, str]]:
     """Rank actionable tasks; deadline alerts cover blocked and deferred work."""
-    now = datetime.now()
+    current = now if now is not None else datetime.now()
 
     def due(task: Card, mode: str) -> bool:
-        return has_deadline_due(task) and card_query.due_matches(task.frontmatter.get("due"), mode, now)
+        return has_deadline_due(task) and card_query.due_matches(task.frontmatter.get("due"), mode, current)
 
     overdue, today, week = card_query.DUE_OVERDUE, card_query.DUE_TODAY, card_query.DUE_WEEK
 
     def due_value(task: Card) -> str | None:
-        return due_sort_value(task.frontmatter.get("due")) or None
+        return due_sort_value(task.frontmatter.get("due"), now=current) or None
 
     groups = (
         ((task for task in tasks if due(task, today) and not due(task, overdue)), "due_today"),
@@ -59,7 +61,7 @@ def ranked_focus_candidates(tasks: list[Card], rank: dict[str, int]) -> list[tup
     seen: set[str] = set()
     for candidates, reason in groups:
         def key(item: Card) -> tuple:
-            order = focus_sort_key(item, rank)
+            order = focus_sort_key(item, rank, now=current)
             return (due_value(item) or "", *order) if reason in {"due_today", "due_soon"} else order
 
         for task in sorted(candidates, key=key):
@@ -71,23 +73,25 @@ def ranked_focus_candidates(tasks: list[Card], rank: dict[str, int]) -> list[tup
     return ordered
 
 
-def task_display_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, int, str, str]:
-    value, now = task.frontmatter.get("due"), datetime.now()
-    due_group = 0 if any(card_query.due_matches(value, mode, now) for mode in (
+def task_display_sort_key(task: Card, rank: dict[str, int], *, now: datetime | None = None) -> tuple[int, int, str, str]:
+    value = task.frontmatter.get("due")
+    current = now if now is not None else datetime.now()
+    due_group = 0 if any(card_query.due_matches(value, mode, current) for mode in (
         card_query.DUE_OVERDUE, card_query.DUE_TODAY)) else 1 if value else 2
-    priority, normalized_due, _ = focus_sort_key(task, rank)
+    priority, normalized_due, _ = focus_sort_key(task, rank, now=current)
     return due_group, priority, normalized_due, str(task.path)
 
 
-def followup_sort_key(task: Card, rank: dict[str, int]) -> tuple[int, str, int, str]:
-    due = due_sort_value(task.frontmatter.get("due"))
+def followup_sort_key(task: Card, rank: dict[str, int], *, now: datetime | None = None) -> tuple[int, str, int, str]:
+    current = now if now is not None else datetime.now()
+    due = due_sort_value(task.frontmatter.get("due"), now=current)
     priority = str(task.frontmatter.get("priority") or "medium")
-    due_group = 0 if card_query.due_matches(task.frontmatter.get("due"), card_query.DUE_OVERDUE, datetime.now()) else 1 if due else 2
+    due_group = 0 if card_query.due_matches(task.frontmatter.get("due"), card_query.DUE_OVERDUE, current) else 1 if due else 2
     return due_group, due or "9999-12-31T23:59:59", rank.get(priority, len(rank)), task.path.name
 
 
 def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: str | None = None,
-                  ws: Workspace | None = None) -> dict:
+                  ws: Workspace | None = None, now: datetime | None = None) -> dict:
     """One read-only focus snapshot for the CLI, dashboard, and skills.
 
     Callers select visibility and workspace filters before calling this function.
@@ -100,6 +104,7 @@ def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: st
     cfg = store.policy(resolved)
     actor = store.current_username(actor, ws=resolved)
     rank = {name: index for index, name in enumerate(cfg.get("priorities", {}))}
+    current = now if now is not None else datetime.now()
     tasks = [task for task in tasks if task.frontmatter.get("status") != "done"]
     available = [task for task in tasks
                  if task.frontmatter.get("status") in {"active", "doing", "inbox"}
@@ -109,7 +114,7 @@ def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: st
         return {**item_json_record(task, ws=resolved), "reason_key": reason_key,
                 "reason": FOCUS_REASONS[reason_key]}
 
-    candidates = [record(task, reason) for task, reason in ranked_focus_candidates(available, rank)]
+    candidates = [record(task, reason) for task, reason in ranked_focus_candidates(available, rank, now=current)]
     state = read_focus_state(resolved, focus_user)
     selected = next((item for item in candidates if state and item["id"] == state.task_id), None)
     mode = state.mode if selected and state else "auto"
@@ -118,14 +123,13 @@ def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: st
     elif candidates:
         selected = candidates[0]
 
-    now = datetime.now()
     alerts = []
-    deadline_order = lambda item: (due_sort_value(item.frontmatter.get("due")) or "9999",
-                                   *focus_sort_key(item, rank))
+    deadline_order = lambda item: (due_sort_value(item.frontmatter.get("due"), now=current) or "9999",
+                                   *focus_sort_key(item, rank, now=current))
     for task in sorted(tasks, key=deadline_order):
         value = task.frontmatter.get("due")
         # Overdue or due within the week: the same cards as `--due next`.
-        if not has_deadline_due(task) or not any(card_query.due_matches(value, mode, now) for mode in (
+        if not has_deadline_due(task) or not any(card_query.due_matches(value, mode, current) for mode in (
                 card_query.DUE_OVERDUE, card_query.DUE_WEEK)):
             continue
         owner = task.frontmatter.get("claimed_by")
@@ -144,7 +148,7 @@ def focus_context(tasks: list[Card], *, actor: str | None = None, focus_user: st
     return {"selected": selected, "mode": mode, "actor": actor,
             "generated_at": now_stamp(), "candidates": candidates, "alerts": alerts,
             "followup_ids": [str(task.frontmatter.get("id") or task.path.stem)
-                             for task in sorted(tasks, key=lambda item: followup_sort_key(item, rank))
+                             for task in sorted(tasks, key=lambda item: followup_sort_key(item, rank, now=current))
                              if task.frontmatter.get("status") == "waiting"]}
 
 
