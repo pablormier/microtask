@@ -3,7 +3,37 @@
                        @click="select(task, $event)" @keydown.enter.stop.prevent="select(task, $event)" @keydown.space.stop.prevent="select(task, $event)">
                 <div class="mt-card-header">
                   <div class="mt-title" x-text="task.title"></div>
-                  <div class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" x-text="task.priority"></div>
+                  <div class="mt-card-header-end">
+                    <span class="mt-card-ordered" x-show="task.order" title="Custom order" aria-label="Custom order">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+                    </span>
+                    <div class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" x-text="task.priority"></div>
+                    <details class="mt-card-menu mt-card-inline-menu" x-show="canOrderCard(task)"
+                             @click.stop @keydown.enter.stop @keydown.space.stop
+                             @click.outside="$el.open = false"
+                             @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+                      <summary class="mt-menu-trigger" :aria-label="'Order actions for ' + task.title" title="Card order">
+                        <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+                      </summary>
+                      <div class="mt-card-menu-items mt-card-order-bar">
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact" title="Move to top" aria-label="Move to top" :disabled="busy || !cardGroupNeighbors(task).prev" @click="$el.closest('details').open = false; orderCard(task, { position: 'top' })">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5h14M12 19V9M7.5 13.5 12 9l4.5 4.5"/></svg>
+                        </button>
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact" title="Move up" aria-label="Move up" :disabled="busy || !cardGroupNeighbors(task).prev" @click="$el.closest('details').open = false; moveCardStep(task, -1)">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"/></svg>
+                        </button>
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact" title="Move down" aria-label="Move down" :disabled="busy || !cardGroupNeighbors(task).next" @click="$el.closest('details').open = false; moveCardStep(task, 1)">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/></svg>
+                        </button>
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact" title="Move to bottom" aria-label="Move to bottom" :disabled="busy || !cardGroupNeighbors(task).next" @click="$el.closest('details').open = false; orderCard(task, { position: 'bottom' })">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 19h14M12 5v10M7.5 10.5 12 15l4.5-4.5"/></svg>
+                        </button>
+                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact" x-show="task.order" title="Reset order" aria-label="Reset order" :disabled="busy" @click="$el.closest('details').open = false; orderCard(task, { position: 'clear' })">
+                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>
+                        </button>
+                      </div>
+                    </details>
+                  </div>
                 </div>
                 <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-show="showCardStatus(task) && task.status" x-text="statusText(task.status)"></span>
                 <template x-if="task.topic && settings[mode]?.group !== 'topic'">

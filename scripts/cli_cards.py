@@ -37,6 +37,7 @@ from operations import (
     op_edit,
     op_focus,
     op_move,
+    op_order,
     op_store_attachment,
     op_topic_rename,
     parse_tag_json,
@@ -294,6 +295,29 @@ def command_move(args: argparse.Namespace, ws: Workspace | None = None) -> int:
             comments=args.comments,
             takeover=getattr(args, "takeover", False),
             by=getattr(args, "by", None),
+            match_mode=args.match_mode,
+            quiet_sync=as_json,
+        ),
+        as_json=as_json,
+    )
+
+
+def command_order(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    as_json = getattr(args, "as_json", False)
+    position = (
+        "top" if args.top
+        else "bottom" if args.bottom
+        else "clear_panel" if getattr(args, "clear_panel", False)
+        else "clear" if args.clear
+        else None
+    )
+    return _cli_call_op(
+        lambda: op_order(
+            ws,
+            " ".join(args.query),
+            position=position,
+            before=getattr(args, "before", None),
+            after=getattr(args, "after", None),
             match_mode=args.match_mode,
             quiet_sync=as_json,
         ),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime
 import hashlib
 from pathlib import Path
 import re
@@ -47,6 +48,7 @@ from card_render import (  # noqa: F401 - re-exported for callers
 )
 import drafts as draft_store
 from focus import (  # noqa: F401 - re-exported for callers
+    card_display_sort_key,
     focus_context,
     focus_sort_key,
     followup_sort_key,
@@ -54,8 +56,10 @@ from focus import (  # noqa: F401 - re-exported for callers
     is_high_priority_task,
     next_action_needs_restart_step,
     ranked_focus_candidates,
+    sort_notes_for_display,
     task_display_sort_key,
 )
+import lexorank
 import store
 from store import (
     Card,
@@ -590,6 +594,199 @@ def op_move(
         action="takeover" if takeover else "move",
         by=by,
         require_history=bool(takeover),
+    )
+
+
+def _order_peers(resolved: Workspace, item: Card) -> list[Card]:
+    live = [card for card in store.discover(item.kind, ws=resolved) if not store.is_archived(card) and card.path != item.path]
+    if item.kind == "note":
+        return sort_notes_for_display(live)
+    status = item.frontmatter.get("status")
+    rank = {name: index for index, name in enumerate(store.policy(resolved).get("priorities", {}))}
+    now = datetime.now()
+    same_status = [card for card in live if card.frontmatter.get("status") == status]
+    return sorted(same_status, key=lambda card: card_display_sort_key(card, rank, now=now))
+
+
+def _set_card_order(raw: str, order: str | None, stamp: str) -> str:
+    properties, body = card_format.parse_document(raw)
+    properties["updated"] = stamp
+    if order is None:
+        properties.pop("order", None)
+    else:
+        properties["order"] = order
+    return card_format.render_document(properties, body)
+
+
+def _order_locked(
+    resolved: Workspace,
+    query: str,
+    *,
+    position: str | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    match_mode: str = "exact",
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    query = query.strip()
+    if not query:
+        raise InputError("order requires a non-empty query")
+    choices = sum([position is not None, before is not None, after is not None])
+    if choices != 1:
+        raise InputError("order requires exactly one of position, before, or after")
+    if position is not None and position not in {"top", "bottom", "clear", "clear_panel"}:
+        raise InputError(f"invalid order position: {position}")
+
+    item = _resolve_unique_card(resolved, query, match_mode=match_mode)
+    if store.is_archived(item):
+        raise InputError("cannot reorder an archived card")
+    if item.kind == "task" and item.frontmatter.get("status") == "done":
+        raise InputError("cannot reorder a done task")
+
+    stamp = now_stamp()
+    if position == "clear_panel":
+        targets = [card for card in (item, *_order_peers(resolved, item)) if "order" in card.frontmatter]
+        if not targets:
+            return WriteResult(
+                card=item,
+                receipt=saved_receipt(item, updated=False, ws=resolved),
+                message=f"Panel order already clear: {item.path.name}",
+                changed=False,
+            )
+        base = resolved.root
+        writes = {}
+        expected = {}
+        for card in targets:
+            rel = str(card.path.relative_to(base))
+            writes[rel] = _set_card_order(card.raw, None, stamp).encode("utf-8")
+            expected[rel] = card.raw.encode("utf-8")
+        try:
+            transaction.apply_item_transaction(writes, expected=expected, source_root=base, ws=resolved)
+        except TaskError:
+            raise
+        except (OSError, ValueError) as error:
+            if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
+                raise ConflictError(f"order update failed validation; change rolled back: {error}") from error
+            raise ValidationError(f"order update failed validation; change rolled back: {error}") from error
+        saved = Card.read(item.path)
+        return WriteResult(
+            card=saved,
+            receipt=saved_receipt(saved, updated=True, ws=resolved),
+            message=f"Cleared panel order ({len(targets)} cards): {item.path.name}",
+            changed=True,
+        )
+
+    if position == "clear":
+        if "order" not in item.frontmatter:
+            return WriteResult(
+                card=item,
+                receipt=saved_receipt(item, updated=False, ws=resolved),
+                message=f"Order already clear: {item.path.name}",
+                changed=False,
+            )
+        updated = _set_card_order(item.raw, None, stamp)
+        return _commit_item_write(
+            resolved,
+            item,
+            updated,
+            expected=item.raw.encode("utf-8"),
+            failure_prefix="order update failed validation; change rolled back",
+            summary=f"Cleared order and validated: {item.path.name}",
+        )
+
+    peers = _order_peers(resolved, item)
+    if position == "top":
+        idx = 0
+    elif position == "bottom":
+        idx = len(peers)
+    else:
+        anchor_query = (before if before is not None else after or "").strip()
+        if not anchor_query:
+            raise InputError("order anchor requires a non-empty query")
+        anchor = _resolve_unique_card(resolved, anchor_query, match_mode=match_mode)
+        if anchor.path == item.path:
+            raise InputError("cannot order a card relative to itself")
+        anchor_idx = next((i for i, peer in enumerate(peers) if peer.path == anchor.path), None)
+        if anchor_idx is None:
+            raise InputError("anchor card must be in the same panel")
+        idx = anchor_idx if before is not None else anchor_idx + 1
+
+    right_raw = peers[idx].frontmatter.get("order") if idx < len(peers) else None
+    right_order = str(right_raw) if lexorank.is_rank(right_raw) else None
+
+    updates: list[tuple[Card, str]] = []
+    if idx == 0:
+        new_order = lexorank.rank_between(None, right_order)
+    else:
+        # Keep any prefix that already has strictly increasing valid ranks untouched.
+        first_missing = 0
+        prev_rank: str | None = None
+        while first_missing < idx:
+            candidate = peers[first_missing].frontmatter.get("order")
+            if not lexorank.is_rank(candidate) or (prev_rank is not None and str(candidate) <= prev_rank):
+                break
+            prev_rank = str(candidate)
+            first_missing += 1
+
+        if first_missing == idx and (right_order is None or (prev_rank is not None and prev_rank < right_order)):
+            new_order = lexorank.rank_between(prev_rank, right_order)
+        else:
+            prefix_before = str(peers[first_missing - 1].frontmatter["order"]) if first_missing > 0 else None
+            suffix_after = right_order if (right_order is not None and (prefix_before is None or prefix_before < right_order)) else None
+            ranks = lexorank.initial_ranks(idx - first_missing + 1, before=prefix_before, after=suffix_after)
+            for peer, rank_val in zip(peers[first_missing:idx], ranks[:-1]):
+                updates.append((peer, rank_val))
+            new_order = ranks[-1]
+
+    updates.append((item, new_order))
+    base = resolved.root
+    writes: dict[str, bytes] = {}
+    expected: dict[str, bytes] = {}
+    for card, rank_val in updates:
+        rel = str(card.path.relative_to(base))
+        writes[rel] = _set_card_order(card.raw, rank_val, stamp).encode("utf-8")
+        expected[rel] = card.raw.encode("utf-8")
+
+    try:
+        transaction.apply_item_transaction(writes, expected=expected, source_root=base, ws=resolved)
+    except TaskError:
+        raise
+    except (OSError, ValueError) as error:
+        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
+            raise ConflictError(f"order update failed validation; change rolled back: {error}") from error
+        raise ValidationError(f"order update failed validation; change rolled back: {error}") from error
+
+    saved = Card.read(item.path)
+    return WriteResult(
+        card=saved,
+        receipt=saved_receipt(saved, updated=True, ws=resolved),
+        message=f"Updated order and validated: {item.path.name}",
+        changed=True,
+    )
+
+
+def op_order(
+    ws: Workspace | None,
+    query: str,
+    *,
+    position: str | None = None,
+    before: str | None = None,
+    after: str | None = None,
+    by: str | None = None,
+    match_mode: str = "exact",
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Set or clear the manual panel order of a live card using sparse LexoRank."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _order_locked(
+            resolved, query, position=position, before=before, after=after, match_mode=match_mode
+        ),
+        sync=sync,
+        quiet_sync=quiet_sync,
+        action="order",
+        by=by,
     )
 
 

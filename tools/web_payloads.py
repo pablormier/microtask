@@ -140,6 +140,7 @@ def task_to_dict(
         "ref": f"@{task.short_ref}",
         "status": fm.get("status", ""),
         "priority": fm["priority"],
+        "order": fm.get("order") or "",
         "type": fm.get("type", ""),
         "project": fm.get("project"),
         "topic": fm.get("topic"),
@@ -156,7 +157,7 @@ def task_to_dict(
         "title": task.title,
         "next_action": task.next_action,
         "needs_restart": operations.next_action_needs_restart_step(task),
-        "display_rank": operations.task_display_sort_key(task, rank, now=now),
+        "display_rank": operations.card_display_sort_key(task, rank, now=now),
         "excerpt": excerpt,
         "content_hash": content_hash,
         "needs_review": fm.get("needs_review") is True,
@@ -351,7 +352,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     done_cutoff = card_query.default_done_cutoff(query, store.done_window(ws), now.date())
     collections = collection_results(
         ordered, query, now=now, open_statuses=store.open_statuses(ws), done_cutoff=done_cutoff,
-        display_rank=lambda card: operations.task_display_sort_key(card, rank, now=now))
+        display_rank=lambda card: operations.card_display_sort_key(card, rank, now=now))
     if query == card_query.DEFAULT:
         unfiltered = collections
     else:

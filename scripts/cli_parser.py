@@ -37,6 +37,7 @@ from cli_cards import (
     command_focus,
     command_list,
     command_move,
+    command_order,
     command_read,
     command_search,
     command_show,
@@ -654,6 +655,19 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     move.add_argument("--takeover", action="store_true", help="transfer another user's claim; requires doing")
     move.add_argument("--json", dest="as_json", action="store_true", help="return the updated task receipt as JSON")
     move.set_defaults(func=command_move)
+
+    order = sub.add_parser("order", help="reorder one uniquely matched card within its panel")
+    order.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")
+    add_match_mode_arguments(order)
+    order_target = order.add_mutually_exclusive_group(required=True)
+    order_target.add_argument("--top", action="store_true", help="move to the top of its panel")
+    order_target.add_argument("--bottom", action="store_true", help="move to the bottom of its panel")
+    order_target.add_argument("--before", metavar="TARGET", help="place immediately before another card in the same panel")
+    order_target.add_argument("--after", metavar="TARGET", help="place immediately after another card in the same panel")
+    order_target.add_argument("--clear", action="store_true", help="clear manual order and return to automatic ranking")
+    order_target.add_argument("--clear-panel", action="store_true", help="clear manual order for every card in the same panel")
+    order.add_argument("--json", dest="as_json", action="store_true", help="return the updated card receipt as JSON")
+    order.set_defaults(func=command_order)
 
     comment = sub.add_parser("comment", help="append a timestamped comment to one task or note")
     comment.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")

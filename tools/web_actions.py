@@ -378,6 +378,34 @@ def handle_move(ws: Workspace, item: dict, body: dict, by: str | None = None) ->
     )
 
 
+def handle_order(ws: Workspace, item: dict, body: dict, by: str | None = None) -> tuple[HTTPStatus, dict]:
+    position = body.get("position")
+    before = body.get("before")
+    after = body.get("after")
+    choices = sum([position is not None, before is not None, after is not None])
+    if choices != 1:
+        return HTTPStatus.BAD_REQUEST, {"error": "order requires exactly one of position, before, or after"}
+    if position is not None and position not in {"top", "bottom", "clear", "clear_panel"}:
+        return HTTPStatus.BAD_REQUEST, {"error": "invalid order position"}
+    for name, value in (("before", before), ("after", after)):
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            return HTTPStatus.BAD_REQUEST, {"error": f"{name} must be a card reference or id"}
+    return _run_operation(
+        ws,
+        lambda ws: operations.op_order(
+            ws,
+            item["ref"],
+            position=position,
+            before=before,
+            after=after,
+            by=by,
+            match_mode="exact",
+            sync=False,
+        ),
+        "Panel order reset" if position == "clear_panel" else ("Order cleared" if position == "clear" else "Order updated"),
+    )
+
+
 def handle_comment(ws: Workspace, item: dict, body: dict, by: str | None = None) -> tuple[HTTPStatus, dict]:
     message = body.get("message")
     if not isinstance(message, str) or not message.strip():
@@ -534,6 +562,7 @@ ITEM_ACTION_HANDLERS = {
     "/api/checkbox": handle_checkbox,
     "/api/review": handle_review,
     "/api/move": handle_move,
+    "/api/order": handle_order,
     "/api/comment": handle_comment,
     "/api/time-start": handle_time_start,
     "/api/time-stop": handle_time_stop,

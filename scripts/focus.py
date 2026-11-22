@@ -82,6 +82,30 @@ def task_display_sort_key(task: Card, rank: dict[str, int], *, now: datetime | N
     return due_group, priority, normalized_due, str(task.path)
 
 
+def card_display_sort_key(card: Card, rank: dict[str, int], *, now: datetime | None = None) -> tuple[int, str, int, int, str, str]:
+    """Board sort key for tasks: manually ordered cards first by `order`, then `task_display_sort_key`."""
+    order = card.frontmatter.get("order")
+    base = task_display_sort_key(card, rank, now=now)
+    if isinstance(order, str) and order:
+        return (0, order, *base)
+    return (1, "", *base)
+
+
+def sort_notes_for_display(notes: list[Card]) -> list[Card]:
+    """Order live notes with manually ordered notes first (ascending `order`), then newest first."""
+    ordered = sorted(
+        (card for card in notes if isinstance(card.frontmatter.get("order"), str) and card.frontmatter.get("order")),
+        key=lambda card: (str(card.frontmatter["order"]), str(card.frontmatter.get("id") or card.path.stem)),
+    )
+    unordered = sorted(
+        (card for card in notes if not (isinstance(card.frontmatter.get("order"), str) and card.frontmatter.get("order"))),
+        reverse=True,
+        key=lambda card: (str(card.frontmatter.get("updated") or card.frontmatter.get("created") or ""),
+                          str(card.frontmatter.get("id") or card.path.stem)),
+    )
+    return ordered + unordered
+
+
 def followup_sort_key(task: Card, rank: dict[str, int], *, now: datetime | None = None) -> tuple[int, str, int, str]:
     current = now if now is not None else datetime.now()
     due = due_sort_value(task.frontmatter.get("due"), now=current)

@@ -236,6 +236,53 @@ function createBoardApi() {
       this.apiPost("/api/move", { ref: this.selected.ref, status: this.moveDestination });
     },
 
+    canOrderCard(card) {
+      return Boolean(card && !card.archived && !(card.kind === "task" && card.status === "done"));
+    },
+
+    cardGroupNeighbors(card) {
+      if (!this.canOrderCard(card) || typeof this.viewGroups !== "function") return { prev: null, next: null };
+      for (const group of this.viewGroups()) {
+        const idx = group.items.findIndex(item => item.id === card.id);
+        if (idx === -1) continue;
+        const peers = group.items.filter(item => item.kind === card.kind && (card.kind !== "task" || item.status === card.status));
+        const peerIdx = peers.findIndex(item => item.id === card.id);
+        return {
+          prev: peerIdx > 0 ? peers[peerIdx - 1] : null,
+          next: peerIdx >= 0 && peerIdx < peers.length - 1 ? peers[peerIdx + 1] : null,
+        };
+      }
+      return { prev: null, next: null };
+    },
+
+    orderCard(card, opts = {}) {
+      if (!this.canOrderCard(card) || this.busy) return Promise.resolve(null);
+      if (this.settings[this.mode] && this.settings[this.mode].sort && this.settings[this.mode].sort !== "default") {
+        this.settings[this.mode].sort = "default";
+      }
+      return this.apiPost("/api/order", { ref: card.ref, ...opts });
+    },
+
+    moveCardStep(card, delta) {
+      const { prev, next } = this.cardGroupNeighbors(card);
+      if (delta < 0 && prev) return this.orderCard(card, { before: prev.ref });
+      if (delta > 0 && next) return this.orderCard(card, { after: next.ref });
+      return Promise.resolve(null);
+    },
+
+    groupHasManualOrder(group) {
+      const sort = this.settings[this.mode]?.sort || "default";
+      if (sort !== "default" || !group || !Array.isArray(group.items)) return false;
+      return group.items.some(item => Boolean(item.order) && this.canOrderCard(item));
+    },
+
+    resetGroupOrder(group) {
+      if (!group || !Array.isArray(group.items)) return Promise.resolve(null);
+      const target = group.items.find(item => Boolean(item.order) && this.canOrderCard(item));
+      if (!target) return Promise.resolve(null);
+      return this.orderCard(target, { position: "clear_panel" });
+    },
+
     commentSelected() {
       const message = this.commentText.trim();
       if (!this.selected || !message || this.attachmentUploading) return;

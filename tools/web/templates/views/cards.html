@@ -125,7 +125,18 @@
                :class="{ 'is-flat': settings[mode].group === 'none', 'is-horizontal': settings[mode].group !== 'none' && layout === 'horizontal', 'is-empty-hidden': emptyColumns === 'hide', 'is-empty-shown': emptyColumns === 'show' }">
           <template x-for="group in viewGroups()" :key="group.key">
             <div class="mt-column" :class="{ ...group.className, 'is-empty': !group.items.length }">
-              <h2 x-show="group.label" :title="group.items.length ? null : group.label + ': ' + group.empty"><span x-text="group.label"></span><span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span></h2>
+              <h2 x-show="group.label" :title="group.items.length ? null : group.label + ': ' + group.empty">
+                <span x-text="group.label"></span>
+                <span class="mt-column-header-end">
+                  <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact mt-column-order-reset"
+                          x-show="groupHasManualOrder(group)"
+                          title="Reset panel order" aria-label="Reset panel order"
+                          :disabled="busy" @click="resetGroupOrder(group)">
+                    <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg>
+                  </button>
+                  <span class="mt-badge mt-badge-neutral mt-count" x-text="group.countLabel"></span>
+                </span>
+              </h2>
               <div class="mt-column-cards">
                 <template x-if="group.items.length === 0">
                   <p class="mt-empty" x-text="group.empty"></p>

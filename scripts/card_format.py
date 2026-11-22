@@ -25,7 +25,7 @@ GITHUB_SOURCE_FIELDS = ("github_source", "github_source_hash")
 # Known properties are emitted first in this order. Unknown extension values
 # retain their original insertion order after the known fields.
 FIELD_ORDER = (
-    "id", "capture_id", "title", "kind", "status", "priority", "type",
+    "id", "capture_id", "title", "kind", "status", "priority", "order", "type",
     "project", "topic", "due", "due_kind", "created", "updated",
     "completed", "archived", "hidden", "needs_review", "tags",
     "next_action", "processing_instructions", *CLAIM_FIELDS,
@@ -382,6 +382,11 @@ def _validate_organization_fields(properties: dict[str, object], *, effective_ki
         not isinstance(properties["completed"], str) or not is_metadata_time(properties["completed"])
     ):
         errors.append("completed must be an ISO date or local timestamp or null")
+    if "order" in properties and properties["order"] is not None and (
+        not isinstance(properties["order"], str)
+        or not re.fullmatch(r"[0-9a-z]*[1-9a-z]", properties["order"])
+    ):
+        errors.append("order must be a non-empty lowercase alphanumeric rank not ending in '0' or null")
     return errors
 
 

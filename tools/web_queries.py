@@ -3,6 +3,7 @@ from dataclasses import replace
 from datetime import datetime
 
 import card_query  # on sys.path via tools/taskweb.py, which inserts scripts/
+import focus
 
 
 def card_id(card):
@@ -42,8 +43,7 @@ def collection_results(cards, query, *, now=None, done_cutoff=None, open_statuse
     ordered = sorted((card for card in tasks if card.frontmatter.get("status") != "done"), key=rank)
     ordered += sorted((card for card in tasks if card.frontmatter.get("status") == "done"),
                       key=recent_rank, reverse=True)
-    notes = sorted(pick(live_notes), reverse=True, key=lambda card: (
-        str(card.frontmatter.get("updated") or card.frontmatter.get("created") or ""), card_id(card)))
+    notes = focus.sort_notes_for_display(pick(live_notes))
     open_query = _narrowed(replace(query, archived="exclude", hidden="exclude"),
                            kind=("task",), status=open_statuses)
 
