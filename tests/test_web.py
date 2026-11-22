@@ -2737,6 +2737,9 @@ class FooterTests(unittest.TestCase):
             self.assertIn('<footer class="mt-footer">', html)
             self.assertNotIn("mt-demo-banner", html)
             self.assertIn('class="mt-footer-alert" role="status"', html)
+            self.assertIn('class="mt-footer-sync" role="status"', html)
+            self.assertIn('mt-footer-shortcut', html)
+            self.assertIn("'Workspace: ' + workspaceName", html)
             self.assertNotIn('<footer class="mt-footer" role="status"', html)
 
     def test_dashboard_payload_collection_totals_when_filtered(self) -> None:
@@ -2790,6 +2793,12 @@ class FooterTests(unittest.TestCase):
             'app.filters = defaultFilters();\n'
             'app.mode = "notes"; assert.equal(app.footerCountLabel(), "1 note");\n'
             'app.mode = "archive"; app.settings.archive.kind = "task"; assert.equal(app.footerCountLabel(), "2 archived tasks");\n'
+            'assert.equal(app.footerSyncLabel(), "");\n'
+            'app.syncing = true; assert.equal(app.footerSyncLabel(), "Syncing…");\n'
+            'app.syncing = false; app.now = Date.parse("2026-11-22T14:30:00Z");\n'
+            'app.lastSyncedAt = "2026-11-22T14:29:40Z"; assert.equal(app.footerSyncLabel(), "Synced just now");\n'
+            'app.lastSyncedAt = "2026-11-22T14:27:00Z"; assert.equal(app.footerSyncLabel(), "Synced 3m ago");\n'
+            'app.syncWarning = "sync failed"; assert.equal(app.footerSyncLabel(), "");\n'
             '`);'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True)

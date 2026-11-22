@@ -397,6 +397,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                                             actor=actor.user if actor else None, hosted=self.hosted_meta(actor),
                                             sign_out_url=self.server.sign_out_url)
                 payload["sync_warning"] = self.server.sync.current_warning()
+                payload["sync_status"] = self.server.sync.status()
                 payload["restart_notice"] = self.server.restart_notice()
                 # An address with older spellings: the client adopts the canonical `query`.
                 payload["query_aliased"] = card_query.uses_aliases(params)
@@ -504,6 +505,7 @@ class TaskWebHandler(BaseHTTPRequestHandler):
                                            demo=self.server.demo, actor=actor.user if actor else None,
                                            hosted=self.hosted_meta(actor), sign_out_url=self.server.sign_out_url),
                        "sync_warning": " ".join(part for part in (self.server.sync.current_warning(), history_warning) if part),
+                       "sync_status": self.server.sync.status(),
                        "restart_notice": self.server.restart_notice(),
                        **payload}
         elif history_warning:

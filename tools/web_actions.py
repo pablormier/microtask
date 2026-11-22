@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from http import HTTPStatus
 import io
 from pathlib import Path
@@ -42,6 +43,7 @@ class BackgroundSync:
         self.thread: threading.Thread | None = None
         self.again = False
         self.warning = ""
+        self.last_synced_at = ""
 
     def request(self, ws: Workspace) -> None:
         if not store.policy(ws).get("rules", {}).get("auto_sync", False):
@@ -58,6 +60,8 @@ class BackgroundSync:
             warning = sync_once(ws.for_operation())
             with self.lock:
                 self.warning = warning
+                if not warning:
+                    self.last_synced_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 if not self.again:
                     self.thread = None
                     return
@@ -72,6 +76,13 @@ class BackgroundSync:
     def current_warning(self) -> str:
         with self.lock:
             return self.warning
+
+    def status(self) -> dict[str, object]:
+        with self.lock:
+            return {
+                "syncing": self.thread is not None,
+                "last_synced_at": self.last_synced_at,
+            }
 
 
 def sync_once(ws: Workspace) -> str:

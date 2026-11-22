@@ -70,6 +70,21 @@ function createBoardViews() {
       return formatCount(shown, this.collectionTotals.tasks, "task", "tasks");
     },
 
+    footerSyncLabel() {
+      if (!this.ready || this.syncWarning) return "";
+      if (this.syncing) return "Syncing…";
+      if (!this.lastSyncedAt) return "";
+      const syncedMs = Date.parse(this.lastSyncedAt);
+      if (!Number.isFinite(syncedMs)) return "";
+      const diffSec = Math.max(0, Math.floor((this.now - syncedMs) / 1000));
+      if (diffSec < 60) return "Synced just now";
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return "Synced " + diffMin + "m ago";
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return "Synced " + diffHr + "h ago";
+      return "Synced " + Math.floor(diffHr / 24) + "d ago";
+    },
+
     dueState(task) { return cardDueState(task, Date.now()); },
     dueDate(value) { return parseCardDueDate(value); },
     dueDayDiff(value) { return cardDueDayDifference(value, new Date()); },

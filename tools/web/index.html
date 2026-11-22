@@ -47,6 +47,7 @@
 {drawer}
 {capture_composer}
 {quick_search}
+{shortcuts_modal}
         </div>
       </template>
     </main>
@@ -59,12 +60,15 @@
           </span>
         </template>
         <template x-if="!demo && workspaceName">
-          <span class="mt-footer-workspace" x-text="workspaceName" :title="hosted ? 'Shared workspace' : 'Workspace: ' + workspaceName"></span>
+          <span class="mt-footer-workspace" x-text="hosted ? workspaceName : 'Workspace: ' + workspaceName" :title="hosted ? 'Shared workspace' : 'Workspace: ' + workspaceName"></span>
         </template>
+        <span class="mt-footer-sync" role="status" x-show="footerSyncLabel()" x-text="footerSyncLabel()" :title="lastSyncedAt ? 'Last synced ' + lastSyncedAt : ''" x-cloak></span>
         <span class="mt-footer-alert" role="status" x-show="syncWarning" x-text="syncWarning" :title="syncWarning" x-cloak></span>
         <span class="mt-footer-alert" role="status" x-show="restartNotice" x-text="restartNotice" :title="restartNotice" x-cloak></span>
       </div>
       <div class="mt-footer-end">
+        <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-footer-shortcut" x-show="ready" @click="openShortcuts()" title="Keyboard shortcuts (?)" x-cloak><kbd>?</kbd><span>Shortcuts</span></button>
+        <span class="mt-footer-sep mt-footer-shortcut-sep" aria-hidden="true" x-show="ready && (footerCountLabel() || appVersion)" x-cloak>·</span>
         <span class="mt-footer-count" x-show="ready && footerCountLabel()" x-text="footerCountLabel()" x-cloak></span>
         <span class="mt-footer-sep" aria-hidden="true" x-show="ready && footerCountLabel() && appVersion" x-cloak>·</span>
         <span class="mt-footer-version" x-show="appVersion" x-text="appVersion"></span>

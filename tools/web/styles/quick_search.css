@@ -1,7 +1,8 @@
 /* Quick search palette (<dialog> modal) — floating Spotlight-style bar */
 
 .mt-quick-search-trigger {
-  gap: 6px;
+  min-width: var(--mt-control-size);
+  padding-inline: 8px;
 }
 
 .mt-kbd {
@@ -17,14 +18,6 @@
   font-size: var(--mt-font-size-xs);
   font-weight: 500;
   line-height: 1.4;
-}
-
-/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
-@media (max-width: 42rem) {
-  .mt-quick-search-trigger-label,
-  .mt-quick-search-trigger .mt-kbd {
-    display: none;
-  }
 }
 
 /* Override Pico's full-viewport `dialog` defaults (min-width/min-height: 100%, inset: 0). */

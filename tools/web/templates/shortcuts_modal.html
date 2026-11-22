@@ -1,0 +1,46 @@
+<dialog id="mt-shortcuts" class="mt-shortcuts-dialog" closedby="any" aria-labelledby="mt-shortcuts-title"
+        x-ref="shortcutsDialog" @close="shortcutsOpen = false">
+  <div class="mt-shortcuts-header">
+    <h2 id="mt-shortcuts-title">Keyboard shortcuts</h2>
+    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact"
+            aria-label="Close keyboard shortcuts" @click="closeShortcuts()">
+      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg>
+    </button>
+  </div>
+  <div class="mt-shortcuts-body">
+    <section class="mt-shortcuts-group" aria-labelledby="mt-shortcuts-nav">
+      <h3 id="mt-shortcuts-nav">Navigation &amp; search</h3>
+      <dl class="mt-shortcuts-list">
+        <div class="mt-shortcut-row">
+          <dt>Quick search</dt>
+          <dd><kbd>⌘K</kbd><span class="mt-shortcut-or">or</span><kbd>/</kbd></dd>
+        </div>
+        <div class="mt-shortcut-row">
+          <dt>Navigate &amp; open search result</dt>
+          <dd><kbd>↑</kbd><kbd>↓</kbd><kbd>↵</kbd></dd>
+        </div>
+        <div class="mt-shortcut-row">
+          <dt>Keyboard shortcuts</dt>
+          <dd><kbd>?</kbd></dd>
+        </div>
+        <div class="mt-shortcut-row">
+          <dt>Close dialog, drawer, or menu</dt>
+          <dd><kbd>Esc</kbd></dd>
+        </div>
+      </dl>
+    </section>
+    <section class="mt-shortcuts-group" aria-labelledby="mt-shortcuts-cards">
+      <h3 id="mt-shortcuts-cards">Cards &amp; composer</h3>
+      <dl class="mt-shortcuts-list">
+        <div class="mt-shortcut-row">
+          <dt>Save card, body edit, or comment</dt>
+          <dd><kbd>⌘/Ctrl</kbd><kbd>↵</kbd></dd>
+        </div>
+        <div class="mt-shortcut-row">
+          <dt>Toggle Zen mode</dt>
+          <dd><kbd>⌘/Ctrl</kbd><kbd>⇧</kbd><kbd>F</kbd></dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+</dialog>

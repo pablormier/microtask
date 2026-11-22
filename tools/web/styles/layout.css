@@ -173,6 +173,7 @@
 }
 .mt-footer-demo-note,
 .mt-footer-workspace,
+.mt-footer-sync,
 .mt-footer-alert {
   min-width: 0;
   overflow: hidden;
@@ -180,9 +181,114 @@
   white-space: nowrap;
 }
 .mt-footer-workspace { font-weight: 500; }
+.mt-footer-sync { opacity: .85; }
 .mt-footer-alert { color: var(--mt-warning, var(--mt-danger)); font-weight: 500; }
 .mt-footer-sep { opacity: .6; }
 .mt-footer-version { font-variant-numeric: tabular-nums; }
+.mt-footer-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: .8;
+}
+.mt-footer-shortcut:hover { opacity: 1; color: var(--mt-text); }
+.mt-footer-shortcut kbd,
+.mt-shortcut-row kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--mt-border);
+  border-radius: 5px;
+  background: var(--mt-surface-subdued);
+  color: var(--mt-text);
+  font-family: var(--mt-font-family-mono);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 500;
+  line-height: 1.4;
+}
+dialog.mt-shortcuts-dialog {
+  position: fixed;
+  inset: min(14vh, 112px) auto auto 50%;
+  translate: -50% 0;
+  width: min(460px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: 460px;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100dvh - 18vh);
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--mt-border);
+  border-radius: 14px;
+  background: var(--mt-surface-raised);
+  color: var(--mt-text);
+  box-shadow: var(--mt-shadow-popover);
+  overflow: hidden;
+}
+dialog.mt-shortcuts-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+dialog.mt-shortcuts-dialog::backdrop {
+  background: rgba(15, 23, 42, .28);
+}
+.mt-shortcuts-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--mt-border);
+}
+.mt-shortcuts-header h2 {
+  margin: 0;
+  color: var(--mt-text);
+  font-size: var(--mt-font-size-md);
+  font-weight: 600;
+}
+.mt-shortcuts-body {
+  display: grid;
+  gap: 16px;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+.mt-shortcuts-group h3 {
+  margin: 0 0 8px;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.mt-shortcuts-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.mt-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--mt-font-size-sm);
+}
+.mt-shortcut-row dt { margin: 0; color: var(--mt-text); font-weight: 400; }
+.mt-shortcut-row dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+}
+.mt-shortcut-or { opacity: .7; }
 .mt-demo-badge {
   flex: 0 0 auto;
   padding: 1px 7px;
@@ -218,7 +324,7 @@
   /* Search and Filters show as icons so the actions fit on the brand row. */
   .mt-title-row { flex-wrap: wrap; }
   .mt-toolbar-actions { gap: 6px; }
-  .mt-filter-toggle-label, .mt-filter-count-label, .mt-timers-label, .mt-account-name, .mt-capture-resume-label { display: none; }
+  .mt-account-name, .mt-capture-resume-label { display: none; }
   .mt-timers-menu > summary.mt-menu-trigger { padding-inline: 6px; }
   .mt-settings-menu > summary.mt-menu-trigger.has-name { width: var(--mt-control-size); padding: 0; }
   /* The timers list spans the action row, below it, so it stays on screen. */
@@ -235,7 +341,9 @@
   .mt-filters { position: relative; }
   .mt-filters .mt-filter { position: static; }
   .mt-filters .mt-filter-menu { right: 0; left: 0; min-width: 0; max-width: none; }
-  .mt-footer-demo-note { display: none; }
+  .mt-footer-demo-note,
+  .mt-footer-shortcut,
+  .mt-footer-shortcut-sep { display: none; }
 }
 
 /* Keep workspace text wrapping while busy; Pico's busy style assumes a control. */

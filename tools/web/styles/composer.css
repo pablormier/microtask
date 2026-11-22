@@ -85,13 +85,18 @@
 }
 .mt-composer-body.mt-field {
   flex: 0 0 auto;
-  min-height: 14rem;
+  min-height: 9.5rem;
   padding: 10px 12px;
   font-size: var(--mt-font-size-md);
   line-height: 1.55;
   tab-size: 2;
 }
-.mt-processing-instructions { margin: 12px 0 0; }
+.mt-composer-meta-group {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mt-border);
+}
+.mt-processing-instructions { margin: 4px 0 0; }
 .mt-processing-instructions > label {
   display: block;
   margin: 9px 0 5px;
@@ -158,7 +163,7 @@
 .mt-composer details[open] > .mt-extra-summary { border-color: transparent; background: transparent; color: var(--mt-accent); }
 .mt-composer .mt-extra-summary .mt-extra-chevron { order: -1; width: .4rem; height: .4rem; margin: 0 4px 0 2px; border-color: currentColor; }
 .mt-composer .mt-metadata-more > summary { padding: 4px 6px 4px 2px; font-weight: 600; }
-.mt-capture-properties { margin-bottom: var(--mt-space-4); }
+.mt-capture-properties { margin-bottom: var(--mt-space-2); }
 .mt-properties-panel {
   align-self: start;
   min-width: 0;
@@ -342,8 +347,10 @@ li.mt-mention-option.is-active .mt-mention-meta {
   outline-offset: 4px;
 }
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
+  order: -1;
   max-height: 45vh;
   overflow: auto;
+  margin-top: 0;
   margin-block-end: var(--mt-space-4);
   padding: 14px 16px;
   border: 1px solid var(--mt-border);

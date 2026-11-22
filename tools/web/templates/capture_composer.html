@@ -52,33 +52,6 @@
                          :disabled="captureComposer.saving" autocomplete="off">
                 </div>
               </template>
-              <div id="mt-composer-zen-meta" class="mt-composer-meta-group" x-show="!captureComposer.zen || captureComposer.zenMetaOpen" :class="{ 'is-zen-popover': captureComposer.zen }">
-                <template x-if="captureComposer.draft">
-                  <div class="mt-capture-properties" x-data="cardMetadataEditor(captureComposer.draft?.taskOptions || {}, true, 'capture', cardMetadataConfig(), captureComposer.draft?.taskMetadataErrors || {}, captureComposer.draft?.kind)"
-                       x-effect="disabled = captureComposer.saving || busy; cardKind = captureComposer.draft?.kind || 'note'; fieldErrors = captureComposer.draft?.taskMetadataErrors || {}; if (['type', 'project', 'topic', 'tags'].some(field => fieldErrors[field])) morePropertiesOpen = true"
-                       @metadata-change="captureComposer.draft.taskOptions = $event.detail; captureComposer.persist(captureContext())">
-                    {card_metadata_editor}
-                  </div>
-                </template>
-                <template x-if="captureComposer.draft">
-                  <details class="mt-processing-instructions mt-extra-details"
-                           :open="Boolean(captureComposer.draft?.instructions && captureComposer.draft.instructions.trim())">
-                    <summary class="mt-extra-summary">
-                      <span class="mt-extra-summary-copy">
-                        <span class="mt-extra-summary-label">Processing instructions</span>
-                        <span class="mt-detail-summary-meta">(optional)</span>
-                      </span>
-                      <span class="mt-extra-chevron" aria-hidden="true"></span>
-                    </summary>
-                    <label for="mt-processing-instructions">How should this capture be organized or triaged?</label>
-                    <textarea id="mt-processing-instructions" class="mt-field" rows="4"
-                              x-model="captureComposer.draft.instructions"
-                              @input="captureComposer.persist(captureContext())"
-                              :disabled="captureComposer.saving"
-                              placeholder="Add guidance for organizing or triaging this capture"></textarea>
-                  </details>
-                </template>
-              </div>
               <div class="mt-composer-body-label-row">
                 <label for="mt-composer-body" x-show="!captureComposer.zen" x-text="captureComposer.draft?.kind === 'task' ? 'Description' : 'Note'"></label>
                 <div class="mt-composer-body-actions">
@@ -122,6 +95,33 @@
                   {composer_mention_menu}
                 </div>
                 <div class="mt-preview mt-zen-preview" x-show="captureComposer.zen && (captureComposer.zenView === 'split' || captureComposer.zenView === 'preview')" x-html="captureComposer.previewHtml"></div>
+              </div>
+              <div id="mt-composer-zen-meta" class="mt-composer-meta-group" x-show="!captureComposer.zen || captureComposer.zenMetaOpen" :class="{ 'is-zen-popover': captureComposer.zen }">
+                <template x-if="captureComposer.draft">
+                  <div class="mt-capture-properties" x-data="cardMetadataEditor(captureComposer.draft?.taskOptions || {}, true, 'capture', cardMetadataConfig(), captureComposer.draft?.taskMetadataErrors || {}, captureComposer.draft?.kind)"
+                       x-effect="disabled = captureComposer.saving || busy; cardKind = captureComposer.draft?.kind || 'note'; fieldErrors = captureComposer.draft?.taskMetadataErrors || {}; if (['type', 'project', 'topic', 'tags'].some(field => fieldErrors[field])) morePropertiesOpen = true"
+                       @metadata-change="captureComposer.draft.taskOptions = $event.detail; captureComposer.persist(captureContext())">
+                    {card_metadata_editor}
+                  </div>
+                </template>
+                <template x-if="captureComposer.draft">
+                  <details class="mt-processing-instructions mt-extra-details"
+                           :open="Boolean(captureComposer.draft?.instructions && captureComposer.draft.instructions.trim())">
+                    <summary class="mt-extra-summary">
+                      <span class="mt-extra-summary-copy">
+                        <span class="mt-extra-summary-label">Processing instructions</span>
+                        <span class="mt-detail-summary-meta">(optional)</span>
+                      </span>
+                      <span class="mt-extra-chevron" aria-hidden="true"></span>
+                    </summary>
+                    <label for="mt-processing-instructions">How should this capture be organized or triaged?</label>
+                    <textarea id="mt-processing-instructions" class="mt-field" rows="4"
+                              x-model="captureComposer.draft.instructions"
+                              @input="captureComposer.persist(captureContext())"
+                              :disabled="captureComposer.saving"
+                              placeholder="Add guidance for organizing or triaging this capture"></textarea>
+                  </details>
+                </template>
               </div>
               <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.recoveryWarning" x-text="captureComposer.recoveryWarning"></p>
               <p class="mt-composer-storage-status" role="status" aria-live="polite" x-show="draftWorkspaceStatus" :class="{ 'is-error': draftWorkspaceStatus === 'Error' }" x-text="draftWorkspaceStatus"></p>

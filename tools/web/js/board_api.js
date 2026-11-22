@@ -84,6 +84,10 @@ function createBoardApi() {
       if (Object.prototype.hasOwnProperty.call(payload, "sync_warning")) {
         this.syncWarning = payload.sync_warning || "";
       }
+      if (Object.prototype.hasOwnProperty.call(payload, "sync_status") && payload.sync_status) {
+        this.syncing = Boolean(payload.sync_status.syncing);
+        this.lastSyncedAt = payload.sync_status.last_synced_at || "";
+      }
       if (Object.prototype.hasOwnProperty.call(payload, "restart_notice")) {
         this.restartNotice = payload.restart_notice || "";
       }

@@ -117,7 +117,10 @@ function taskBoard() {
     draftWorkspaceStatus: "",
     draftBusy: false,
     syncWarning: "",
+    syncing: false,
+    lastSyncedAt: "",
     restartNotice: "",
+    shortcutsOpen: false,
     detailReturnFocus: null,
     hoverCard: null,
     hoverDisplayCard: null,
@@ -194,7 +197,9 @@ function taskBoard() {
       this.updatePageTitle();
       window.addEventListener("scroll", () => this.clearHoverCard(), { passive: true, capture: true });
       window.addEventListener("keydown", event => {
-        if (!this.memberChanging) this.handleQuickSearchShortcut(event);
+        if (this.memberChanging) return;
+        this.handleQuickSearchShortcut(event);
+        if (!event.defaultPrevented) this.handleShortcutsHelpShortcut(event);
       });
       window.addEventListener("popstate", () => this.readCardLocation());
       window.addEventListener("hashchange", () => this.readCardLocation());
@@ -259,6 +264,29 @@ function taskBoard() {
       } else {
         document.title = "MicroTask";
       }
+    },
+
+    openShortcuts() {
+      const dialog = this.$refs && this.$refs.shortcutsDialog;
+      if (dialog && !dialog.open && typeof dialog.showModal === "function") dialog.showModal();
+      this.shortcutsOpen = true;
+    },
+
+    closeShortcuts() {
+      const dialog = this.$refs && this.$refs.shortcutsDialog;
+      if (dialog && dialog.open && typeof dialog.close === "function") dialog.close();
+      this.shortcutsOpen = false;
+    },
+
+    handleShortcutsHelpShortcut(event) {
+      if (!event || event.defaultPrevented || !this.ready) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key !== "?") return;
+      const target = event.target;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(target.tagName || ""))) return;
+      if (this.quickSearch.open || this.captureComposer.open) return;
+      event.preventDefault();
+      if (this.shortcutsOpen) this.closeShortcuts();
+      else this.openShortcuts();
     },
 
     // ---------------------------------------------------------------------------
