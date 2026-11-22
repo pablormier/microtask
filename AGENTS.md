@@ -16,7 +16,7 @@ The rules that matter most:
 - Show a proposed new card and wait for agreement before creating it, unless
   the user asked for immediate creation.
 - Ask before completing, deleting, converting, or taking over a card, and
-  before `mt sync` or `mt update`. Do not stage or commit yourself.
+  before `mt sync` or `mt update`. Do not stage or commit yourself unless user authorizes you.
 - `mt capture`, editors, `mt show`, and `mt web` are for humans. Use explicit
   arguments and `--file -` instead.
 
