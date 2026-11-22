@@ -10,7 +10,7 @@ if str(APP_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(APP_ROOT / "scripts"))
 
 import card_query  # noqa: E402
-from cli_cards import resolve_needs_review  # noqa: E402
+from cli_cards import resolve_needs_review, topic_subtree  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
 from workspace import Workspace  # noqa: E402
@@ -137,6 +137,19 @@ def _parse_pos_int(raw: str | None, name: str) -> int | None:
     return value
 
 
+def _query_from_params(ws: Workspace, raw_params: dict[str, list[str]]) -> card_query.Query:
+    normalized = {
+        key: (vals[0] if len(vals) == 1 and key not in card_query.LIST_FIELDS else vals)
+        for key, vals in raw_params.items()
+    }
+    try:
+        query = card_query.query_from_mapping(normalized)
+        card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
+    except card_query.QueryError as error:
+        raise _BadInput(str(error)) from error
+    return query
+
+
 def _v1_items(ws: Workspace, params: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, object]]:
     raw_params = dict(params)
     search = (raw_params.pop("search", ["0"])[0] or "0").lower() in {"1", "true", "yes"}
@@ -153,20 +166,35 @@ def _v1_items(ws: Workspace, params: dict[str, list[str]]) -> tuple[HTTPStatus, 
         raise _BadInput(f"invalid format: {fmt}")
     if limit is not None and tail is not None:
         raise _BadInput("limit and tail cannot be combined")
-    normalized = {
-        key: (vals[0] if len(vals) == 1 and key not in card_query.LIST_FIELDS else vals)
-        for key, vals in raw_params.items()
-    }
-    try:
-        query = card_query.query_from_mapping(normalized)
-        card_query.validate(query, statuses=store.statuses(ws), priorities=list(store.policy(ws).get("priorities", {})))
-    except card_query.QueryError as error:
-        raise _BadInput(str(error)) from error
+    query = _query_from_params(ws, raw_params)
     if search and not query.text.strip():
         raise _BadInput("search requires a non-empty query")
     return HTTPStatus.OK, store.query_card_records(
         ws, query, search=search, sort=sort_field, order=order, limit=limit, tail=tail, fmt=fmt,
     )
+
+
+def _v1_settings(ws: Workspace) -> tuple[HTTPStatus, dict[str, object]]:
+    return HTTPStatus.OK, {"settings": store.policy(ws)}
+
+
+def _v1_topics(ws: Workspace, params: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, object]]:
+    topic = (params.get("topic") or [None])[0]
+    tree = operations.workspace_topic_tree(store.discover(ws=ws), store.policy(ws))
+    try:
+        subtree, depth = topic_subtree(tree, topic)
+    except ValueError as error:
+        raise _BadInput(str(error), status=HTTPStatus.NOT_FOUND, exit_code=1) from error
+    return HTTPStatus.OK, {"topics": subtree, "depth": depth, "has_topics": bool(tree)}
+
+
+def _v1_focus(ws: Workspace, params: dict[str, list[str]], actor=None) -> tuple[HTTPStatus, dict[str, object]]:
+    selection = _query_from_params(ws, dict(params))
+    open_query = card_query.narrow(selection, "status", store.open_statuses(ws))
+    open_tasks = store.select_cards(store.discover(ws=ws), open_query) if open_query else []
+    username = actor.user if actor is not None else store.current_username(ws=ws)
+    context = operations.focus_context(open_tasks, actor=username, focus_user=username, ws=ws)
+    return HTTPStatus.OK, context
 
 
 def handle_v1_get(ws: Workspace, path: str, params: dict[str, list[str]], actor=None) -> tuple[HTTPStatus, dict[str, object]]:
@@ -175,6 +203,12 @@ def handle_v1_get(ws: Workspace, path: str, params: dict[str, list[str]], actor=
             return _v1_item(ws, params)
         if path == "/api/v1/items":
             return _v1_items(ws, params)
+        if path == "/api/v1/settings":
+            return _v1_settings(ws)
+        if path == "/api/v1/topics":
+            return _v1_topics(ws, params)
+        if path == "/api/v1/focus":
+            return _v1_focus(ws, params, actor=actor)
     except _BadInput as error:
         return error.status, {"error": error.message, "exit_code": error.exit_code}
     return HTTPStatus.NOT_FOUND, {"error": "not found", "exit_code": 1}

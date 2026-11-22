@@ -412,6 +412,41 @@ class RemoteModeTests(unittest.TestCase):
         self.assertEqual(receipt["properties"]["status"], "doing")
         self.assertEqual(receipt["properties"]["claimed_by"], "alice")
 
+    def test_metadata_discovery_settings_topics_and_focus(self) -> None:
+        settings_res = self.run_remote_mt("settings", "--json", token=self.alice_token)
+        self.assertEqual(settings_res.returncode, 0, settings_res.stderr)
+        settings_payload = json.loads(settings_res.stdout)
+        self.assertIn("statuses", settings_payload)
+        self.assertIn("priorities", settings_payload)
+
+        added = self.run_remote_mt(
+            "add",
+            "Read async cancellation notes",
+            "--topic",
+            "learning/rust",
+            "--status",
+            "active",
+            "--json",
+            token=self.alice_token,
+        )
+        self.assertEqual(added.returncode, 0, added.stderr)
+        ref = json.loads(added.stdout)["ref"]
+
+        topics_res = self.run_remote_mt("topic", "list", "--json", token=self.bob_token)
+        self.assertEqual(topics_res.returncode, 0, topics_res.stderr)
+        topic_paths = [node["path"] for node in json.loads(topics_res.stdout)["topics"]]
+        self.assertIn("learning", topic_paths)
+        self.assertIn("learning/rust", topic_paths)
+
+        focus_res = self.run_remote_mt("focus", "--json", token=self.bob_token)
+        self.assertEqual(focus_res.returncode, 0, focus_res.stderr)
+        focus_payload = json.loads(focus_res.stdout)
+        self.assertEqual(focus_payload["selected"]["ref"], ref)
+
+        bad_focus = self.run_remote_mt("focus", "--clear", token=self.bob_token)
+        self.assertEqual(bad_focus.returncode, 2)
+        self.assertIn("read-only", bad_focus.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

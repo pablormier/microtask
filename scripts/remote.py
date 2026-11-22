@@ -10,15 +10,21 @@ import urllib.parse
 import urllib.request
 
 import card_query
+from cli_admin import emit_settings
 from cli_cards import (
     _edit_body_mode_from_args,
     _edit_metadata_from_args,
     create_params_from_args,
+    emit_focus_context,
+    emit_topic_tree,
     prepare_command_inputs,
 )
 from cli_helpers import emit_json, emit_query_output, emit_receipt, query_output_format
 
-SUPPORTED_REMOTE_COMMANDS = {"add", "note", "list", "search", "read", "move", "edit", "comment", "done"}
+SUPPORTED_REMOTE_COMMANDS = {
+    "add", "note", "list", "search", "read", "move", "edit", "comment", "done",
+    "settings", "topic", "focus",
+}
 
 
 class RemoteError(Exception):
@@ -103,6 +109,19 @@ def _remote_add(base_url: str, token: str, args: argparse.Namespace) -> int:
     )
 
 
+def _query_params(query: card_query.Query) -> list[tuple[str, str]]:
+    params: list[tuple[str, str]] = []
+    for key, value in card_query.query_to_mapping(query).items():
+        if isinstance(value, list):
+            params.extend((key, str(entry)) for entry in value)
+        elif isinstance(value, bool):
+            if value:
+                params.append((key, "true"))
+        elif value is not None:
+            params.append((key, str(value)))
+    return params
+
+
 def _remote_list_or_search(base_url: str, token: str, args: argparse.Namespace, *, search: bool) -> int:
     if args.limit is not None and args.limit < 1:
         raise RemoteError("--limit must be a positive integer", exit_code=2)
@@ -125,16 +144,46 @@ def _remote_list_or_search(base_url: str, token: str, args: argparse.Namespace, 
     for opt in ("limit", "tail"):
         if getattr(args, opt) is not None:
             params.append((opt, str(getattr(args, opt))))
-    for key, value in card_query.query_to_mapping(query).items():
-        if isinstance(value, list):
-            params.extend((key, str(entry)) for entry in value)
-        elif isinstance(value, bool):
-            if value:
-                params.append((key, "true"))
-        elif value is not None:
-            params.append((key, str(value)))
+    params.extend(_query_params(query))
 
     return emit_query_output(_request_json(base_url, token, "GET", "/api/v1/items", params=params), fmt)
+
+
+def _remote_settings(base_url: str, token: str, args: argparse.Namespace) -> int:
+    response = _request_json(base_url, token, "GET", "/api/v1/settings")
+    return emit_settings(response["settings"], as_json=bool(getattr(args, "as_json", False)))
+
+
+def _remote_topic(base_url: str, token: str, args: argparse.Namespace) -> int:
+    if getattr(args, "topic_command", None) != "list":
+        raise RemoteError(f"'mt topic {getattr(args, 'topic_command', '')}' is not available in remote mode", exit_code=2)
+    params = [("topic", args.topic)] if getattr(args, "topic", None) else []
+    response = _request_json(base_url, token, "GET", "/api/v1/topics", params=params)
+    return emit_topic_tree(
+        list(response.get("topics") or []),
+        depth=int(response.get("depth", 0)),
+        topic=getattr(args, "topic", None),
+        as_json=bool(getattr(args, "as_json", False)),
+        paths=bool(getattr(args, "paths", False)),
+        tree_view=bool(getattr(args, "tree", False)),
+        has_topics=bool(response.get("has_topics", False)),
+    )
+
+
+def _remote_focus(base_url: str, token: str, args: argparse.Namespace) -> int:
+    if (
+        getattr(args, "next", False)
+        or getattr(args, "clear", False)
+        or getattr(args, "set_query", None)
+        or " ".join(getattr(args, "query", []) or []).strip()
+    ):
+        raise RemoteError("remote 'mt focus' is read-only; --set, --clear, and --next are not available in remote mode", exit_code=2)
+    try:
+        query = card_query.query_from_args(args, env=os.environ)
+    except card_query.QueryError as error:
+        raise RemoteError(str(error), exit_code=2) from error
+    response = _request_json(base_url, token, "GET", "/api/v1/focus", params=_query_params(query))
+    return emit_focus_context(response, as_json=bool(getattr(args, "as_json", False) or getattr(args, "json", False)))
 
 
 def _remote_read(base_url: str, token: str, args: argparse.Namespace) -> int:
@@ -180,6 +229,12 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
             return _remote_list_or_search(remote_url, token, args, search=args.command == "search")
         if args.command == "read":
             return _remote_read(remote_url, token, args)
+        if args.command == "settings":
+            return _remote_settings(remote_url, token, args)
+        if args.command == "topic":
+            return _remote_topic(remote_url, token, args)
+        if args.command == "focus":
+            return _remote_focus(remote_url, token, args)
         if args.command == "move":
             return _remote_post(remote_url, token, args, "/api/v1/move", {
                 "destination": args.destination,

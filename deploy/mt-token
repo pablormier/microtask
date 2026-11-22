@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Manage revocable API bearer tokens for a hosted shared microtask workspace.
+set -euo pipefail
+
+root="${MT_DEPLOY_ROOT:-}"
+app_dir=""
+
+usage() {
+  cat <<'EOF'
+Usage:
+  mt-token [--root DIR] [--app DIR] WORKSPACE issue EMAIL [--label LABEL] [--json]
+  mt-token [--root DIR] [--app DIR] WORKSPACE revoke (--id ID | --email EMAIL) [--json]
+  mt-token [--root DIR] [--app DIR] WORKSPACE list [--json]
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --root) root="${2:?--root needs a directory}"; shift 2 ;;
+    --app) app_dir="${2:?--app needs a directory}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "error: unknown option $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+
+[[ $# -ge 2 ]] || { usage >&2; exit 2; }
+workspace="$1"
+action="$2"
+shift 2
+
+if [[ ! "$workspace" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "error: invalid workspace name '$workspace'" >&2
+  exit 2
+fi
+
+root="${root%/}"
+app_dir="${app_dir:-$root/opt/microtask/current}"
+[[ -f "$app_dir/tools/web_hosted.py" ]] || {
+  echo "error: no microtask at $app_dir; pass --app" >&2
+  exit 1
+}
+
+env_dir="$root/etc/mt"
+tokens_file="$env_dir/$workspace.tokens.json"
+members_file="$env_dir/$workspace.members"
+map_file="$env_dir/users.map"
+
+case "$action" in
+  issue)
+    [[ -f "$members_file" ]] || {
+      echo "error: missing workspace members file $members_file" >&2
+      exit 1
+    }
+    existed=0
+    if [[ -f "$tokens_file" ]]; then
+      existed=1
+    fi
+    extra=(--tokens-file "$tokens_file" --members-file "$members_file")
+    if [[ -f "$map_file" ]]; then
+      extra+=(--map "$map_file")
+    fi
+    python3 "$app_dir/tools/web_hosted.py" token-issue "${extra[@]}" "$@"
+    if [[ $existed -eq 0 && -f "$tokens_file" ]]; then
+      chmod 640 "$tokens_file"
+      if id "mt-$workspace" >/dev/null 2>&1; then
+        chown "root:mt-$workspace" "$tokens_file"
+      fi
+    fi
+    ;;
+  revoke)
+    exec python3 "$app_dir/tools/web_hosted.py" token-revoke --tokens-file "$tokens_file" "$@"
+    ;;
+  list)
+    exec python3 "$app_dir/tools/web_hosted.py" token-list --tokens-file "$tokens_file" "$@"
+    ;;
+  *)
+    echo "error: unknown action '$action' (expected issue, revoke, or list)" >&2
+    exit 2
+    ;;
+esac

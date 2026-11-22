@@ -292,6 +292,7 @@ class AddUserScriptTests(unittest.TestCase):
             self.assertIn(f"chown mt-{name}:mt-{name} {self.root / 'etc/mt' / (name + '.secret')}", calls)
             if name == "team":
                 self.assertIn(f"chown root:mt-{name} {self.root / 'etc/mt' / (name + '.members')}", calls)
+                self.assertIn(f"chown root:mt-{name} {self.root / 'etc/mt' / (name + '.tokens.json')}", calls)
             self.assertIn(f"systemctl enable --now {unit}", calls)
             self.assertLess(calls.index(f"useradd --system --user-group --no-create-home --home-dir "
                                         f"{workspace / name} --shell /usr/sbin/nologin mt-{name}"),
@@ -418,6 +419,7 @@ class AddUserScriptTests(unittest.TestCase):
                          "PORT=8101\nHOST_NAME=team.mt.example.com\nMT_ADMINS=alice\n"
                          "MT_PROXY_SECRET_FILE=/etc/mt/team.secret\n"
                          "MT_MEMBERS_FILE=/etc/mt/team.members\n"
+                         "MT_API_TOKENS_FILE=/etc/mt/team.tokens.json\n"
                          "MT_SIGN_OUT_URL=/oauth2/sign_out\n")
         site = (self.root / "etc/caddy/mt-users/team.caddy").read_text()
         self.assertIn("team.mt.example.com {", site)
@@ -491,6 +493,64 @@ class AddUserScriptTests(unittest.TestCase):
         self.assertIn(r"`(?i)^(alice@example\.com)$`", caddy.read_text())
         self.assertEqual(emails.read_text(), "alice@example.com\ncarol@example.com\n")
 
+    def test_shared_tokens_file_and_mt_token_wrapper_with_auto_revoke(self) -> None:
+        self.create_team()
+        tokens_file = self.root / "etc/mt/team.tokens.json"
+        self.assertTrue(tokens_file.is_file())
+        self.assertEqual(stat.S_IMODE(tokens_file.stat().st_mode), 0o640)
+
+        mt_token = SOURCE_ROOT / "deploy" / "mt-token"
+        issued = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT),
+             "team", "issue", "bob@example.com", "--label", "ci", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(issued.returncode, 0, issued.stderr)
+        payload = json.loads(issued.stdout)
+        self.assertTrue(payload["token"].startswith("mt_"))
+
+        listed = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT), "team", "list", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        entries = json.loads(listed.stdout)["tokens"]
+        self.assertEqual(len(entries), 1)
+        self.assertIsNone(entries[0]["revoked_at"])
+
+        # Removing bob from the workspace automatically revokes bob's active tokens.
+        removed = self.add_shared("--remove", "team", "bob@example.com")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        listed_after = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT), "team", "list", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(listed_after.returncode, 0, listed_after.stderr)
+        self.assertIsNotNone(json.loads(listed_after.stdout)["tokens"][0]["revoked_at"])
+
+        # Reject invalid workspace names and missing members files (fail closed).
+        bad_ws = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT), "../team", "list"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(bad_ws.returncode, 2)
+        missing_ws = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT), "taem", "issue", "alice@example.com"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(missing_ws.returncode, 1)
+        self.assertFalse((self.root / "etc/mt/taem.tokens.json").exists())
+
+        # Pre-v1 workspace without tokens.json yet still gets 0640 permissions on first issue.
+        tokens_file.unlink()
+        reissued = subprocess.run(
+            [str(mt_token), "--root", str(self.root), "--app", str(SOURCE_ROOT),
+             "team", "issue", "alice@example.com", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(reissued.returncode, 0, reissued.stderr)
+        self.assertEqual(stat.S_IMODE(tokens_file.stat().st_mode), 0o640)
+
     def test_shared_member_changes_are_checked_and_can_be_previewed(self) -> None:
         self.create_team()
         snapshot = {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
@@ -527,7 +587,7 @@ class AddUserScriptTests(unittest.TestCase):
 
     def assert_private_files(self) -> None:
         for name, limit in (("caddy/mt-users/team.caddy", 0o640), ("mt/team.secret", 0o600),
-                            ("mt/team.members", 0o640)):
+                            ("mt/team.members", 0o640), ("mt/team.tokens.json", 0o640)):
             path = self.root / "etc" / name
             mode = stat.S_IMODE(path.stat().st_mode)
             self.assertEqual(mode & ~limit, 0, f"{name} is {oct(mode)}, more open than {oct(limit)}")

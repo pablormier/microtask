@@ -772,30 +772,41 @@ def command_list(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return _run_card_query(args, search=False, ws=ws)
 
 
-def command_topic_list(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    resolved = _ws(ws)
-    tree = workspace_topic_tree(discover(ws=resolved), store.policy(resolved))
-    start, end, depth = 0, len(tree), 0  # `tree` is depth-first, so a topic's subtree is the run after it
-    if args.topic:
-        # Accept "learning/" as printed by the one-level listing.
-        wanted = card_format.topic_key(args.topic.strip().rstrip(card_format.TOPIC_SEPARATOR))
-        found = [index for index, node in enumerate(tree) if card_format.topic_key(str(node["path"])) == wanted]
-        if not found:
-            print(f"error: unknown topic: {args.topic}", file=sys.stderr)
-            return 1
-        start, depth = found[0], int(tree[found[0]]["depth"])
-        end = start + 1
-        while end < len(tree) and int(tree[end]["depth"]) > depth:
-            end += 1
-    subtree = tree[start:end]  # the topic itself (when given) and everything below it
-    if args.as_json:
+def topic_subtree(tree: list[dict[str, object]], topic: str | None) -> tuple[list[dict[str, object]], int]:
+    """Return `(subtree, base_depth)` for `topic`, or raise ValueError if unknown."""
+    if not topic:
+        return tree, 0
+    # Accept "learning/" as printed by the one-level listing.
+    wanted = card_format.topic_key(topic.strip().rstrip(card_format.TOPIC_SEPARATOR))
+    found = [index for index, node in enumerate(tree) if card_format.topic_key(str(node["path"])) == wanted]
+    if not found:
+        raise ValueError(f"unknown topic: {topic}")
+    start, depth = found[0], int(tree[found[0]]["depth"])
+    end = start + 1
+    while end < len(tree) and int(tree[end]["depth"]) > depth:
+        end += 1
+    return tree[start:end], depth
+
+
+def emit_topic_tree(
+    subtree: list[dict[str, object]],
+    *,
+    depth: int = 0,
+    topic: str | None = None,
+    as_json: bool = False,
+    paths: bool = False,
+    tree_view: bool = False,
+    has_topics: bool = True,
+) -> int:
+    """Print a topic tree in JSON, --paths, one-level, or --tree format."""
+    if as_json:
         print(json.dumps({"topics": subtree}, ensure_ascii=False))
         return 0
-    if args.paths:
+    if paths:
         for node in subtree:
             print(node["path"])
         return 0
-    if not tree:
+    if not has_topics:
         print("No topics yet. Set one with 'mt edit REF --topic PATH'.")
         return 0
     color = sys.stdout.isatty() and "NO_COLOR" not in os.environ and os.environ.get("TERM") != "dumb"
@@ -803,21 +814,21 @@ def command_topic_list(args: argparse.Namespace, ws: Workspace | None = None) ->
     def line(prefix: str, label: str, index: int) -> str:
         node = subtree[index]
         has_children = index + 1 < len(subtree) and int(subtree[index + 1]["depth"]) > int(node["depth"])
-        text = f"{prefix}{label}{'/' if has_children and not args.tree else ''} ({node['count']})"
+        text = f"{prefix}{label}{'/' if has_children and not tree_view else ''} ({node['count']})"
         return f"\033[2m{text}\033[0m" if color and not node["count"] else text
 
-    if not args.tree:
-        level = depth + 1 if args.topic else 0  # one level: the roots, or the children of TOPIC
+    if not tree_view:
+        level = depth + 1 if topic else 0  # one level: the roots, or the children of TOPIC
         for index, node in enumerate(subtree):
             if int(node["depth"]) == level:
                 print(line("", str(node["name"]), index))
         return 0
     # --tree: a node is last when no later node sits at its depth before the subtree climbs higher.
-    base = depth if args.topic else 0
+    base = depth if topic else 0
     for index, node in enumerate(subtree):
         level = int(node["depth"]) - base
         if level == 0:
-            print(line("", str(node["path"]) if args.topic else str(node["name"]), index))
+            print(line("", str(node["path"]) if topic else str(node["name"]), index))
             continue
         siblings_after = [later for later in subtree[index + 1:]
                           if int(later["depth"]) <= int(node["depth"])]
@@ -829,6 +840,25 @@ def command_topic_list(args: argparse.Namespace, ws: Workspace | None = None) ->
             prefix += "│   " if later and int(later[0]["depth"]) == ancestor_depth else "    "
         print(line(prefix + ("└── " if is_last else "├── "), str(node["name"]), index))
     return 0
+
+
+def command_topic_list(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    resolved = _ws(ws)
+    tree = workspace_topic_tree(discover(ws=resolved), store.policy(resolved))
+    try:
+        subtree, depth = topic_subtree(tree, args.topic)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return emit_topic_tree(
+        subtree,
+        depth=depth,
+        topic=args.topic,
+        as_json=args.as_json,
+        paths=args.paths,
+        tree_view=args.tree,
+        has_topics=bool(tree),
+    )
 
 
 def command_topic_rename(args: argparse.Namespace, ws: Workspace | None = None) -> int:
@@ -899,7 +929,12 @@ def command_focus(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         )
     except store.TaskError as error:
         return _cli_print_error(error)
-    if getattr(args, "as_json", False) or getattr(args, "json", False):
+    return emit_focus_context(context, as_json=bool(getattr(args, "as_json", False) or getattr(args, "json", False)))
+
+
+def emit_focus_context(context: dict[str, object], *, as_json: bool = False) -> int:
+    """Print focus recommendation and deadline alerts as JSON or readable text."""
+    if as_json:
         print(json.dumps(context, ensure_ascii=False, indent=2))
         return 0
     selected = context["selected"]

@@ -372,14 +372,9 @@ def command_info(args: argparse.Namespace, ws: Workspace | None = None) -> int:
     return 0
 
 
-def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int:
-    """Show effective settings, with JSON available for automation."""
-    try:
-        effective = store.policy(_ws(ws))
-    except (OSError, ValueError) as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 1
-    if args.as_json:
+def emit_settings(effective: dict[str, object], *, as_json: bool = False) -> int:
+    """Print effective settings as JSON or human-readable sections."""
+    if as_json:
         print(json.dumps(effective, ensure_ascii=False, sort_keys=True))
         return 0
     print("Effective workspace settings")
@@ -397,6 +392,16 @@ def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int
         else:
             print(f"\n{label}: {value}")
     return 0
+
+
+def command_policy(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    """Show effective settings, with JSON available for automation."""
+    try:
+        effective = store.policy(_ws(ws))
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return emit_settings(effective, as_json=bool(getattr(args, "as_json", False)))
 
 
 def copy_application(

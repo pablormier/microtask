@@ -214,6 +214,7 @@ env_file="$env_dir/$name.env"
 secret_file="$env_dir/$name.secret"
 members_file="$env_dir/$name.members"
 retired_file="$env_dir/$name.retired"
+tokens_file="$env_dir/$name.tokens.json"
 caddy_dir="$root/etc/caddy/mt-users"
 caddy_file="$caddy_dir/$name.caddy"
 oauth_emails_file="${OAUTH2_EMAILS_FILE:-$root/etc/oauth2-proxy/emails.txt}"
@@ -226,7 +227,7 @@ app_dir="${app_dir:-$root/opt/microtask/current}"
 check_existing() {
   local path
   if [[ "$mode" == create ]]; then
-    for path in "$workspace" "$env_file" "$secret_file" "$caddy_file" "$members_file" "$retired_file"; do
+    for path in "$workspace" "$env_file" "$secret_file" "$caddy_file" "$members_file" "$retired_file" "$tokens_file"; do
       [[ ! -e "$path" ]] || die "$name already exists ($path is present)"
     done
     if [[ -z "$no_systemctl" ]]; then
@@ -483,6 +484,7 @@ if [[ "$mode" != create ]]; then
   chmod 640 "$members_file"
   if [[ -z "$no_systemctl" ]] && id "$unix_user" >/dev/null 2>&1; then
     chown "root:$unix_user" "$members_file"
+    [[ ! -f "$tokens_file" ]] || chown "root:$unix_user" "$tokens_file"
   fi
   # Retire the names of removed people; give a name back to whoever is now allowed to use it.
   if [[ ! -f "$retired_file" ]]; then make_file 600 "$retired_file"; fi
@@ -528,6 +530,13 @@ if [[ "$mode" != create ]]; then
   changed_members=""
   trap - EXIT
   rm -rf "$backup_dir"
+  if [[ "$mode" == remove && -f "$tokens_file" ]]; then
+    for address in "${requested[@]}"; do
+      if ! python3 "$app_dir/tools/web_hosted.py" token-revoke --tokens-file "$tokens_file" --email "$address" >/dev/null; then
+        echo "warning: could not revoke tokens for $address in $tokens_file" >&2
+      fi
+    done
+  fi
   rmdir "$lock_dir" 2>/dev/null || true
   echo "Updated $name: ${#emails[@]} member(s); https://$host"
   exit 0
@@ -621,8 +630,8 @@ claim_path "$secret_file"
 secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 make_file 600 "$secret_file"
 printf '%s\n' "$secret" > "$secret_file"
-printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\nMT_MEMBERS_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
-  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" "/etc/mt/$name.members" "/oauth2/sign_out" > "$env_file"
+printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\nMT_MEMBERS_FILE=%s\nMT_API_TOKENS_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
+  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" "/etc/mt/$name.members" "/etc/mt/$name.tokens.json" "/oauth2/sign_out" > "$env_file"
 
 make_email_pattern
 
@@ -634,6 +643,10 @@ render_caddy > "$caddy_file"
 claim_path "$members_file"
 make_file 640 "$members_file"
 printf '%s\n' "${emails[@]}" > "$members_file"
+
+claim_path "$tokens_file"
+make_file 640 "$tokens_file"
+printf '{"version": 1, "tokens": []}\n' > "$tokens_file"
 
 mkdir -p "$(dirname "$oauth_emails_file")"
 touch "$oauth_emails_file"
@@ -652,6 +665,7 @@ if [[ -z "$no_systemctl" ]]; then
   chown -R "$unix_user:$unix_user" "$workspace"
   chown "$unix_user:$unix_user" "$secret_file"
   chown "root:$unix_user" "$members_file"
+  chown "root:$unix_user" "$tokens_file"
   if getent group caddy >/dev/null 2>&1; then
     chgrp caddy "$caddy_file"
   fi
