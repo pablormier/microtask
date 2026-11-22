@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 import getpass
 import hashlib
 import json
@@ -842,6 +842,64 @@ def sort_card_items(
     missing = [item for item in sorted_by_id if sort_value(item) is None]
     present.sort(key=sort_value, reverse=order == "desc")
     return present + missing
+
+
+def query_card_records(
+    ws: Workspace,
+    query: card_query.Query,
+    *,
+    search: bool = False,
+    sort: str = "updated",
+    order: str = "desc",
+    limit: int | None = None,
+    tail: int | None = None,
+    fmt: str = "json",
+) -> dict[str, object]:
+    """Discover, filter, sort, slice, and serialize cards for `mt list`/`search` and `/api/v1/items`."""
+    all_items = discover(ws=ws)
+    done_cutoff = None if search else card_query.default_done_cutoff(query, done_window(ws), date.today())
+    selected = select_cards(all_items, query, done_cutoff=done_cutoff)
+    relevance_scores = (
+        {item.path: card_query.text_score(item, query.text, query.match) for item in selected}
+        if search else None
+    )
+    priorities = list(policy(ws).get("priorities", {}).keys())
+    rank = {name: index for index, name in enumerate(priorities)}
+    selected = sort_card_items(
+        selected,
+        field=sort,
+        order=order,
+        priority_rank=rank,
+        relevance_scores=relevance_scores,
+    )
+    if limit is not None:
+        selected = selected[:limit]
+    elif tail is not None:
+        selected = selected[-tail:]
+
+    if fmt == "compact":
+        return {"items": [item_compact_json_record(item) for item in selected]}
+    if fmt == "outline":
+        return {"items": [item_outline_json_record(item) for item in selected]}
+    if fmt == "full":
+        return {"items": [item_read_record(item, ws=ws) for item in selected]}
+    if fmt == "text":
+        lines = []
+        for item in selected:
+            status = f" [{item.frontmatter['status']}]" if item.is_task else ""
+            priority = str(item.frontmatter.get("priority") or "-")
+            claim = f" [claimed: {item.frontmatter['claimed_by']}]" if item.frontmatter.get("claimed_by") else ""
+            fuzzy_suffix = (
+                f" (fuzzy {relevance_scores[item.path]:.0%})"
+                if search and relevance_scores is not None and query.match == "fuzzy" else ""
+            )
+            lines.append(
+                f"[@{item.short_ref}] [{item.kind}]{status} [{priority}] {item.title}"
+                f"{item_state_suffix(item)}{claim}{fuzzy_suffix}"
+            )
+        return {"lines": lines}
+    reference_index = ReferenceIndex(all_items)
+    return {"items": [item_json_record(item, reference_index, ws=ws) for item in selected]}
 
 
 

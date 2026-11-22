@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+from urllib.parse import urlsplit
 import uuid
 
 import card_query
@@ -36,6 +37,36 @@ TIME_QUERY_DEFAULTS = {"archived": "include", "hidden": "include"}
 
 def emit_json(payload: object, *, indent: int | None = None) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=indent))
+
+
+def query_output_format(args: argparse.Namespace) -> str:
+    """Return the selected output format name for list/search."""
+    if getattr(args, "compact", False):
+        return "compact"
+    if getattr(args, "outline", False):
+        return "outline"
+    if getattr(args, "full", False):
+        return "full"
+    if getattr(args, "as_json", False) or getattr(args, "json", False):
+        return "json"
+    return "text"
+
+
+def emit_query_output(result: dict[str, object], fmt: str) -> int:
+    """Print list/search records or formatted lines in the requested CLI format."""
+    if fmt in {"compact", "outline"}:
+        for item in result.get("items") or ():
+            emit_json(item)
+        return 0
+    if fmt == "full":
+        emit_json(result.get("items") or [])
+        return 0
+    if fmt == "json":
+        emit_json(result.get("items") or [], indent=2)
+        return 0
+    for line in result.get("lines") or ():
+        print(line)
+    return 0
 
 
 def command_query(args: argparse.Namespace, ws: Workspace | None = None) -> card_query.Query | None:
@@ -164,6 +195,25 @@ def validate_repo_workspace(path: Path, *, allow_unmigrated: bool = False) -> st
     if not os.access(path / "mt", os.X_OK):
         return f"microtask entrypoint is not executable: {path / 'mt'}"
     return None
+
+
+def is_remote_url(value: str) -> bool:
+    """Return True when `value` looks like an http:// or https:// URL."""
+    lowered = value.strip().lower()
+    return lowered.startswith("http://") or lowered.startswith("https://")
+
+
+def validate_remote_url(value: str) -> str:
+    """Validate and normalize an http:// or https:// remote workspace base URL."""
+    text = value.strip()
+    if not text or any(ch.isspace() or ord(ch) < 32 for ch in text):
+        raise ValueError(f"invalid remote URL: {value!r}")
+    parts = urlsplit(text)
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        raise ValueError(f"remote URL must be an http:// or https:// address: {value}")
+    if parts.query or parts.fragment:
+        raise ValueError(f"remote URL must not include a query or fragment: {value}")
+    return f"{parts.scheme.lower()}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
 def path_like_repo_selector(value: str) -> bool:
@@ -395,6 +445,12 @@ def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -
         parser.add_argument("--user-map", metavar="FILE",
                             help="lines of 'EMAIL USER' that name the user for an email "
                                  "(or set MT_USER_MAP); other emails use the part before the @")
+        parser.add_argument("--members-file", metavar="FILE",
+                            help="active workspace member emails, one per line "
+                                 "(or set MT_MEMBERS_FILE); required for API bearer tokens")
+        parser.add_argument("--tokens-file", metavar="FILE",
+                            help="JSON file holding hashed API bearer tokens "
+                                 "(or set MT_API_TOKENS_FILE)")
         parser.add_argument("--admin", action="append", default=[], metavar="USER",
                             help="user name allowed to delete cards, take over claims and rename topics; "
                                  "repeatable, or set MT_ADMINS to a comma-separated list")

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date
 import json
 import os
 from pathlib import Path
@@ -21,6 +20,9 @@ from cli_helpers import (
     create_editor_recovery_copy,
     editor_command,
     emit_json,
+    emit_query_output,
+    query_output_format,
+    read_input_file,
     resolve_unique,
 )
 from operations import (
@@ -49,20 +51,13 @@ import store
 from store import (
     RESTART_COMMANDS,
     Card,
-    ReferenceIndex,
     _ws,
     discover,
-    done_window,
     is_due_value,
     is_timestamp,
-    item_compact_json_record,
-    item_json_record,
-    item_outline_json_record,
     item_read_record,
-    item_state_suffix,
     now_stamp,
     select_cards,
-    sort_card_items,
 )
 from transaction import validate_item_changes
 from workspace import Workspace
@@ -72,6 +67,52 @@ def card_text_option(args: argparse.Namespace, name: str) -> str:
     """Read an optional text property supplied inline or from a --*-file option."""
     value = str(getattr(args, f"{name}_text", None) or getattr(args, name, "") or "")
     return value if value.strip() else ""
+
+
+def resolve_needs_review(kind: str, is_capture: bool, raw_needs_review: object) -> bool:
+    if is_capture:
+        return (kind == "note") if raw_needs_review is None else bool(raw_needs_review)
+    return bool(raw_needs_review)
+
+
+def prepare_command_inputs(root_parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Validate and read file/stdin text inputs before locking or sending a remote request."""
+    if (args.command in {"add", "note"} and args.file is None and not args.text
+            and not getattr(args, "template", None) and not sys.stdin.isatty()):
+        secondary_files = [getattr(args, field, None) for field in ("next_action_file", "instructions_file")]
+        if any(path == "-" for path in secondary_files):
+            root_parser.error("implicit body input conflicts with another file reading stdin; pass --file PATH")
+        args.file = "-"
+    if args.command == "edit":
+        _validate_edit_args(root_parser, args)
+    if args.command in {"add", "note"}:
+        _validate_capture_args(root_parser, args)
+    # Input is read before acquiring locks. Only one input may consume stdin.
+    input_files = [getattr(args, field, None) for field in
+                   ("file", "replace_file", "next_action_file", "instructions_file", "apply_plan")]
+    if sum(path == "-" for path in input_files if path is not None) > 1:
+        root_parser.error("only one input file may read stdin")
+    if getattr(args, "file", None) is not None:
+        try:
+            args.file_text = read_input_file(args.file)
+        except (OSError, UnicodeError) as error:
+            root_parser.error(f"cannot read input text: {error}")
+    for option, destination in (("next_action_file", "next_action_text"),
+                                ("instructions_file", "instructions_text"),
+                                ("replace_file", "replacements_text"),
+                                ("apply_plan", "apply_text")):
+        path = getattr(args, option, None)
+        if path is not None:
+            try:
+                setattr(args, destination, read_input_file(path))
+            except (OSError, UnicodeError) as error:
+                root_parser.error(f"cannot read input text: {error}")
+    if args.command in {"add", "note"} and getattr(args, "instructions", None) is not None:
+        args.instructions_text = args.instructions
+    if args.command in {"add", "note"} and args.file is not None:
+        args.text = [args.file_text]
+    if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
+        root_parser.error("an empty body requires --title")
 
 
 def command_create(args: argparse.Namespace, ws: Workspace | None = None) -> int:
@@ -98,7 +139,7 @@ def command_create(args: argparse.Namespace, ws: Workspace | None = None) -> int
             due=getattr(args, "due", None),
             due_kind=getattr(args, "due_kind", None),
             tags=getattr(args, "tags", None),
-            needs_review=((kind == "note") if needs_review is None else bool(needs_review)) if is_capture else bool(needs_review),
+            needs_review=resolve_needs_review(kind, is_capture, needs_review),
             archived=bool(getattr(args, "archived", False)),
             hidden=bool(getattr(args, "hidden", False)),
             by=getattr(args, "by", None) if kind == "task" else None,
@@ -699,52 +740,18 @@ def _run_card_query(args: argparse.Namespace, *, search: bool, ws: Workspace | N
     if search and not query.text.strip():
         print("error: search requires a non-empty query", file=sys.stderr)
         return 2
-    all_items = discover(ws=resolved)
-    done_cutoff = None if search else card_query.default_done_cutoff(query, done_window(resolved), date.today())
-    selected = select_cards(all_items, query, done_cutoff=done_cutoff)
-    relevance_scores = (
-        {item.path: card_query.text_score(item, query.text, query.match) for item in selected}
-        if search else None
+    fmt = query_output_format(args)
+    result = store.query_card_records(
+        resolved,
+        query,
+        search=search,
+        sort=args.sort,
+        order=args.order,
+        limit=args.limit,
+        tail=args.tail,
+        fmt=fmt,
     )
-    priorities = list(store.policy(resolved).get("priorities", {}).keys())
-    rank = {name: index for index, name in enumerate(priorities)}
-    selected = sort_card_items(
-        selected, field=args.sort, order=args.order,
-        priority_rank=rank, relevance_scores=relevance_scores,
-    )
-    if args.limit is not None:
-        selected = selected[:args.limit]
-    elif args.tail is not None:
-        selected = selected[-args.tail:]
-
-    if getattr(args, "compact", False):
-        for item in selected:
-            print(json.dumps(item_compact_json_record(item), ensure_ascii=False))
-        return 0
-    if getattr(args, "outline", False):
-        for item in selected:
-            print(json.dumps(item_outline_json_record(item), ensure_ascii=False))
-        return 0
-    if args.full:
-        print(json.dumps([item_read_record(item, ws=resolved) for item in selected], ensure_ascii=False))
-        return 0
-    if getattr(args, "as_json", False) or getattr(args, "json", False):
-        reference_index = ReferenceIndex(all_items)
-        print(json.dumps([item_json_record(item, reference_index, ws=resolved) for item in selected],
-                         ensure_ascii=False, indent=2))
-        return 0
-
-    for item in selected:
-        status = f" [{item.frontmatter['status']}]" if item.is_task else ""
-        priority = str(item.frontmatter.get("priority") or "-")
-        claim = f" [claimed: {item.frontmatter['claimed_by']}]" if item.frontmatter.get("claimed_by") else ""
-        fuzzy_suffix = (
-            f" (fuzzy {relevance_scores[item.path]:.0%})"
-            if search and relevance_scores is not None and query.match == "fuzzy" else ""
-        )
-        print(f"[@{item.short_ref}] [{item.kind}]{status} [{priority}] {item.title}"
-              f"{item_state_suffix(item)}{claim}{fuzzy_suffix}")
-    return 0
+    return emit_query_output(result, fmt)
 
 
 def command_list(args: argparse.Namespace, ws: Workspace | None = None) -> int:

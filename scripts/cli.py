@@ -19,15 +19,19 @@ from cli_cards import (  # noqa: F401
     command_create,
     command_move,
     command_topic_rename,
+    prepare_command_inputs,
 )
 from cli_helpers import (  # noqa: F401
     apply_capture_scope,
     consume_repo_selector,
+    is_remote_url,
     read_input_file,
     resolve_repo_selector,
     show_workspace,
+    validate_remote_url,
 )
 from cli_parser import parser  # noqa: F401
+import remote
 from cli_time import (  # noqa: F401
     command_time_add,
     command_time_end,
@@ -69,25 +73,33 @@ def main() -> int:
     if arguments == ["help"]:
         arguments = ["--help"]
     explicit_app = os.environ.pop(_EXPLICIT_APP, None)
-    ws = Workspace.resolve()
+    remote_url: str | None = None
+    ws: Workspace | None = None
     try:
         arguments, repo_selector = consume_repo_selector(arguments)
         # 'mt migrate' is the one command that accepts a workspace folder still named mt-policy.yaml.
         migrating = bool(arguments) and arguments[0] == "migrate"
         demo_cmd = bool(arguments) and arguments[0] == "demo" and repo_selector is None
-        if repo_selector is not None:
-            selected_root = resolve_repo_selector(repo_selector, allow_unmigrated=migrating)
-            if selected_root != ws.root:
-                if is_data_workspace(selected_root) or (migrating and is_unmigrated_workspace(selected_root)):
-                    executable = ws.app_root / "mt"
-                    env = {**ws.environ, "MT_WORKSPACE": str(selected_root)}
-                else:
-                    executable, env = selected_root / "mt", foreign_env(ws)
-                env[_EXPLICIT_APP] = str(executable.parent.resolve())
-                os.execve(str(executable), [str(executable), *arguments], env)
-        error = None if (migrating and is_unmigrated_workspace(ws.root)) or demo_cmd else workspace_error(ws)
-        if error:
-            raise ValueError(error)
+        if repo_selector is not None and is_remote_url(repo_selector):
+            remote_url = validate_remote_url(repo_selector)
+        elif repo_selector is None and os.environ.get("MT_REMOTE", "").strip():
+            remote_url = validate_remote_url(os.environ["MT_REMOTE"])
+        else:
+            ws = Workspace.resolve()
+            if repo_selector is not None:
+                selected_root = resolve_repo_selector(repo_selector, allow_unmigrated=migrating)
+                if selected_root != ws.root:
+                    if is_data_workspace(selected_root) or (migrating and is_unmigrated_workspace(selected_root)):
+                        executable = ws.app_root / "mt"
+                        env = {**ws.environ, "MT_WORKSPACE": str(selected_root)}
+                    else:
+                        executable, env = selected_root / "mt", foreign_env(ws)
+                    env.pop("MT_REMOTE", None)
+                    env[_EXPLICIT_APP] = str(executable.parent.resolve())
+                    os.execve(str(executable), [str(executable), *arguments], env)
+            error = None if (migrating and is_unmigrated_workspace(ws.root)) or demo_cmd else workspace_error(ws)
+            if error:
+                raise ValueError(error)
     except ValueError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
@@ -95,6 +107,9 @@ def main() -> int:
     args = root_parser.parse_args(arguments)
     if getattr(args, "workspace_repo", None) is not None:
         root_parser.error("-R / --repo must come before the command")
+    if remote_url is not None:
+        return remote.dispatch_remote(remote_url, root_parser, args)
+    assert ws is not None
     try:
         needs_workspace = args.command not in {"demo", "init", "repo", "update"}
         if needs_workspace and repo_selector is None and explicit_app != str(ws.app_root.resolve()):
@@ -136,42 +151,7 @@ def _dispatch(root_parser, args, ws: Workspace) -> int:
         if not args.argv or not args.argv[0]:
             root_parser.error("run requires a command")
         return args.func(args, ws=ws)
-    if (args.command in {"add", "note"} and args.file is None and not args.text
-            and not getattr(args, "template", None) and not sys.stdin.isatty()):
-        secondary_files = [getattr(args, field, None) for field in ("next_action_file", "instructions_file")]
-        if any(path == "-" for path in secondary_files):
-            root_parser.error("implicit body input conflicts with another file reading stdin; pass --file PATH")
-        args.file = "-"
-    if args.command == "edit":
-        _validate_edit_args(root_parser, args)
-    if args.command in {"add", "note"}:
-        _validate_capture_args(root_parser, args)
-    # Input is read before acquiring locks. Only one input may consume stdin.
-    input_files = [getattr(args, field, None) for field in
-                   ("file", "replace_file", "next_action_file", "instructions_file", "apply_plan")]
-    if sum(path == "-" for path in input_files if path is not None) > 1:
-        root_parser.error("only one input file may read stdin")
-    if getattr(args, "file", None) is not None:
-        try:
-            args.file_text = read_input_file(args.file)
-        except (OSError, UnicodeError) as error:
-            root_parser.error(f"cannot read input text: {error}")
-    for option, destination in (("next_action_file", "next_action_text"),
-                                ("instructions_file", "instructions_text"),
-                                ("replace_file", "replacements_text"),
-                                ("apply_plan", "apply_text")):
-        path = getattr(args, option, None)
-        if path is not None:
-            try:
-                setattr(args, destination, read_input_file(path))
-            except (OSError, UnicodeError) as error:
-                root_parser.error(f"cannot read input text: {error}")
-    if args.command in {"add", "note"} and getattr(args, "instructions", None) is not None:
-        args.instructions_text = args.instructions
-    if args.command in {"add", "note"} and args.file is not None:
-        args.text = [args.file_text]
-    if args.command in {"add", "note"} and args.text and not " ".join(args.text).strip() and not args.title:
-        root_parser.error("an empty body requires --title")
+    prepare_command_inputs(root_parser, args)
     if args.command in {
         "add", "note", "capture", "time", "focus", "list", "search", "read", "show", "edit", "bulk-edit",
         "comment", "move", "convert", "done", "delete", "topic", "sync", "validate", "draft",

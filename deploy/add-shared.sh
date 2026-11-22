@@ -480,7 +480,10 @@ if [[ "$mode" != create ]]; then
   cat "$backup_dir/caddy.new" > "$caddy_file"
   printf '%s\n' "${emails[@]}" > "$members_file"
   chmod 640 "$caddy_file"
-  chmod 600 "$members_file"
+  chmod 640 "$members_file"
+  if [[ -z "$no_systemctl" ]] && id "$unix_user" >/dev/null 2>&1; then
+    chown "root:$unix_user" "$members_file"
+  fi
   # Retire the names of removed people; give a name back to whoever is now allowed to use it.
   if [[ ! -f "$retired_file" ]]; then make_file 600 "$retired_file"; fi
   : > "$backup_dir/retired.new"
@@ -618,8 +621,8 @@ claim_path "$secret_file"
 secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 make_file 600 "$secret_file"
 printf '%s\n' "$secret" > "$secret_file"
-printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
-  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" "/oauth2/sign_out" > "$env_file"
+printf 'PORT=%s\nHOST_NAME=%s\nMT_ADMINS=%s\nMT_PROXY_SECRET_FILE=%s\nMT_MEMBERS_FILE=%s\nMT_SIGN_OUT_URL=%s\n' \
+  "$port" "$host" "$admin_list" "/etc/mt/$name.secret" "/etc/mt/$name.members" "/oauth2/sign_out" > "$env_file"
 
 make_email_pattern
 
@@ -629,7 +632,7 @@ make_file 640 "$caddy_file"
 render_caddy > "$caddy_file"
 
 claim_path "$members_file"
-make_file 600 "$members_file"
+make_file 640 "$members_file"
 printf '%s\n' "${emails[@]}" > "$members_file"
 
 mkdir -p "$(dirname "$oauth_emails_file")"
@@ -648,6 +651,7 @@ if [[ -z "$no_systemctl" ]]; then
   created_account=1
   chown -R "$unix_user:$unix_user" "$workspace"
   chown "$unix_user:$unix_user" "$secret_file"
+  chown "root:$unix_user" "$members_file"
   if getent group caddy >/dev/null 2>&1; then
     chgrp caddy "$caddy_file"
   fi

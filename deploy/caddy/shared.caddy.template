@@ -18,26 +18,40 @@
 			header_up X-Forwarded-Uri {uri}
 		}
 
-		# Ask oauth2-proxy whether the browser is signed in.
-		forward_auth 127.0.0.1:4180 {
-			uri /oauth2/auth
-			header_up X-Real-IP {remote_host}
-			copy_headers X-Auth-Request-Email
+		# Remote API clients authenticate with per-member Bearer tokens verified by microtask itself
+		# against the workspace members file, bypassing browser OAuth redirects.
+		@api_v1_bearer {
+			path /api/v1/*
+			header_regexp Authorization (?i)^Bearer\s+
+		}
+		handle @api_v1_bearer {
+			request_header -X-Auth-Request-Email
+			request_header X-Microtask-Proxy-Secret "@SECRET@"
+			reverse_proxy 127.0.0.1:@PORT@
+		}
 
-			@unauthenticated status 401
-			handle_response @unauthenticated {
-				redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+		handle {
+			# Ask oauth2-proxy whether the browser is signed in.
+			forward_auth 127.0.0.1:4180 {
+				uri /oauth2/auth
+				header_up X-Real-IP {remote_host}
+				copy_headers X-Auth-Request-Email
+
+				@unauthenticated status 401
+				handle_response @unauthenticated {
+					redir * /oauth2/sign_in?rd={scheme}://{host}{uri}
+				}
 			}
-		}
 
-		# Signed in with an address that is not on this workspace's allowlist.
-		@not_allowed {
-			not header_regexp X-Auth-Request-Email `@EMAIL_PATTERN@`
-		}
-		respond @not_allowed "Forbidden" 403
+			# Signed in with an address that is not on this workspace's allowlist.
+			@not_allowed {
+				not header_regexp X-Auth-Request-Email `@EMAIL_PATTERN@`
+			}
+			respond @not_allowed "Forbidden" 403
 
-		# The dashboard trusts X-Auth-Request-Email only together with this secret.
-		request_header X-Microtask-Proxy-Secret "@SECRET@"
-		reverse_proxy 127.0.0.1:@PORT@
+			# The dashboard trusts X-Auth-Request-Email only together with this secret.
+			request_header X-Microtask-Proxy-Secret "@SECRET@"
+			reverse_proxy 127.0.0.1:@PORT@
+		}
 	}
 }

@@ -290,6 +290,8 @@ class AddUserScriptTests(unittest.TestCase):
                           f"--shell /usr/sbin/nologin mt-{name}", calls)
             self.assertIn(f"chown -R mt-{name}:mt-{name} {workspace / name}", calls)
             self.assertIn(f"chown mt-{name}:mt-{name} {self.root / 'etc/mt' / (name + '.secret')}", calls)
+            if name == "team":
+                self.assertIn(f"chown root:mt-{name} {self.root / 'etc/mt' / (name + '.members')}", calls)
             self.assertIn(f"systemctl enable --now {unit}", calls)
             self.assertLess(calls.index(f"useradd --system --user-group --no-create-home --home-dir "
                                         f"{workspace / name} --shell /usr/sbin/nologin mt-{name}"),
@@ -415,6 +417,7 @@ class AddUserScriptTests(unittest.TestCase):
         self.assertEqual((self.root / "etc/mt/team.env").read_text(),
                          "PORT=8101\nHOST_NAME=team.mt.example.com\nMT_ADMINS=alice\n"
                          "MT_PROXY_SECRET_FILE=/etc/mt/team.secret\n"
+                         "MT_MEMBERS_FILE=/etc/mt/team.members\n"
                          "MT_SIGN_OUT_URL=/oauth2/sign_out\n")
         site = (self.root / "etc/caddy/mt-users/team.caddy").read_text()
         self.assertIn("team.mt.example.com {", site)
@@ -459,7 +462,7 @@ class AddUserScriptTests(unittest.TestCase):
         self.create_team()
         members = self.root / "etc/mt/team.members"
         self.assertEqual(members.read_text(), "alice@example.com\nbob@example.com\n")
-        self.assertEqual(stat.S_IMODE(members.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(members.stat().st_mode), 0o640)
 
     def test_shared_members_can_be_added_and_removed(self) -> None:
         self.create_team()
@@ -524,7 +527,7 @@ class AddUserScriptTests(unittest.TestCase):
 
     def assert_private_files(self) -> None:
         for name, limit in (("caddy/mt-users/team.caddy", 0o640), ("mt/team.secret", 0o600),
-                            ("mt/team.members", 0o600)):
+                            ("mt/team.members", 0o640)):
             path = self.root / "etc" / name
             mode = stat.S_IMODE(path.stat().st_mode)
             self.assertEqual(mode & ~limit, 0, f"{name} is {oct(mode)}, more open than {oct(limit)}")

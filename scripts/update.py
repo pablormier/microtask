@@ -404,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.json and not args.check:
         parser.error("--json requires --check")
     try:
+        if os.environ.get("MT_REMOTE", "").strip():
+            raise UpdateError("cannot run 'mt update' in remote mode (MT_REMOTE is set)", code=2)
         refuse_unsuitable_folder()
         version = current_version()
         tag, latest, note, following = plan_target(version)

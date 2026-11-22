@@ -678,6 +678,8 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         command.append("--require-proxy-secret")
     for flag, value in (("--proxy-secret-file", getattr(args, "proxy_secret_file", None)),
                         ("--user-map", getattr(args, "user_map", None)),
+                        ("--members-file", getattr(args, "members_file", None)),
+                        ("--tokens-file", getattr(args, "tokens_file", None)),
                         ("--sign-out-url", getattr(args, "sign_out_url", None))):
         if value:
             command.extend([flag, value])

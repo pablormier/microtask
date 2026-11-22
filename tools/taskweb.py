@@ -34,6 +34,7 @@ from workspace import Workspace, missing_workspace_error  # noqa: E402
 
 try:
     from . import web_hosted
+    from . import web_v1
     from .web_actions import (
         BackgroundSync,
         SNAPSHOT_BEFORE,
@@ -61,6 +62,7 @@ try:
 except ImportError:  # Direct script entry point or file-based test loader.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import web_hosted  # noqa: F401
+    import web_v1  # noqa: F401
     from web_actions import (  # noqa: F401
         BackgroundSync,
         SNAPSHOT_BEFORE,
@@ -173,24 +175,41 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "unrecognized Host header"})
         return True
 
-    def authenticate(self) -> tuple[bool, web_hosted.Identity | None]:
-        """Who is asking: (True, None) for a single-user dashboard, (True, person) in a shared one.
+    def authenticate(self, *, allow_bearer: bool = False) -> tuple[bool, web_hosted.Identity | None, bool]:
+        """Who is asking: (True, person_or_None, used_bearer).
 
-        A shared dashboard answers 401 or 403 and returns (False, None) when the request carries
-        no valid proxy secret or no single signed-in identity, for reads as well as writes.
+        A shared dashboard answers 401 or 403 and returns (False, None, False) when the request
+        carries no valid credential, for reads as well as writes.
         """
         hosted = getattr(self.server, "hosted", None)
+        if allow_bearer:
+            has_auth = bool(
+                self.headers.get_all("Authorization")
+                if hasattr(self.headers, "get_all")
+                else self.headers.get("Authorization")
+            )
+        else:
+            has_auth = False
+        if allow_bearer and has_auth:
+            if hosted is None:
+                self.send_json(HTTPStatus.FORBIDDEN, {"error": "API bearer tokens require a hosted workspace."})
+                return False, None, False
+            try:
+                return True, hosted.identify_bearer(self.headers), True
+            except web_hosted.HostedAuthError as error:
+                self.send_json(HTTPStatus(error.status), {"error": error.message})
+                return False, None, False
         if hosted is None:
             required = getattr(self.server, "require_secret", None)
             if required and not web_hosted.secret_header_matches(self.headers, required):
                 self.send_json(HTTPStatus.FORBIDDEN, {"error": "This request did not come through the sign-in proxy."})
-                return False, None
-            return True, None
+                return False, None, False
+            return True, None, False
         try:
-            return True, hosted.identify(self.headers)
+            return True, hosted.identify(self.headers), False
         except web_hosted.HostedAuthError as error:
             self.send_json(HTTPStatus(error.status), {"error": error.message})
-            return False, None
+            return False, None, False
 
     def api_token(self, actor: web_hosted.Identity | None) -> str:
         """The write token for this request: the process token, or in a shared workspace the signed-in person's."""
@@ -344,10 +363,20 @@ class TaskWebHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.reject_host():
             return
-        allowed, actor = self.authenticate()
+        url = urlsplit(self.path)
+        is_v1 = url.path.startswith("/api/v1/")
+        allowed, actor, _used_bearer = self.authenticate(allow_bearer=is_v1)
         if not allowed:
             return
-        url = urlsplit(self.path)
+        if is_v1:
+            try:
+                ws = self.server.workspace.for_operation()
+                status, payload = web_v1.handle_v1_get(ws, url.path, parse_qs(url.query), actor=actor)
+            except ValueError as error:
+                self.send_json(HTTPStatus.CONFLICT, {"error": str(error)})
+                return
+            self.send_json(status, payload)
+            return
         if url.path.startswith("/vendor/"):
             found = vendor_file(unquote(url.path))
             if found is None:
@@ -432,23 +461,59 @@ class TaskWebHandler(BaseHTTPRequestHandler):
             return
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
+    def _run_post_write(
+        self,
+        ws: Workspace,
+        actor: web_hosted.Identity | None,
+        *,
+        action: str,
+        source: str,
+        require_snapshot: bool,
+        unsynced: bool,
+        handler,
+    ) -> tuple[HTTPStatus, dict, str] | None:
+        with self.write_scope(ws, actor):
+            req_actor = actor.user if actor is not None else store.current_username(ws=ws)
+            try:
+                with history.capture_context(
+                    action=action,
+                    actor=req_actor,
+                    source=source,
+                    require=require_snapshot,
+                ) as ctx:
+                    status, payload = handler()
+                    history_warning = ctx.warning
+            except store.HistoryRequiredError as error:
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                    "error": f"Nothing was changed: the card could not be saved to local history first. {error}",
+                    **({"exit_code": 1} if source == "remote" else {}),
+                })
+                return None
+            wrote = not unsynced and (status == HTTPStatus.OK or payload.get("sync_needed"))
+        if wrote:
+            self.server.sync.request(ws)
+        return status, payload, history_warning
+
     def do_POST(self) -> None:
         if self.reject_host():
             return
-        allowed, actor = self.authenticate()
+        path = urlsplit(self.path).path
+        is_v1 = path.startswith("/api/v1/")
+        allowed, actor, used_bearer = self.authenticate(allow_bearer=is_v1)
         if not allowed:
             return
-        sent_token = (self.headers.get("X-Microtask-Token") or "").encode("utf-8")
-        if not secrets.compare_digest(sent_token, self.api_token(actor).encode("utf-8")):
-            if actor is not None:
-                # Before anything is read or changed: the page was loaded for another account, or by an
-                # older process. The client keeps its unsaved work locally and reloads.
-                self.send_json(HTTPStatus.CONFLICT, {"error": "The signed-in account changed. Reload the page.",
-                                                     "member_changed": True})
-            else:
-                self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
-            return
-        if urlsplit(self.path).path == "/api/attachments":
+        if not used_bearer:
+            sent_token = (self.headers.get("X-Microtask-Token") or "").encode("utf-8")
+            if not secrets.compare_digest(sent_token, self.api_token(actor).encode("utf-8")):
+                if actor is not None:
+                    # Before anything is read or changed: the page was loaded for another account, or by an
+                    # older process. The client keeps its unsaved work locally and reloads.
+                    self.send_json(HTTPStatus.CONFLICT, {"error": "The signed-in account changed. Reload the page.",
+                                                         "member_changed": True})
+                else:
+                    self.send_json(HTTPStatus.FORBIDDEN, {"error": "invalid token"})
+                return
+        if path == "/api/attachments":
             self.handle_attachment_upload(actor)
             return
         try:
@@ -470,34 +535,41 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": "request body must be an object"})
             return
-        path = urlsplit(self.path).path
         ws = self.server.workspace.for_operation()
+        if is_v1:
+            outcome = self._run_post_write(
+                ws,
+                actor,
+                action=path[len("/api/v1/"):],
+                source="remote" if used_bearer else "web",
+                require_snapshot=actor is not None and actor.admin and web_v1.v1_requires_snapshot(path, body),
+                unsynced=False,
+                handler=lambda: web_v1.handle_v1_post(ws, path, body, actor),
+            )
+            if outcome is None:
+                return
+            status, payload, history_warning = outcome
+            if history_warning:
+                payload = {**payload, "history_warning": history_warning}
+            self.send_json(status, payload)
+            return
         try:
             query = request_query(ws, body.get("query"))
         except card_query.QueryError as error:
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             return
-        history_warning = ""
-        with self.write_scope(ws, actor):
-            req_actor = actor.user if actor is not None else store.current_username(ws=ws)
-            require_snapshot = actor is not None and actor.admin and path in SNAPSHOT_BEFORE
-            try:
-                with history.capture_context(
-                    action=path[len("/api/"):],
-                    actor=req_actor,
-                    source="web",
-                    require=require_snapshot,
-                ) as ctx:
-                    status, payload = handle_api_action(ws, path, body, actor)
-                    history_warning = ctx.warning
-            except store.HistoryRequiredError as error:
-                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
-                    "error": f"Nothing was changed: the card could not be saved to local history first. {error}",
-                })
-                return
-            wrote = path not in UNSYNCED_ACTIONS and (status == HTTPStatus.OK or payload.get("sync_needed"))
-        if wrote:
-            self.server.sync.request(ws)
+        outcome = self._run_post_write(
+            ws,
+            actor,
+            action=path[len("/api/"):],
+            source="web",
+            require_snapshot=actor is not None and actor.admin and path in SNAPSHOT_BEFORE,
+            unsynced=path in UNSYNCED_ACTIONS,
+            handler=lambda: handle_api_action(ws, path, body, actor),
+        )
+        if outcome is None:
+            return
+        status, payload, history_warning = outcome
         if status == HTTPStatus.OK:
             # Actions return receipts; build the queried collection once, after success.
             payload = {**dashboard_payload(self.server.workspace.for_operation(), self.server.cache,
@@ -582,8 +654,18 @@ def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig 
                                     environ.get("MT_PROXY_SECRET"))
     admins = web_hosted.parse_admins(*args.admin, environ.get("MT_ADMINS"))
     sign_out_url = web_hosted.read_sign_out_url(args.sign_out_url or environ.get("MT_SIGN_OUT_URL"))
-    return web_hosted.HostedConfig(secret, admins, web_hosted.read_user_map(args.user_map or environ.get("MT_USER_MAP")),
-                                   sign_out_url=sign_out_url)
+    user_map_file = args.user_map or environ.get("MT_USER_MAP")
+    members_file = getattr(args, "members_file", None) or environ.get("MT_MEMBERS_FILE")
+    tokens_file = getattr(args, "tokens_file", None) or environ.get("MT_API_TOKENS_FILE")
+    return web_hosted.HostedConfig(
+        secret,
+        admins,
+        web_hosted.read_user_map(user_map_file),
+        sign_out_url=sign_out_url,
+        tokens_file=tokens_file,
+        members_file=members_file,
+        user_map_file=user_map_file,
+    )
 
 
 def required_secret(args: argparse.Namespace, environ) -> str | None:
