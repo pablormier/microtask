@@ -3,8 +3,18 @@
         <div class="mt-view-controls">
           <button type="button" class="mt-button mt-button-compact mt-topic-tree-toggle"
                   :class="{ 'is-active': topicTreeOpen() }"
+                  :aria-pressed="String(topicTreeOpen())"
                   :aria-expanded="String(topicTreeOpen())" aria-controls="mt-topic-tree"
-                  @click="toggleTopicTree()">Topics</button>
+                  :title="topicTreeOpen() ? 'Hide topics panel' : 'Show topics panel'"
+                  @click="toggleTopicTree()">
+            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <path d="M9 4v16"/>
+              <path x-show="!topicTreeOpen()" d="m13 9 3 3-3 3"/>
+              <path x-show="topicTreeOpen()" d="m16 9-3 3 3 3"/>
+            </svg>
+            <span>Topics</span>
+          </button>
           <template x-if="mode === 'archive'">
             <div class="mt-segmented" role="group" aria-label="Card kind">
               <button class="mt-segment" type="button" :aria-pressed="settings.archive.kind === 'task'" @click="setKind('task')">Tasks</button>
