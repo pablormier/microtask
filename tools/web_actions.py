@@ -106,6 +106,8 @@ def _run_operation(ws: Workspace, action, message: str, *, include_saved_ref: bo
         result = action(ws)
     except store.HistoryRequiredError:
         raise
+    except store.RollbackError as error:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(error)}
     except store.ConflictError as error:
         payload: dict[str, object] = {"error": str(error), "conflict": True}
         if error.sync_needed:

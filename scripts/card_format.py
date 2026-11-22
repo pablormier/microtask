@@ -660,11 +660,14 @@ def atomic_write(path: Path, content: bytes) -> None:
     """Atomically write ``content`` to ``path`` using a sibling temporary file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    replaced = False
     try:
         temporary.write_bytes(content)
         os.replace(temporary, path)
+        replaced = True
     finally:
-        temporary.unlink(missing_ok=True)
+        if not replaced:
+            temporary.unlink(missing_ok=True)
 
 
 def is_single_line_text(value: object) -> bool:

@@ -1,6 +1,9 @@
 """Tests for SQLite local history (.mt/history.sqlite) and mt history / mt restore."""
 from __future__ import annotations
 
+import argparse
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -14,6 +17,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import card_format  # noqa: E402
+import cli_cards  # noqa: E402
 import history  # noqa: E402
 import operations  # noqa: E402
 import policy_parser  # noqa: E402
@@ -291,14 +296,16 @@ class LocalHistoryTests(unittest.TestCase):
         # Inject a failure after unlink (in validate_data_root) AND fail rollback (atomic_write).
         with mock.patch.object(transaction, "validate_data_root", side_effect=OSError("post-delete boom")), \
                 mock.patch.object(transaction, "atomic_write", side_effect=OSError("rollback write failed")):
-            with self.assertRaises(store.ValidationError):
+            with self.assertRaises(store.RollbackError) as raised:
                 operations.op_delete(self.ws, f"@{card.short_ref}", by="root", sync=False)
+        self.assertNotIn("change rolled back", str(raised.exception))
 
         # Card was deleted and rollback failed, so the prepared recovery snapshot MUST remain intact.
         self.assertFalse(card.path.exists())
         deleted = history.list_events(self.ws, deleted_only=True)
         self.assertEqual(len(deleted), 1)
         self.assertEqual(deleted[0]["status"], "prepared")
+        self.assertIn(f"history event #{deleted[0]['id']}", str(raised.exception))
 
         # Admin can still restore the card from that prepared snapshot.
         operations.op_restore(self.ws, deleted[0]["id"], by="root", sync=False)
@@ -349,6 +356,142 @@ class LocalHistoryTests(unittest.TestCase):
         with mock.patch.object(history.difflib, "unified_diff", side_effect=AssertionError("should not diff")):
             operations.op_restore(self.ws, rename_event["id"], path=rel1, force=True, by="root", sync=False)
         self.assertIn("topic: old", c1.path.read_text(encoding="utf-8"))
+
+    def test_post_replace_failure_rolls_back_and_raises_original_error(self) -> None:
+        created = operations.op_create(self.ws, "task", "v1\n", title="Post Replace", sync=False)
+        card = created.card
+        assert card is not None
+        operations.op_edit(self.ws, f"@{card.short_ref}", body_mode="replace", body_text="v2\n", by="root", sync=False)
+        edit_event = history.list_events(self.ws, limit=5)[0]
+        v2_bytes = card.path.read_bytes()
+        events_before = len(history.list_events(self.ws, limit=20))
+
+        real_replace = card_format.os.replace
+        calls = 0
+
+        def fail_first_replace(src: Path, dst: Path) -> None:
+            nonlocal calls
+            calls += 1
+            real_replace(src, dst)
+            if calls == 1:
+                raise OSError("disk hiccup after replace")
+
+        with mock.patch.object(card_format.os, "replace", side_effect=fail_first_replace):
+            with self.assertRaises(store.ValidationError) as raised:
+                operations.op_restore(self.ws, edit_event["id"], force=True, by="root", sync=False)
+        self.assertNotIsInstance(raised.exception, store.RollbackError)
+        self.assertIn("disk hiccup after replace", str(raised.exception))
+        self.assertEqual(card.path.read_bytes(), v2_bytes)
+        events_after = history.list_events(self.ws, limit=20)
+        self.assertEqual(len(events_after), events_before)
+        self.assertFalse(any(event["status"] == "prepared" for event in events_after))
+
+    def test_untouched_card_in_batch_not_clobbered_on_rollback(self) -> None:
+        c1 = operations.op_create(self.ws, "task", "One\n", title="Batch A", topic="old", sync=False).card
+        c2 = operations.op_create(self.ws, "task", "Two\n", title="Batch B", topic="old", sync=False).card
+        assert c1 is not None and c2 is not None
+        rel_a = str(c1.path.relative_to(self.root))
+        rel_b = str(c2.path.relative_to(self.root))
+        orig_a = c1.path.read_bytes()
+        orig_b = c2.path.read_bytes()
+        new_a = orig_a.replace(b"topic: old", b"topic: new")
+        new_b = orig_b.replace(b"topic: old", b"topic: new")
+        external_b = orig_b + b"\nExternal edit on B\n"
+
+        real_atomic_write = transaction.atomic_write
+
+        def write_and_edit_b(path: Path, content: bytes) -> None:
+            real_atomic_write(path, content)
+            if path == c1.path and content == new_a:
+                c2.path.write_bytes(external_b)
+
+        with history.capture_context(action="batch", actor="root", source="cli", require=True):
+            with mock.patch.object(transaction, "atomic_write", side_effect=write_and_edit_b):
+                with self.assertRaises(store.StaleCardError) as raised:
+                    transaction.apply_item_transaction({rel_a: new_a, rel_b: new_b}, source_root=self.root, ws=self.ws)
+        self.assertNotIsInstance(raised.exception, store.RollbackError)
+        self.assertEqual(c1.path.read_bytes(), orig_a)
+        self.assertEqual(c2.path.read_bytes(), external_b)
+        prepared = [event for event in history.list_events(self.ws, limit=20) if event["status"] == "prepared"]
+        self.assertEqual(len(prepared), 1)
+
+    def test_stale_snapshot_on_external_edit_during_sqlite_wait(self) -> None:
+        created = operations.op_create(self.ws, "task", "Initial\n", title="Stale Wait", sync=False)
+        card = created.card
+        assert card is not None
+        external = card.path.read_bytes() + b"\nExternal edit during prepare\n"
+        events_before = len(history.list_events(self.ws, limit=20))
+
+        real_prepare = history.prepare_transaction
+
+        def prepare_then_external_edit(*args, **kwargs):
+            event_id = real_prepare(*args, **kwargs)
+            card.path.write_bytes(external)
+            return event_id
+
+        with mock.patch.object(history, "prepare_transaction", side_effect=prepare_then_external_edit):
+            with self.assertRaises(store.StaleCardError) as raised:
+                operations.op_delete(self.ws, f"@{card.short_ref}", by="root", sync=False)
+        self.assertIsInstance(raised.exception, store.ConflictError)
+        self.assertNotIn("change rolled back", str(raised.exception))
+        self.assertEqual(card.path.read_bytes(), external)
+        events_after = history.list_events(self.ws, limit=20)
+        self.assertEqual(len(events_after), events_before)
+        self.assertFalse(any(event["status"] == "prepared" for event in events_after))
+
+    def test_topic_rename_surfaces_history_warning_in_text_and_json(self) -> None:
+        operations.op_create(self.ws, "task", "One\n", title="Rename 1", topic="alpha", sync=False)
+        operations.op_create(self.ws, "task", "Two\n", title="Rename 2", topic="beta", sync=False)
+
+        with mock.patch.object(history, "finalize_event", return_value="Local history finalization failed: disk full"):
+            out_text = io.StringIO()
+            err_text = io.StringIO()
+            with redirect_stdout(out_text), redirect_stderr(err_text):
+                rc_text = cli_cards.command_topic_rename(
+                    argparse.Namespace(old="alpha", new="alpha-new", merge=False, dry_run=False, by="root", as_json=False),
+                    ws=self.ws,
+                )
+            self.assertEqual(rc_text, 0)
+            self.assertIn("warning: Local history finalization failed: disk full", err_text.getvalue())
+
+            out_json = io.StringIO()
+            err_json = io.StringIO()
+            with redirect_stdout(out_json), redirect_stderr(err_json):
+                rc_json = cli_cards.command_topic_rename(
+                    argparse.Namespace(old="beta", new="beta-new", merge=False, dry_run=False, by="root", as_json=True),
+                    ws=self.ws,
+                )
+            self.assertEqual(rc_json, 0)
+            payload = json.loads(out_json.getvalue())
+            self.assertEqual(payload.get("history_warning"), "Local history finalization failed: disk full")
+
+    def test_rollback_treats_permission_error_as_unverified_not_absent(self) -> None:
+        created = operations.op_create(self.ws, "task", "Body\n", title="Perm Test", sync=False)
+        card = created.card
+        assert card is not None
+        rel = str(card.path.relative_to(self.root))
+        original_bytes = card.path.read_bytes()
+        operations.op_delete(self.ws, f"@{card.short_ref}", by="root", sync=False)
+        self.assertFalse(card.path.exists())
+
+        # Restoring a previously absent file: simulate permission error after write.
+        def revoke_after_write(*args, **kwargs):
+            os.chmod(self.root / "cards", 0o000)
+            raise OSError("post-write failure")
+
+        try:
+            with history.capture_context(action="restore", actor="root", source="cli", require=True):
+                with mock.patch.object(transaction, "validate_data_root", side_effect=revoke_after_write):
+                    with self.assertRaises(store.RollbackError) as raised:
+                        with transaction.time_mutation_lock(self.ws):
+                            transaction.apply_item_transaction({rel: original_bytes}, source_root=self.root, ws=self.ws)
+        finally:
+            os.chmod(self.root / "cards", 0o755)
+
+        prepared = [event for event in history.list_events(self.ws, limit=20) if event["status"] == "prepared"]
+        self.assertEqual(len(prepared), 1)
+        self.assertIn(f"history event #{prepared[0]['id']}", str(raised.exception))
+        self.assertTrue(card.path.exists())
 
 
 if __name__ == "__main__":

@@ -257,6 +257,14 @@ def validate_data_root(data_root: Path, *, changes: dict[str, bytes] | None = No
 
 
 
+def _read_bytes_or_absent(path: Path) -> bytes | None:
+    """Read file bytes, treating only FileNotFoundError as absence."""
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
 def apply_item_transaction(
     changes: dict[str, bytes],
     *,
@@ -274,23 +282,19 @@ def apply_item_transaction(
     resolved = _ws(ws)
     deletions = set(deletions or ())
     base = source_root or resolved.root
+    # Phase A: Pre-flight & Freshness Gate — zero filesystem writes yet.
     affected = set(changes) | deletions
     original: dict[str, bytes | None] = {}
     for relative in affected:
         path = base / relative
-        original[relative] = path.read_bytes() if path.is_file() else None
+        original[relative] = _read_bytes_or_absent(path)
     if expected is not None:
         for relative, value in expected.items():
             path = base / relative
-            current = original[relative] if relative in original else (path.read_bytes() if path.is_file() else None)
+            current = original[relative] if relative in original else _read_bytes_or_absent(path)
             if current != value:
                 raise store.StaleCardError(f"item changed before transaction: {relative}")
     warnings = validate_item_changes(changes, deletions=deletions, source_root=base, previous=original, ws=resolved)
-    for relative, before in original.items():
-        path = base / relative
-        current = path.read_bytes() if path.is_file() else None
-        if current != before:
-            raise store.StaleCardError(f"item changed before transaction: {relative}")
     record_history = base == resolved.root
     ctx = history.current_context()
     if record_history and ctx is None:
@@ -298,49 +302,87 @@ def apply_item_transaction(
     precommitted_event_id: int | None = None
     if record_history and ctx is not None and ctx.require:
         precommitted_event_id = history.prepare_transaction(resolved, ctx, original, changes, deletions)
-    written: set[str] = set()
+    for relative, before in original.items():
+        path = base / relative
+        current = _read_bytes_or_absent(path)
+        if current != before:
+            if precommitted_event_id is not None:
+                history.delete_event(resolved, precommitted_event_id)
+            raise store.StaleCardError(f"item changed before transaction: {relative}")
+
+    # Phase B: Filesystem Mutation & Full-State Rollback Verification.
+    attempted: set[str] = set()
     try:
-        for relative in deletions:
+        for relative in sorted(deletions - set(changes)):
             path = base / relative
-            if path.exists():
+            current = _read_bytes_or_absent(path)
+            if current != original[relative]:
+                raise store.StaleCardError(f"item changed before transaction: {relative}")
+            if current is not None:
+                attempted.add(relative)
                 path.unlink()
-                written.add(relative)
         for relative, content in changes.items():
             path = base / relative
+            current = _read_bytes_or_absent(path)
+            if current != original[relative]:
+                raise store.StaleCardError(f"item changed before transaction: {relative}")
             path.parent.mkdir(parents=True, exist_ok=True)
+            attempted.add(relative)
             atomic_write(path, content)
-            written.add(relative)
         validate_data_root(base, changes=changes, deletions=deletions, previous=original, ws=resolved)
-    except Exception:
-        rollback_ok = True
-        for relative in reversed(sorted(written)):
+    except Exception as error:
+        for relative in reversed(sorted(attempted)):
             path = base / relative
             before = original[relative]
             try:
-                current = path.read_bytes() if path.is_file() else None
+                current = _read_bytes_or_absent(path)
                 expected_after = changes.get(relative, None)
                 if relative in deletions and relative not in changes:
                     expected_after = None
                 # Do not overwrite an unexpected concurrent edit while rolling back,
                 # and avoid rewriting files that already match their pre-transaction bytes.
-                if current == before:
-                    continue
-                if current != expected_after:
-                    rollback_ok = False
+                if current == before or current != expected_after:
                     continue
                 if before is None:
                     path.unlink(missing_ok=True)
                 else:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     atomic_write(path, before)
-                restored = path.read_bytes() if path.is_file() else None
-                if restored != before:
-                    rollback_ok = False
+            except OSError:
+                pass
+        rollback_ok = True
+        for relative in attempted:
+            path = base / relative
+            try:
+                current = _read_bytes_or_absent(path)
             except OSError:
                 rollback_ok = False
-        if precommitted_event_id is not None and rollback_ok:
+                break
+            if current != original[relative]:
+                rollback_ok = False
+                break
+        all_original_intact = rollback_ok
+        if all_original_intact:
+            for relative in set(original) - attempted:
+                path = base / relative
+                try:
+                    current = _read_bytes_or_absent(path)
+                except OSError:
+                    all_original_intact = False
+                    break
+                if current != original[relative]:
+                    all_original_intact = False
+                    break
+        if precommitted_event_id is not None and rollback_ok and all_original_intact:
             history.delete_event(resolved, precommitted_event_id)
+        if not rollback_ok:
+            message = f"{error}; rollback of workspace changes was incomplete or could not be verified"
+            if precommitted_event_id is not None:
+                message = f"{message}; recovery snapshot preserved as history event #{precommitted_event_id}"
+            raise store.RollbackError(message) from error
         raise
+
+    # Phase C: Finalize.
     if precommitted_event_id is not None:
         finalize_warning = history.finalize_event(resolved, precommitted_event_id)
         if finalize_warning and ctx is not None and not ctx.warning:

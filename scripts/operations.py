@@ -201,6 +201,8 @@ def _commit_item_write(
             source_root=base,
             ws=resolved,
         )
+    except TaskError:
+        raise
     except (OSError, ValueError) as error:
         if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
             raise ConflictError(f"{failure_prefix}: {error}") from error
@@ -887,6 +889,8 @@ def _delete_locked(
         transaction.apply_item_transaction(
             {}, deletions={relative}, expected={relative: original}, source_root=base, ws=resolved,
         )
+    except TaskError:
+        raise
     except (OSError, ValueError) as error:
         raise ValidationError(f"delete failed validation; change rolled back: {error}") from error
     receipt = item_receipt(task, ws=resolved)
@@ -1099,6 +1103,8 @@ def _topic_rename_locked(
             transaction.apply_item_transaction(changes, expected=expected, source_root=base, ws=resolved)
     except CardInputError as error:
         raise InputError(str(error), exit_code=1) from error
+    except TaskError:
+        raise
     except (OSError, ValueError) as error:
         raise ValidationError(f"topic rename failed; changes rolled back: {error}") from error
     saved = not dry_run
@@ -1231,6 +1237,8 @@ def _time_start_locked(
             failure_prefix="could not start timer",
             summary="",
         )
+    except (store.RollbackError, store.HistoryRequiredError):
+        raise
     except TaskError as error:
         raise ConflictError(str(error), exit_code=1) from error
     except (OSError, ValueError) as error:
@@ -1241,6 +1249,8 @@ def _time_start_locked(
                 continue
             try:
                 _stop_timer_card(resolved, other, max(started_epoch, int(other_timer["start_epoch"])), timestamp)
+            except (store.RollbackError, store.HistoryRequiredError):
+                raise
             except (OSError, ValueError, TaskError) as error:
                 raise ConflictError(
                     f"started the timer, but could not stop the timer on {other.title}: "
@@ -1998,6 +2008,8 @@ def op_restore(
                 source_root=resolved.root,
                 ws=resolved,
             )
+        except TaskError:
+            raise
         except (OSError, ValueError) as error:
             if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
                 raise ConflictError(f"restore failed: {error}") from error

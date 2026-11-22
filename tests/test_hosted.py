@@ -817,6 +817,36 @@ class HistoryAndConflictTests(SharedWorkspaceCase):
         self.assertNotIn("late", text)
         self.assertIn("priority: none", text)
 
+    def test_incomplete_rollback_returns_500_for_delete_and_timer_start(self) -> None:
+        card = self.add_task("Rollback 500")
+        self.start()
+        task = next(item for item in self.items("root")["tasks"] if item["ref"] == card["ref"])
+
+        with mock.patch.object(transaction, "validate_data_root", side_effect=OSError("boom")), \
+                mock.patch.object(transaction, "atomic_write", side_effect=OSError("rollback failed")):
+            status, payload = self.post("/api/delete", "root", {"ref": card["ref"], "expected_hash": task["content_hash"]})
+        self.assertEqual(status, 500, payload)
+        self.assertIn("history event #", payload["error"])
+        self.assertNotIn("conflict", payload)
+
+        card2 = self.add_task("Timer Rollback 500")
+        real_write = transaction.atomic_write
+        calls = 0
+
+        def fail_rollback_write(path: Path, content: bytes) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                real_write(path, content)
+            else:
+                raise OSError("rollback failed")
+
+        with mock.patch.object(transaction, "validate_data_root", side_effect=OSError("boom")), \
+                mock.patch.object(transaction, "atomic_write", side_effect=fail_rollback_write):
+            status, payload = self.post("/api/time-start", "alice", {"ref": card2["ref"]})
+        self.assertEqual(status, 500, payload)
+        self.assertNotIn("conflict", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

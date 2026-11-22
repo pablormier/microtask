@@ -157,6 +157,8 @@ def save_terminal_capture(fields: dict, ws: Workspace | None = None) -> int:
         return _cli_print_error(error)
     assert result.card is not None
     print(f"Created {result.receipt['ref']}: {result.card.path}")
+    if result.history_warning:
+        print(f"warning: {result.history_warning}", file=sys.stderr)
     return result.sync_exit_code
 
 
@@ -808,9 +810,13 @@ def command_topic_rename(args: argparse.Namespace, ws: Workspace | None = None) 
     payload = dict(result.receipt)
     if result.sync_error:
         payload["sync_error"] = result.sync_error
+    if result.history_warning:
+        payload["history_warning"] = result.history_warning
     if args.as_json:
         emit_json(payload)
         return 0
+    if result.history_warning:
+        print(f"warning: {result.history_warning}", file=sys.stderr)
     records = payload["items"]
     verb = "Would move" if args.dry_run else "Moved"
     for record in records:

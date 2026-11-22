@@ -115,6 +115,12 @@ class ValidationError(TaskError, ValueError):
     exit_code = 1
 
 
+class RollbackError(TaskError):
+    """A filesystem transaction failed and rollback of attempted paths was incomplete or unverified."""
+
+    exit_code = 1
+
+
 
 def now_stamp() -> str:
     return datetime.now().replace(microsecond=0).isoformat()
