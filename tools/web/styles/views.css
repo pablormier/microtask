@@ -18,6 +18,7 @@
    lists of what needs attention and what waits on others. */
 .mt-focus-view {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   width: 100%;
   max-width: 48rem;
@@ -28,15 +29,19 @@
 .mt-focus-heading { margin-bottom: 8px; }
 .mt-focus-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
   margin: 0;
   padding: 18px 20px 14px;
   border-radius: var(--mt-radius-lg);
 }
-.mt-focus-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mt-focus-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 /* The title opens the card; it drops the shared button chrome to read as a heading. */
 button.mt-button.mt-focus-title {
   display: block;
+  flex: 0 1 auto;
+  min-width: 0;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -47,16 +52,19 @@ button.mt-button.mt-focus-title {
   line-height: 1.3;
   text-align: start;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 button.mt-button.mt-focus-title:enabled:hover { border: 0; background: none; box-shadow: none; color: var(--mt-accent); }
 button.mt-button.mt-focus-title:focus-visible { border-radius: var(--mt-radius-sm); }
 .mt-focus-card-head .mt-priority { flex: none; margin-top: 4px; }
-.mt-focus-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.mt-focus-reason { color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); }
+.mt-focus-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.mt-focus-reason { min-width: 0; color: var(--mt-text-muted); font-size: var(--mt-font-size-sm); overflow-wrap: anywhere; }
 /* The next step is the one thing to act on, so it gets the most weight. */
 .mt-focus-next {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
+  min-width: 0;
   margin: 0;
   padding: 10px 12px;
   border-left: 3px solid var(--mt-accent);
@@ -65,6 +73,7 @@ button.mt-button.mt-focus-title:focus-visible { border-radius: var(--mt-radius-s
   color: var(--mt-text);
   font-size: var(--mt-font-size-md);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .mt-focus-next.is-missing { border-left-color: var(--mt-warning-border); color: var(--mt-text-muted); }
 .mt-focus-next-label {
@@ -79,6 +88,7 @@ button.mt-button.mt-focus-title:focus-visible { border-radius: var(--mt-radius-s
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+  min-width: 0;
   padding-top: 10px;
   border-top: 1px solid var(--mt-border);
 }
@@ -122,7 +132,7 @@ li.mt-focus-row:focus-visible { outline: 2px solid var(--mt-focus); outline-offs
 li.mt-focus-row.is-overdue { box-shadow: inset 3px 0 0 var(--mt-danger); }
 li.mt-focus-row.is-due-today { box-shadow: inset 3px 0 0 var(--mt-warning-border); }
 .mt-focus-row-title { min-width: 0; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); overflow-wrap: anywhere; }
-.mt-focus-row-badges { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.mt-focus-row-badges { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .mt-focus-row-detail {
   grid-column: 1 / -1;
   display: flex;
