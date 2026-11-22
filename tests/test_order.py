@@ -177,6 +177,35 @@ class OrderOperationsAndApiTests(unittest.TestCase):
         self.assertEqual(self._board_note_ids(), ["2026-06-01-090005-n2", "2026-06-01-090004-n1"])
         operations.op_order(self.ws, "2026-06-01-090004-n1", position="top", sync=False)
         self.assertEqual(self._board_note_ids(), ["2026-06-01-090004-n1", "2026-06-01-090005-n2"])
+        # Reordering/clearing preserves the note's original updated timestamp
+        operations.op_order(self.ws, "2026-06-01-090004-n1", position="clear", sync=False)
+        n1 = store.Card.read(self.root / "cards" / "2026-06-01-090004-n1.md")
+        self.assertEqual(n1.frontmatter["updated"], "2026-06-01T10:00:00")
+        self.assertEqual(self._board_note_ids(), ["2026-06-01-090005-n2", "2026-06-01-090004-n1"])
+
+    def test_order_rejects_invalid_targets(self) -> None:
+        (self.root / "cards" / "2026-06-01-090006-done.md").write_text(
+            make_task_file("2026-06-01-090006-done", "Done card", status="done")
+            .replace("tags: []\n", "completed: 2026-06-01T09:05:00\ntags: []\n"),
+            encoding="utf-8",
+        )
+        (self.root / "cards" / "2026-06-01-090007-inbox.md").write_text(
+            make_task_file("2026-06-01-090007-inbox", "Inbox card", status="inbox"),
+            encoding="utf-8",
+        )
+        (self.root / "cards" / "2026-06-01-090008-arch.md").write_text(
+            make_task_file("2026-06-01-090008-arch", "Archived card", status="active")
+            .replace("tags: []\n", "archived: true\ntags: []\n"),
+            encoding="utf-8",
+        )
+        with self.assertRaises(store.InputError):
+            operations.op_order(self.ws, "2026-06-01-090006-done", position="top", sync=False)
+        with self.assertRaises(store.InputError):
+            operations.op_order(self.ws, "2026-06-01-090008-arch", position="top", sync=False)
+        with self.assertRaises(store.InputError):
+            operations.op_order(self.ws, "2026-06-01-090001-t1", before="2026-06-01-090001-t1", sync=False)
+        with self.assertRaises(store.InputError):
+            operations.op_order(self.ws, "2026-06-01-090001-t1", before="2026-06-01-090007-inbox", sync=False)
 
     def test_cli_order_and_api_order_endpoint(self) -> None:
         from contextlib import redirect_stdout

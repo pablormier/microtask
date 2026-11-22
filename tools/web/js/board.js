@@ -337,6 +337,7 @@ function taskBoard() {
       let nearest = 0;
       let best = Infinity;
       columns.forEach((column, index) => {
+        if (this.emptyColumns === "hide" && column.classList && column.classList.contains("is-empty")) return;
         const distance = Math.abs(column.getBoundingClientRect().left - left);
         if (distance < best) { best = distance; nearest = index; }
       });

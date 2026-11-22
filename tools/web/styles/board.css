@@ -3,7 +3,7 @@
   gap: 12px;
   flex: 1 1 auto;
   min-height: 0;
-  padding: 16px 18px 24px;
+  padding: 0 18px 16px;
   overflow-x: auto;
   align-items: flex-start;
 }
@@ -118,6 +118,8 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
 }
 .mt-card:has(.mt-card-inline-menu[open]) { z-index: 4; }
 .mt-card-menu-items.mt-card-order-bar {
+  top: -2px;
+  right: calc(100% + 6px);
   display: flex;
   align-items: center;
   gap: 2px;

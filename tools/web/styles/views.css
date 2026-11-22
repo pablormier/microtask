@@ -320,7 +320,7 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
   flex: 0 0 15.5rem;
   min-width: 13.5rem;
   max-width: 17.5rem;
-  margin: 0 0 24px 18px;
+  margin: 0 0 16px 18px;
   padding: 10px 8px;
   display: flex;
   flex-direction: column;
@@ -550,7 +550,7 @@ button.mt-button-icon.mt-topic-tree-disclosure {
 }
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
-  .mt-groups { padding: 12px; }
+  .mt-groups { padding: 4px 12px 12px; }
   .mt-focus-view { gap: 22px; padding: 16px 12px 24px; }
   .mt-focus-card { padding: 14px 14px 12px; }
   button.mt-button.mt-focus-title { font-size: var(--mt-font-size-lg); }

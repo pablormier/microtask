@@ -21,12 +21,12 @@
         </h1>
         <div class="mt-mode-toggle mt-segmented" role="group" aria-label="Dashboard mode">
           <button class="mt-segment" type="button" :aria-pressed="mode === 'tasks'" @click="mode = 'tasks'">Tasks</button>
-          <button class="mt-segment" type="button" :aria-pressed="mode === 'focus'" @click="mode = 'focus'">Focus</button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'notes'" @click="mode = 'notes'">Notes</button>
+          <button class="mt-segment" type="button" :aria-pressed="mode === 'archive'" @click="mode = 'archive'" x-text="viewLabel('archive')"></button>
           <button class="mt-segment mt-drafts-tab" type="button" :aria-pressed="mode === 'drafts'" @click="mode = 'drafts'" :aria-label="'Drafts, ' + drafts.length + ' saved'">
             <span>Drafts</span><span class="mt-tab-count" x-show="drafts.length" x-text="drafts.length"></span>
           </button>
-          <button class="mt-segment" type="button" :aria-pressed="mode === 'archive'" @click="mode = 'archive'" x-text="viewLabel('archive')"></button>
+          <button class="mt-segment" type="button" :aria-pressed="mode === 'focus'" @click="mode = 'focus'">Focus</button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'deadlines'" @click="mode = 'deadlines'">Deadlines</button>
         </div>
         <!-- Primary action first; conditional items sit after Filters so New, Search, and Filters stay anchored. -->

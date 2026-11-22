@@ -272,7 +272,9 @@ function createBoardApi() {
 
     groupHasManualOrder(group) {
       const sort = this.settings[this.mode]?.sort || "default";
-      if (sort !== "default" || !group || !Array.isArray(group.items)) return false;
+      const inPanelView = (this.mode === "tasks" && this.settings.tasks.group === "status")
+        || (this.mode === "notes" && this.settings.notes.group === "none");
+      if (!inPanelView || sort !== "default" || !group || !Array.isArray(group.items)) return false;
       return group.items.some(item => Boolean(item.order) && this.canOrderCard(item));
     },
 

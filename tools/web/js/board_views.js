@@ -325,17 +325,29 @@ function createBoardViews() {
           if (!da && !db) return 0;
           if (!da) return 1;
           if (!db) return -1;
-          return da.localeCompare(db);
+          return da < db ? -1 : (da > db ? 1 : 0);
         });
       }
       if (sort === "updated") {
-        return list.sort((a, b) => String(b.updated || b.created || "").localeCompare(String(a.updated || a.created || "")));
+        return list.sort((a, b) => {
+          const ua = String(a.updated || a.created || "");
+          const ub = String(b.updated || b.created || "");
+          return ub < ua ? -1 : (ub > ua ? 1 : 0);
+        });
       }
       if (sort === "created_desc") {
-        return list.sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
+        return list.sort((a, b) => {
+          const ca = String(a.created || "");
+          const cb = String(b.created || "");
+          return cb < ca ? -1 : (cb > ca ? 1 : 0);
+        });
       }
       if (sort === "created_asc") {
-        return list.sort((a, b) => String(a.created || "").localeCompare(String(b.created || "")));
+        return list.sort((a, b) => {
+          const ca = String(a.created || "");
+          const cb = String(b.created || "");
+          return ca < cb ? -1 : (ca > cb ? 1 : 0);
+        });
       }
       if (sort === "title") {
         return list.sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), undefined, { sensitivity: "base" }));

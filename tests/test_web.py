@@ -804,8 +804,8 @@ view_labels:
         body_index = rendered.index('id="mt-composer-body"')
         kind_index = rendered.index('aria-label="Create a note or task"')
         properties_index = rendered.index('class="mt-capture-properties"')
-        self.assertLess(kind_index, properties_index)
-        self.assertLess(properties_index, body_index)
+        self.assertLess(kind_index, body_index)
+        self.assertLess(body_index, properties_index)
         self.assertNotIn("Track as task", rendered)
         self.assertNotIn("<summary>Task options</summary>", rendered)
         self.assertIn('x-text="captureComposer.title()"', rendered)
@@ -2576,7 +2576,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         css = rendered
         # Columns share the width instead of a fixed size, and empty ones fold to a strip on wider screens.
         self.assertRegex(css, r"\.mt-column \{[^}]*flex: 1 1 18\.5rem;[^}]*min-width: 13rem;[^}]*max-width: 24rem;")
-        self.assertRegex(css, r"\.mt-groups:not\(\.is-horizontal, \.is-flat\) > \.mt-column\.is-empty \{[^}]*flex: 0 0 3rem;")
+        self.assertRegex(css, r"\.mt-groups:not\(\.is-horizontal, \.is-flat, \.is-empty-shown, \.is-empty-hidden\) > \.mt-column\.is-empty \{[^}]*flex: 0 0 3rem;")
         # Phones keep every column full width so swiping and the column pager still work.
         phone = css[css.index("@media (max-width: 42rem)", css.index(".mt-column-pager { display: none; }")):]
         self.assertIn(".mt-groups:not(.is-horizontal, .is-flat) > .mt-column.is-empty { flex: 0 0 calc(100vw - 3.5rem)", phone)
@@ -2587,10 +2587,9 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         toolbar = rendered[rendered.index('class="mt-toolbar-actions"'):rendered.index('<search id="mt-filters"')]
         # New, Search and Filters never look disabled while loading; a click waits for the workspace.
         self.assertNotIn(':disabled="!ready"', toolbar)
-        # Buttons that come and go sit first, so Search, Filters and New keep their places, and the one
-        # settings menu that ends the bar is always there. Clear filters lives in the filter row.
+        # Primary New action sits first, followed by permanent utilities, then conditional items, with Settings anchored at the end.
         order = [toolbar.index(marker) for marker in (
-            "mt-capture-resume", "mt-timers-menu", "mt-quick-search-trigger", "mt-filter-toggle", "mt-capture-new",
+            "mt-capture-new", "mt-quick-search-trigger", "mt-filter-toggle", "mt-timers-menu", "mt-capture-resume",
             "mt-settings-menu")]
         self.assertEqual(order, sorted(order))
         self.assertNotIn("clearFilters()", toolbar)
@@ -2799,6 +2798,26 @@ class FooterTests(unittest.TestCase):
             'app.lastSyncedAt = "2026-11-22T14:29:40Z"; assert.equal(app.footerSyncLabel(), "Synced just now");\n'
             'app.lastSyncedAt = "2026-11-22T14:27:00Z"; assert.equal(app.footerSyncLabel(), "Synced 3m ago");\n'
             'app.syncWarning = "sync failed"; assert.equal(app.footerSyncLabel(), "");\n'
+            'assert.equal(app.emptyColumns, "collapse");\n'
+            'app.setEmptyColumns("hide"); assert.equal(app.emptyColumns, "hide");\n'
+            'app.setEmptyColumns("bogus"); assert.equal(app.emptyColumns, "collapse");\n'
+            'app.priorityOrder = ["urgent", "medium", "low"];\n'
+            'const sample = [\n'
+            '  { id: "1", kind: "task", status: "active", title: "Zeta", priority: "low", due: "2026-07-02", updated: "2026-06-01", created: "2026-05-01", order: "i" },\n'
+            '  { id: "2", kind: "task", status: "active", title: "Alpha", priority: "urgent", due: "", updated: "2026-06-03", created: "2026-05-03", order: "" },\n'
+            '  { id: "3", kind: "task", status: "active", title: "Beta", priority: "medium", due: "2026-07-01", updated: "2026-06-02", created: "2026-05-02", order: "" }\n'
+            '];\n'
+            'assert.deepEqual(app.sortCards(sample, "priority").map(x => x.id), ["2", "3", "1"]);\n'
+            'assert.deepEqual(app.sortCards(sample, "due").map(x => x.id), ["3", "1", "2"]);\n'
+            'assert.deepEqual(app.sortCards(sample, "updated").map(x => x.id), ["2", "3", "1"]);\n'
+            'assert.deepEqual(app.sortCards(sample, "created_asc").map(x => x.id), ["1", "3", "2"]);\n'
+            'assert.deepEqual(app.sortCards(sample, "title").map(x => x.id), ["2", "3", "1"]);\n'
+            'app.mode = "tasks"; app.settings.tasks.group = "status"; app.settings.tasks.sort = "default";\n'
+            'assert.equal(app.groupHasManualOrder({ items: sample }), true);\n'
+            'app.settings.tasks.group = "project";\n'
+            'assert.equal(app.groupHasManualOrder({ items: sample }), false);\n'
+            'app.settings.tasks.group = "status"; app.settings.tasks.sort = "priority";\n'
+            'assert.equal(app.groupHasManualOrder({ items: sample }), false);\n'
             '`);'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True)

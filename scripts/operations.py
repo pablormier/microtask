@@ -181,6 +181,24 @@ def _run_write_operation(
     return result
 
 
+def _apply_item_transaction(
+    resolved: Workspace,
+    writes: dict[str, bytes],
+    expected: dict[str, bytes],
+    *,
+    failure_prefix: str,
+) -> None:
+    """Apply an atomic card transaction and translate low-level storage errors."""
+    try:
+        transaction.apply_item_transaction(writes, expected=expected, source_root=resolved.root, ws=resolved)
+    except TaskError:
+        raise
+    except (OSError, ValueError) as error:
+        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
+            raise ConflictError(f"{failure_prefix}: {error}") from error
+        raise ValidationError(f"{failure_prefix}: {error}") from error
+
+
 def _commit_item_write(
     resolved: Workspace,
     item: Card,
@@ -192,21 +210,13 @@ def _commit_item_write(
     receipt_fn=None,
 ) -> WriteResult:
     _require_mutation_lock(resolved)
-    base = resolved.root
-    relative = str(item.path.relative_to(base))
-    try:
-        transaction.apply_item_transaction(
-            {relative: updated.encode("utf-8")},
-            expected={relative: expected if expected is not None else item.raw.encode("utf-8")},
-            source_root=base,
-            ws=resolved,
-        )
-    except TaskError:
-        raise
-    except (OSError, ValueError) as error:
-        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
-            raise ConflictError(f"{failure_prefix}: {error}") from error
-        raise ValidationError(f"{failure_prefix}: {error}") from error
+    relative = str(item.path.relative_to(resolved.root))
+    _apply_item_transaction(
+        resolved,
+        {relative: updated.encode("utf-8")},
+        {relative: expected if expected is not None else item.raw.encode("utf-8")},
+        failure_prefix=failure_prefix,
+    )
     saved = Card.read(item.path)
     receipt = receipt_fn(saved, updated=True) if receipt_fn is not None else saved_receipt(saved, updated=True, ws=resolved)
     return WriteResult(
@@ -608,9 +618,8 @@ def _order_peers(resolved: Workspace, item: Card) -> list[Card]:
     return sorted(same_status, key=lambda card: card_display_sort_key(card, rank, now=now))
 
 
-def _set_card_order(raw: str, order: str | None, stamp: str) -> str:
+def _set_card_order(raw: str, order: str | None) -> str:
     properties, body = card_format.parse_document(raw)
-    properties["updated"] = stamp
     if order is None:
         properties.pop("order", None)
     else:
@@ -643,7 +652,6 @@ def _order_locked(
     if item.kind == "task" and item.frontmatter.get("status") == "done":
         raise InputError("cannot reorder a done task")
 
-    stamp = now_stamp()
     if position == "clear_panel":
         targets = [card for card in (item, *_order_peers(resolved, item)) if "order" in card.frontmatter]
         if not targets:
@@ -658,16 +666,14 @@ def _order_locked(
         expected = {}
         for card in targets:
             rel = str(card.path.relative_to(base))
-            writes[rel] = _set_card_order(card.raw, None, stamp).encode("utf-8")
+            writes[rel] = _set_card_order(card.raw, None).encode("utf-8")
             expected[rel] = card.raw.encode("utf-8")
-        try:
-            transaction.apply_item_transaction(writes, expected=expected, source_root=base, ws=resolved)
-        except TaskError:
-            raise
-        except (OSError, ValueError) as error:
-            if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
-                raise ConflictError(f"order update failed validation; change rolled back: {error}") from error
-            raise ValidationError(f"order update failed validation; change rolled back: {error}") from error
+        _apply_item_transaction(
+            resolved,
+            writes,
+            expected,
+            failure_prefix="order update failed validation; change rolled back",
+        )
         saved = Card.read(item.path)
         return WriteResult(
             card=saved,
@@ -684,7 +690,7 @@ def _order_locked(
                 message=f"Order already clear: {item.path.name}",
                 changed=False,
             )
-        updated = _set_card_order(item.raw, None, stamp)
+        updated = _set_card_order(item.raw, None)
         return _commit_item_write(
             resolved,
             item,
@@ -744,17 +750,15 @@ def _order_locked(
     expected: dict[str, bytes] = {}
     for card, rank_val in updates:
         rel = str(card.path.relative_to(base))
-        writes[rel] = _set_card_order(card.raw, rank_val, stamp).encode("utf-8")
+        writes[rel] = _set_card_order(card.raw, rank_val).encode("utf-8")
         expected[rel] = card.raw.encode("utf-8")
 
-    try:
-        transaction.apply_item_transaction(writes, expected=expected, source_root=base, ws=resolved)
-    except TaskError:
-        raise
-    except (OSError, ValueError) as error:
-        if "conflict:" in str(error).lower() or "changed before transaction" in str(error):
-            raise ConflictError(f"order update failed validation; change rolled back: {error}") from error
-        raise ValidationError(f"order update failed validation; change rolled back: {error}") from error
+    _apply_item_transaction(
+        resolved,
+        writes,
+        expected,
+        failure_prefix="order update failed validation; change rolled back",
+    )
 
     saved = Card.read(item.path)
     return WriteResult(
