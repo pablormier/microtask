@@ -190,7 +190,7 @@ class WebDashboardTests(unittest.TestCase):
         self.assertIn("<!doctype html>", rendered)
         self.assertIn("taskBoard()", rendered)
         config = json.loads(re.search(r'id="mt-config">(.*?)</script>', rendered).group(1))
-        self.assertEqual(set(config), {"api_token", "workspace_key"})
+        self.assertEqual(set(config), {"api_token", "workspace_key", "demo", "version", "workspace_name"})
         self.assertEqual(config["api_token"], "test-token")
         self.assertNotIn("Plan the work", rendered)
         self.assertNotIn('id="task-data"', rendered)
@@ -2676,6 +2676,115 @@ class MdvizUnchangedTests(unittest.TestCase):
             self.assertIn("font-src data:", rendered)
             self.assertNotIn("@picocss/pico", rendered)
             self.assertNotIn("taskBoard()", rendered)
+
+
+class FooterTests(unittest.TestCase):
+    def test_bootstrap_and_meta_footer_fields_across_modes_and_version(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app_root = root / "app"
+            app_root.mkdir()
+            ws_dir = root / "my-secret-workspace-dir"
+            ws_dir.mkdir()
+            (ws_dir / "cards").mkdir()
+            (ws_dir / "settings.yaml").write_text(
+                (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            ws = taskweb.Workspace.at(ws_dir, app_root=app_root)
+
+            # Without VERSION file -> "dev"
+            local_cfg = taskweb.bootstrap_config(ws, "tok")
+            self.assertEqual(local_cfg["version"], "dev")
+            self.assertEqual(local_cfg["demo"], False)
+            self.assertEqual(local_cfg["workspace_name"], "my-secret-workspace-dir")
+
+            from tools import web_payloads
+            local_meta = web_payloads.dashboard_meta(ws, api_token="tok", items=[])
+            self.assertEqual(local_meta["version"], "dev")
+            self.assertEqual(local_meta["workspace_name"], "my-secret-workspace-dir")
+
+            # With VERSION file -> reads VERSION
+            (app_root / "VERSION").write_text("v0.2.0\n", encoding="utf-8")
+            versioned_cfg = taskweb.bootstrap_config(ws, "tok")
+            self.assertEqual(versioned_cfg["version"], "v0.2.0")
+
+            # Demo mode -> demo=True, no temp dir name leaked as workspace_name
+            demo_cfg = taskweb.bootstrap_config(ws, "tok", demo=True)
+            self.assertTrue(demo_cfg["demo"])
+            self.assertEqual(demo_cfg["workspace_name"], "")
+
+            # Hosted mode -> safe label, never leaks filesystem path or folder name
+            hosted = {"user": "alice", "email": "alice@example.org", "admin": False}
+            hosted_cfg = taskweb.bootstrap_config(ws, "tok", "alice", hosted=hosted)
+            self.assertEqual(hosted_cfg["workspace_name"], "Shared workspace")
+            self.assertNotIn("my-secret-workspace-dir", json.dumps(hosted_cfg))
+            hosted_meta = web_payloads.dashboard_meta(ws, api_token="tok", items=[], user="alice", hosted=hosted)
+            self.assertEqual(hosted_meta["workspace_name"], "Shared workspace")
+            self.assertNotIn("my-secret-workspace-dir", json.dumps(hosted_meta))
+
+            # Rendered HTML uses .mt-footer (not .mt-demo-banner) and keeps role="status" on alerts, not <footer>
+            html = taskweb.build_html(local_cfg)
+            self.assertIn('<footer class="mt-footer">', html)
+            self.assertNotIn("mt-demo-banner", html)
+            self.assertIn('class="mt-footer-alert" role="status"', html)
+            self.assertNotIn('<footer class="mt-footer" role="status"', html)
+
+    def test_dashboard_payload_collection_totals_when_filtered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cards").mkdir()
+            (root / "settings.yaml").write_text(
+                (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            ws = taskweb.Workspace.at(root)
+            for idx, proj in enumerate(("alpha", "beta", "beta")):
+                (root / "cards" / f"2026-06-22-09000{idx}-t{idx}.md").write_text(
+                    f"---\nid: 2026-06-22-09000{idx}-t{idx}\ntitle: Task {idx}\nkind: task\nstatus: active\npriority: medium\n"
+                    f"type: task\nproject: {proj}\ncreated: 2026-06-22\nupdated: 2026-06-22\n---\n# Task {idx}\n",
+                    encoding="utf-8",
+                )
+            cache = taskweb.store.CardCache()
+            unfiltered = taskweb.dashboard_payload(ws, cache)
+            self.assertEqual(unfiltered["meta"]["collection_totals"]["tasks"], 3)
+            filtered = taskweb.dashboard_payload(
+                ws, cache, query=taskweb.card_query.Query(project=("alpha",)),
+            )
+            self.assertEqual(len(filtered["collections"]["tasks"]), 1)
+            self.assertEqual(filtered["meta"]["collection_totals"]["tasks"], 3)
+
+    def test_footer_count_label_across_views_in_js(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        probe = (
+            'const assert = require("node:assert/strict");\n'
+            'global.window = { addEventListener() {}, location: { search: "", hash: "" }, matchMedia: () => ({ matches: false, addEventListener() {} }) };\n'
+            'global.document = { hidden: false, documentElement: { dataset: {} }, addEventListener() {}, '
+            'getElementById: () => ({ textContent: JSON.stringify({ api_token: "t", workspace_key: "k", demo: false, version: "v0.2.0", workspace_name: "proj" }) }) };\n'
+            'global.localStorage = { getItem: () => null, setItem() {} };\n'
+            'global.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };\n'
+            f'eval({json.dumps(load_js(SOURCE_ROOT / "tools/web"))} + `\n'
+            'const app = taskBoard();\n'
+            'assert.equal(app.appVersion, "v0.2.0");\n'
+            'assert.equal(app.workspaceName, "proj");\n'
+            'assert.equal(app.footerCountLabel(), "");\n'
+            'app.ready = true;\n'
+            'app.collections = { tasks: ["a", "b"], notes: ["n1"], deadlines: ["d1"], open: ["a"], archive_tasks: ["x1", "x2"] };\n'
+            'app.collectionTotals = { tasks: 5, notes: 1, deadlines: 3, open: 2, archive_tasks: 2 };\n'
+            'app.mode = "tasks"; assert.equal(app.footerCountLabel(), "2 tasks");\n'
+            'app.filters.project = ["alpha"];\n'
+            'assert.equal(app.footerCountLabel(), "2 of 5 tasks");\n'
+            'app.mode = "focus"; assert.equal(app.footerCountLabel(), "1 of 2 open");\n'
+            'app.mode = "deadlines"; assert.equal(app.footerCountLabel(), "1 of 3 deadlines");\n'
+            'app.filters = defaultFilters();\n'
+            'app.mode = "notes"; assert.equal(app.footerCountLabel(), "1 note");\n'
+            'app.mode = "archive"; app.settings.archive.kind = "task"; assert.equal(app.footerCountLabel(), "2 archived tasks");\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

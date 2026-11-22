@@ -46,8 +46,6 @@
               <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg>
             </button>
           </nav>
-          <p class="mt-sync-warning" role="status" x-show="syncWarning" x-text="syncWarning"></p>
-          <p class="mt-sync-warning" role="status" x-show="restartNotice" x-text="restartNotice"></p>
         </div>
         <div class="mt-cards-body" :class="{ 'has-topic-tree': topicTreeOpen() }">
           <template x-if="topicTreeOpen()">

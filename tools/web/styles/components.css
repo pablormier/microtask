@@ -575,18 +575,18 @@ button.mt-button.mt-filter-toggle[aria-expanded="true"]:enabled:hover {
   stroke-linecap: round;
   transition: stroke-dashoffset 1s linear;
 }
-.mt-composer-action-status, .mt-sync-warning { color: var(--mt-text-muted); }
+.mt-composer-action-status { color: var(--mt-text-muted); }
 .mt-composer-action-status.is-error { color: var(--mt-danger); }
 .mt-card:focus-visible, .mt-deadline-row:focus-visible, .mt-deadline-progress:focus-visible {
   outline: 2px solid var(--mt-focus);
   outline-offset: 2px;
 }
 
-/* Transient action feedback, above dialogs so results stay visible while editing. */
+/* Transient action feedback, above dialogs and the footer so results stay visible while editing. */
 .mt-toast-region {
   position: fixed;
   right: 0;
-  bottom: 20px;
+  bottom: 42px;
   left: 0;
   z-index: 90;
   display: flex;

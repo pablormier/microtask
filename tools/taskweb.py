@@ -358,7 +358,8 @@ class TaskWebHandler(BaseHTTPRequestHandler):
         if url.path in ("/", "/index.html"):
             page, nonce = build_html_with_nonce(bootstrap_config(self.server.workspace, self.api_token(actor),
                                                                          actor.user if actor else None,
-                                                                         hosted=self.hosted_meta(actor)))
+                                                                         hosted=self.hosted_meta(actor),
+                                                                         demo=self.server.demo))
             self.send_html(page, nonce=nonce)
             return
         if url.path == "/api/item":

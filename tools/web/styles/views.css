@@ -433,12 +433,6 @@ button.mt-button-icon.mt-topic-tree-disclosure {
   font-size: var(--mt-font-size-xs);
 }
 .mt-card.is-note { min-height: 8rem; }
-.mt-sync-warning {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: var(--mt-font-size-xs);
-  line-height: 1.35;
-}
 
 /* Drafts view */
 .mt-drafts-view {

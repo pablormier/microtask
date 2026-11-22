@@ -26,6 +26,50 @@ function createBoardViews() {
     openTasks() { return this.collectionItems("open"); },
     doingCount() { return this.doingTotal; },
 
+    footerCountLabel() {
+      if (!this.ready) return "";
+      const formatCount = (shown, total, singular, plural) => {
+        const hasTotal = typeof total === "number";
+        if (this.activeFilterCount() > 0 && hasTotal) {
+          return shown + " of " + total + " " + (total === 1 ? singular : plural);
+        }
+        return shown + " " + (shown === 1 ? singular : plural);
+      };
+      if (this.mode === "drafts") {
+        const total = this.drafts.length;
+        const shown = this.visibleDrafts().length;
+        if (this.draftSearch && this.draftSearch.trim()) {
+          return shown + " of " + total + " " + (total === 1 ? "draft" : "drafts");
+        }
+        return total + " " + (total === 1 ? "draft" : "drafts");
+      }
+      if (this.mode === "focus") {
+        const shown = (this.collections.open || []).length;
+        return formatCount(shown, this.collectionTotals.open, "open", "open");
+      }
+      if (this.mode === "deadlines") {
+        const shown = (this.collections.deadlines || []).length;
+        return formatCount(shown, this.collectionTotals.deadlines, "deadline", "deadlines");
+      }
+      if (this.mode === "notes") {
+        const shown = (this.collections.notes || []).length;
+        return formatCount(shown, this.collectionTotals.notes, "note", "notes");
+      }
+      if (this.mode === "archive") {
+        const kind = this.viewKind();
+        const key = ARCHIVE_COLLECTIONS[kind];
+        const shown = (this.collections[key] || []).length;
+        const [singular, plural] = kind === "task"
+          ? ["archived task", "archived tasks"]
+          : kind === "note"
+            ? ["archived note", "archived notes"]
+            : ["archived card", "archived cards"];
+        return formatCount(shown, this.collectionTotals[key], singular, plural);
+      }
+      const shown = (this.collections.tasks || []).length;
+      return formatCount(shown, this.collectionTotals.tasks, "task", "tasks");
+    },
+
     dueState(task) { return cardDueState(task, Date.now()); },
     dueDate(value) { return parseCardDueDate(value); },
     dueDayDiff(value) { return cardDueDayDifference(value, new Date()); },

@@ -315,6 +315,9 @@ class BrowserKeyTests(SharedWorkspaceCase):
         page = self.page("root")
         self.assertIn('"email": "root@example.org"', page)
         self.assertIn('"sign_out_url": "/oauth2/sign_out"', page)
+        self.assertIn('"workspace_name": "Shared workspace"', page)
+        self.assertNotIn(str(self.root), page)
+        self.assertEqual(self.items("root")["meta"]["workspace_name"], "Shared workspace")
 
     def test_the_single_user_key_is_unchanged(self) -> None:
         from tools import web_payloads

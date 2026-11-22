@@ -19,6 +19,7 @@ import drafts as draft_store  # noqa: E402
 import operations  # noqa: E402
 import store  # noqa: E402
 import transaction  # noqa: E402
+import update  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 try:
@@ -38,9 +39,28 @@ def workspace_key(ws: Workspace, user: str | None = None) -> str:
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
+def _footer_version(app_root: Path) -> str:
+    version = update.current_version(app_root)
+    return "dev" if version == "unknown" else version
+
+
+def _workspace_label(ws: Workspace, *, demo: bool = False, hosted: dict | None = None) -> str:
+    if hosted is not None:
+        return "Shared workspace"
+    if demo:
+        return ""
+    return ws.root.resolve().name or ws.root.name
+
+
 def bootstrap_config(ws: Workspace, token: str, user: str | None = None, *,
-                     hosted: dict | None = None) -> dict:
-    config: dict = {"api_token": token, "workspace_key": workspace_key(ws, user)}
+                     hosted: dict | None = None, demo: bool = False) -> dict:
+    config: dict = {
+        "api_token": token,
+        "workspace_key": workspace_key(ws, user),
+        "demo": bool(demo),
+        "version": _footer_version(ws.app_root),
+        "workspace_name": _workspace_label(ws, demo=demo, hosted=hosted),
+    }
     if hosted is not None:
         config["hosted"] = hosted
     return config
@@ -174,6 +194,7 @@ def dashboard_meta(
     cfg: dict | None = None,
     demo: bool = False,
     user: str | None = None,
+    hosted: dict | None = None,
 ) -> dict:
     cfg = cfg if cfg is not None else store.policy(ws)
     default_status, default_priority, default_type = operations.task_defaults(cfg)
@@ -239,6 +260,8 @@ def dashboard_meta(
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
         "api_token": api_token,
         "demo": bool(demo),
+        "version": _footer_version(ws.app_root),
+        "workspace_name": _workspace_label(ws, demo=demo, hosted=hosted),
         "time_running": timers,
         "timer_warn_hours": float(rules.get("timer_warn_hours", 8)),
     }
@@ -310,7 +333,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
         if (t.frontmatter.get("status") or "") in statuses
         else len(statuses),
     )
-    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor)
+    meta = dashboard_meta(ws, api_token=api_token, items=tasks, cfg=cfg, demo=demo, user=actor, hosted=hosted)
     now = datetime.now()
     meta["focus"] = operations.focus_context(card_query.select(tasks, card_query.Query(kind=("task",)), now=now),
                                              actor=actor, focus_user=actor, ws=ws)
@@ -321,6 +344,13 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     collections = collection_results(
         ordered, query, now=now, open_statuses=store.open_statuses(ws), done_cutoff=done_cutoff,
         display_rank=lambda card: operations.task_display_sort_key(card, rank))
+    if query == card_query.DEFAULT:
+        unfiltered = collections
+    else:
+        default_cutoff = card_query.default_done_cutoff(card_query.DEFAULT, store.done_window(ws), date.today())
+        unfiltered = collection_results(
+            ordered, card_query.DEFAULT, now=now, open_statuses=store.open_statuses(ws), done_cutoff=default_cutoff)
+    meta["collection_totals"] = {name: len(ids) for name, ids in unfiltered.items()}
     meta["topic_trees"] = view_topic_trees(ws, ordered, query, now=now, done_cutoff=done_cutoff,
                                            topics=[*meta["workspace_usage"]["topic"], *operations.suggested_topics(cfg)])
     drafts = draft_list_payload(ws.root, actor)

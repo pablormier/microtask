@@ -14,6 +14,7 @@ function taskBoard() {
   return {
     tasks: [],
     collections: {},
+    collectionTotals: {},
     querySequence: 0,
     queryTimer: null,
     queryLoading: false,
@@ -56,7 +57,9 @@ function taskBoard() {
     hosted: MT_CONFIG.hosted || null,
     memberChanging: false,
     restoredStashId: "",
-    demo: false,
+    demo: Boolean(MT_CONFIG.demo),
+    appVersion: MT_CONFIG.version || "dev",
+    workspaceName: MT_CONFIG.workspace_name || "",
     showYearProgress: true,
     showDeadlineProgress: true,
     deadlineProgressStart: "created",
@@ -505,6 +508,11 @@ function taskBoard() {
       this.timerWarnHours = meta.timer_warn_hours || 8;
       this.demo = Boolean(meta.demo);
       this.hosted = meta.hosted || null;
+      if (meta.version) this.appVersion = meta.version;
+      if (Object.prototype.hasOwnProperty.call(meta, "workspace_name")) {
+        this.workspaceName = meta.workspace_name || "";
+      }
+      if (meta.collection_totals) this.collectionTotals = meta.collection_totals;
       this.showYearProgress = meta.show_year_progress !== false;
       this.showDeadlineProgress = meta.show_deadline_progress !== false;
       this.deadlineProgressStart = meta.deadline_progress_start || "created";

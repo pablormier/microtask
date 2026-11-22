@@ -50,9 +50,25 @@
         </div>
       </template>
     </main>
-    <footer class="mt-demo-banner" role="status" x-show="demo" x-cloak>
-      <span class="mt-demo-badge">Demo</span>
-      <span>Bundled examples — every action works on them. Changes are deleted when you stop <code>mt demo</code>.</span>
+    <footer class="mt-footer">
+      <div class="mt-footer-start">
+        <template x-if="demo">
+          <span class="mt-footer-demo">
+            <span class="mt-demo-badge">Demo</span>
+            <span class="mt-footer-demo-note">Bundled examples — every action works on them. Changes are deleted when you stop <code>mt demo</code>.</span>
+          </span>
+        </template>
+        <template x-if="!demo && workspaceName">
+          <span class="mt-footer-workspace" x-text="workspaceName" :title="hosted ? 'Shared workspace' : 'Workspace: ' + workspaceName"></span>
+        </template>
+        <span class="mt-footer-alert" role="status" x-show="syncWarning" x-text="syncWarning" :title="syncWarning" x-cloak></span>
+        <span class="mt-footer-alert" role="status" x-show="restartNotice" x-text="restartNotice" :title="restartNotice" x-cloak></span>
+      </div>
+      <div class="mt-footer-end">
+        <span class="mt-footer-count" x-show="ready && footerCountLabel()" x-text="footerCountLabel()" x-cloak></span>
+        <span class="mt-footer-sep" aria-hidden="true" x-show="ready && footerCountLabel() && appVersion" x-cloak>·</span>
+        <span class="mt-footer-version" x-show="appVersion" x-text="appVersion"></span>
+      </div>
     </footer>
     <div class="mt-toast-region" aria-live="polite">
       <template x-if="toast">
