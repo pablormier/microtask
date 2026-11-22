@@ -604,7 +604,8 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
                     hosted: web_hosted.HostedConfig | None = None, require_secret: str | None = None,
                     sign_out_url: str = "") -> int:
     # A shared workspace may run several processes behind one proxy, so they all derive the same token.
-    token = (web_hosted.shared_process_token(hosted.secret, application_version(APP_ROOT)) if hosted is not None
+    token = (web_hosted.shared_process_token(hosted.secret, application_version(APP_ROOT))
+             if (hosted is not None and hosted.secret)
              else secrets.token_urlsafe(24))
     try:
         server = TaskWebServer((host, port), token, workspace, allow_hosts, demo=demo, hosted=hosted,
@@ -618,7 +619,7 @@ def serve_dashboard(workspace: Workspace, host: str, port: int, *, no_open: bool
         cli_helpers.open_in_browser(url)
     print(url, flush=True)
     if hosted is not None:
-        print(f"Shared workspace: signed-in users come from the {web_hosted.EMAIL_HEADER} header; "
+        print(f"Shared workspace: signed-in users come from the {hosted.email_header} header; "
               f"{len(hosted.admins)} administrator(s).", flush=True)
     # Process supervisors stop us with SIGTERM; treat it like Ctrl-C so the cleanup below runs.
     previous = None
@@ -646,12 +647,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig | None:
     """The shared-workspace settings given by flags or MT_* variables, or None for a single-user dashboard."""
-    if not args.trust_proxy_user:
+    trust_tailscale = bool(getattr(args, "trust_tailscale", False))
+    if not args.trust_proxy_user and not trust_tailscale:
         return None
-    secret = web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
-                                    environ.get("MT_PROXY_SECRET"))
+    if args.trust_proxy_user and trust_tailscale:
+        raise ValueError("--trust-tailscale and --trust-proxy-user cannot be combined")
+    if trust_tailscale and str(args.host).strip().lower() not in LOOPBACK_HOSTS:
+        raise ValueError("--trust-tailscale requires a loopback --host (127.0.0.1, localhost, or ::1) "
+                         "so only local Tailscale Serve can reach it")
+    secret = ("" if trust_tailscale
+              else web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
+                                          environ.get("MT_PROXY_SECRET")))
     admins = web_hosted.parse_admins(*args.admin, environ.get("MT_ADMINS"))
     sign_out_url = web_hosted.read_sign_out_url(args.sign_out_url or environ.get("MT_SIGN_OUT_URL"))
     user_map_file = args.user_map or environ.get("MT_USER_MAP")
@@ -665,6 +676,8 @@ def hosted_config(args: argparse.Namespace, environ) -> web_hosted.HostedConfig 
         tokens_file=tokens_file,
         members_file=members_file,
         user_map_file=user_map_file,
+        email_header=web_hosted.TAILSCALE_EMAIL_HEADER if trust_tailscale else web_hosted.EMAIL_HEADER,
+        require_secret=not trust_tailscale,
     )
 
 
@@ -675,6 +688,8 @@ def required_secret(args: argparse.Namespace, environ) -> str | None:
     if args.trust_proxy_user:
         raise ValueError("--require-proxy-secret and --trust-proxy-user cannot be combined; "
                          "--trust-proxy-user already checks the secret")
+    if getattr(args, "trust_tailscale", False):
+        raise ValueError("--require-proxy-secret and --trust-tailscale cannot be combined")
     return web_hosted.read_secret(args.proxy_secret_file or environ.get("MT_PROXY_SECRET_FILE"),
                                   environ.get("MT_PROXY_SECRET"), option="--require-proxy-secret")
 
@@ -682,10 +697,10 @@ def required_secret(args: argparse.Namespace, environ) -> str | None:
 def single_user_sign_out_url(args: argparse.Namespace, environ) -> str:
     """The Sign out link of a --require-proxy-secret dashboard, or "" when none applies.
 
-    --trust-proxy-user keeps its URL in hosted_config. Plain `mt web` has no sign-in to leave, so an
-    explicit --sign-out-url is refused there, while MT_SIGN_OUT_URL is ignored.
+    --trust-proxy-user and --trust-tailscale keep their URL in hosted_config. Plain `mt web` has no
+    sign-in to leave, so an explicit --sign-out-url is refused there, while MT_SIGN_OUT_URL is ignored.
     """
-    if args.trust_proxy_user:
+    if args.trust_proxy_user or getattr(args, "trust_tailscale", False):
         return ""
     if not args.require_proxy_secret:
         if args.sign_out_url:

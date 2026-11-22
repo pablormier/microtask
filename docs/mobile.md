@@ -113,6 +113,23 @@ pass `--allow-host tasks.example.com` (repeatable; `NAME:PORT` also pins the
 port, while a bare name accepts any port). Otherwise configure the proxy to send
 the backend address as `Host`.
 
+### Sharing one workspace with a team over Tailscale
+
+If several people on your tailnet share one workspace on a Raspberry Pi or home
+server, use `--trust-tailscale` with `tailscale serve` instead of Caddy and
+`oauth2-proxy`:
+
+```sh
+mt web --trust-tailscale --port 8101 --allow-host mypi.tailnet.ts.net --admin alice --no-open
+tailscale serve --bg 8101
+```
+
+`--trust-tailscale` requires a loopback `--host` (`127.0.0.1`, `localhost`, or
+`::1`), reads each visitor's Tailscale identity from `Tailscale-User-Login`, and
+gives each person their own focus, drafts, claims, and comment attribution
+(without needing a proxy secret). Replace `mypi.tailnet.ts.net` with your
+machine's MagicDNS name (`tailscale status`).
+
 ---
 
 ## Telegram bot with Claude Code on a Raspberry Pi or VPS

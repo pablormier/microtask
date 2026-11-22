@@ -679,6 +679,8 @@ def command_web(args: argparse.Namespace, ws: Workspace | None = None) -> int:
         command.extend(["--allow-host", name])
     if getattr(args, "trust_proxy_user", False):
         command.append("--trust-proxy-user")
+    if getattr(args, "trust_tailscale", False):
+        command.append("--trust-tailscale")
     if getattr(args, "require_proxy_secret", False):
         command.append("--require-proxy-secret")
     for flag, value in (("--proxy-secret-file", getattr(args, "proxy_secret_file", None)),

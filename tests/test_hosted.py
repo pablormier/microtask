@@ -1158,5 +1158,108 @@ class RequireProxySecretTests(SharedWorkspaceCase):
         self.assertIn("--require-proxy-secret", help_text[help_text.index("--sign-out-url"):])
 
 
+class TailscaleTests(SharedWorkspaceCase):
+    def start_tailscale(self, *, token: str = TOKEN) -> int:
+        self.hosted_server = True
+        config = web_hosted.HostedConfig(
+            "",
+            self.admins,
+            self.user_map,
+            email_header=web_hosted.TAILSCALE_EMAIL_HEADER,
+            require_secret=False,
+        )
+        server = taskweb.TaskWebServer(("127.0.0.1", 0), token, self.ws, hosted=config)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.port = server.server_address[1]
+        return self.port
+
+    def test_tailscale_identifies_users_without_proxy_secret(self) -> None:
+        self.start_tailscale()
+        # No proxy secret is needed, only Tailscale-User-Login.
+        status, payload = self.request("GET", "/api/items", secret=None,
+                                       extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "alice@example.org")])
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["meta"]["hosted"]["user"], "alice")
+        self.assertFalse(payload["meta"]["hosted"]["admin"])
+
+        # Missing, duplicate, or invalid Tailscale-User-Login headers are rejected.
+        self.assertEqual(self.request("GET", "/api/items", secret=None)[0], 401)
+        self.assertEqual(
+            self.request("GET", "/api/items", secret=None,
+                         extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "alice@example.org"),
+                                (web_hosted.TAILSCALE_EMAIL_HEADER, "bob@example.org")])[0],
+            403,
+        )
+        self.assertEqual(
+            self.request("GET", "/api/items", secret=None,
+                         extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "not-an-email")])[0],
+            403,
+        )
+
+        # Comments and admin actions follow the Tailscale user identity.
+        card = self.add_task("Tailscale task")
+        status, payload = self.request(
+            "POST", "/api/comment", {"ref": card["ref"], "message": "from tailscale"},
+            secret=None,
+            extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "alice@example.org")],
+            token=web_hosted.member_token(TOKEN, "alice"),
+        )
+        self.assertEqual(status, 200, payload)
+        comments = card_format.parse_document(self.card_path(card).read_text())[0]["comments"]
+        self.assertEqual(comments[-1]["by"], "alice")
+
+        # Non-admin cannot delete; admin (root) can.
+        fresh_hash = json.loads(self.mt("read", card["ref"], "--json").stdout)["content_hash"]
+        self.assertEqual(
+            self.request("POST", "/api/delete", {"ref": card["ref"], "expected_hash": fresh_hash}, secret=None,
+                         extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "alice@example.org")],
+                         token=web_hosted.member_token(TOKEN, "alice"))[0],
+            403,
+        )
+        self.assertEqual(
+            self.request("POST", "/api/delete", {"ref": card["ref"], "expected_hash": fresh_hash}, secret=None,
+                         extra=[(web_hosted.TAILSCALE_EMAIL_HEADER, "root@example.org")],
+                         token=web_hosted.member_token(TOKEN, "root"))[0],
+            200,
+        )
+
+    def test_tailscale_cli_validation_and_startup(self) -> None:
+        config = taskweb.hosted_config(taskweb.parse_args(["--trust-tailscale", "--admin", "alice"]), {})
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.email_header, web_hosted.TAILSCALE_EMAIL_HEADER)
+        self.assertFalse(config.require_secret)
+        self.assertEqual(config.admins, frozenset({"alice"}))
+
+        path = Path(self.temporary.name) / "secret"
+        path.write_text(SECRET + "\n")
+        for arguments, message in (
+            (("--trust-tailscale", "--host", "0.0.0.0"), "loopback --host"),
+            (("--trust-tailscale", "--trust-proxy-user", "--proxy-secret-file", str(path)), "cannot be combined"),
+            (("--trust-tailscale", "--require-proxy-secret", "--proxy-secret-file", str(path)), "cannot be combined"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.mt("web", "--no-open", "--port", "0", *arguments)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertIn(message, result.stderr)
+
+        process = subprocess.Popen(
+            [str(ROOT / "mt"), "-R", str(self.root), "web", "--trust-tailscale", "--no-open", "--port", "0"],
+            env=clean_env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL,
+        )
+        try:
+            url_line = process.stdout.readline()
+            info_line = process.stdout.readline()
+            self.assertTrue(url_line.startswith("http://127.0.0.1:"), url_line)
+            self.assertIn(web_hosted.TAILSCALE_EMAIL_HEADER, info_line)
+        finally:
+            process.terminate()
+            process.communicate(timeout=30)
+
+
 if __name__ == "__main__":
     unittest.main()

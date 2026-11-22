@@ -33,6 +33,7 @@ import card_format  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 EMAIL_HEADER = "X-Auth-Request-Email"
+TAILSCALE_EMAIL_HEADER = "Tailscale-User-Login"
 SECRET_HEADER = "X-Microtask-Proxy-Secret"
 MIN_SECRET_LENGTH = 16
 _EMAIL_RE = re.compile(r"[^\s@,;:<>()\[\]\"'\\]{1,64}@[^\s@,;:<>()\[\]\"'\\]{1,190}")
@@ -348,7 +349,8 @@ class HostedConfig:
     def __init__(self, secret: str, admins: frozenset[str] = frozenset(),
                  user_map: dict[str, str] | None = None, sign_out_url: str = "",
                  *, tokens_file: str | None = None, members_file: str | None = None,
-                 user_map_file: str | None = None):
+                 user_map_file: str | None = None, email_header: str = EMAIL_HEADER,
+                 require_secret: bool = True):
         self.secret = secret
         self.admins = admins
         self.user_map = dict(user_map or {})
@@ -356,6 +358,8 @@ class HostedConfig:
         self.tokens_file = tokens_file
         self.members_file = members_file
         self.user_map_file = user_map_file
+        self.email_header = email_header
+        self.require_secret = require_secret
 
     def user_for(self, email: str, user_map: dict[str, str] | None = None) -> str:
         """The user name for an email: its entry in the user map, otherwise the part before the @."""
@@ -371,9 +375,9 @@ class HostedConfig:
 
     def identify(self, headers) -> Identity:
         """The person behind a proxy-authenticated request, or HostedAuthError."""
-        if not secret_header_matches(headers, self.secret):
+        if self.require_secret and not secret_header_matches(headers, self.secret):
             raise HostedAuthError(403, "This request did not come through the sign-in proxy.")
-        emails = headers.get_all(EMAIL_HEADER) or []
+        emails = headers.get_all(self.email_header) or []
         if not emails:
             raise HostedAuthError(401, "Sign in to use this workspace.")
         if len(emails) != 1:
@@ -389,7 +393,7 @@ class HostedConfig:
         token = parse_bearer_token(headers)
         if token is None:
             raise HostedAuthError(401, "API bearer token is required.")
-        if (headers.get_all(SECRET_HEADER) or []) and not secret_header_matches(headers, self.secret):
+        if self.require_secret and (headers.get_all(SECRET_HEADER) or []) and not secret_header_matches(headers, self.secret):
             raise HostedAuthError(403, "This request did not come through the sign-in proxy.")
         if not self.tokens_file or not self.members_file:
             raise HostedAuthError(403, "API bearer authentication is not configured on this server.")

@@ -310,7 +310,9 @@ browser --> Caddy (HTTPS, email allowlist, adds the secret) --> mt web on 127.0.
 ```
 
 Single-user setups are not affected. Everything here applies only when
-`mt web` starts with `--trust-proxy-user`.
+`mt web` starts with `--trust-proxy-user` (or `--trust-tailscale` when serving
+over `tailscale serve` without Caddy or `oauth2-proxy`; see
+[Sharing one workspace with a team over Tailscale](mobile.md#sharing-one-workspace-with-a-team-over-tailscale)).
 
 ### Who is asking
 

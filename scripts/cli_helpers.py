@@ -462,6 +462,9 @@ def add_web_arguments(parser: argparse.ArgumentParser, *, shared: bool = True) -
         parser.add_argument("--trust-proxy-user", action="store_true",
                             help="serve one shared workspace to several people behind a sign-in proxy: read who is asking "
                                  "from X-Auth-Request-Email, but only on requests that also carry the proxy secret")
+        parser.add_argument("--trust-tailscale", action="store_true",
+                            help="serve one shared workspace to several people behind Tailscale Serve: read who is "
+                                 "asking from Tailscale-User-Login without a proxy secret (requires a loopback --host)")
         parser.add_argument("--require-proxy-secret", action="store_true",
                             help="keep the single-user dashboard but answer 403 to any request that lacks the proxy "
                                  "secret in X-Microtask-Proxy-Secret, so other programs on this machine cannot use it; "
