@@ -556,7 +556,31 @@ button.mt-button-icon.mt-topic-tree-disclosure {
   button.mt-button.mt-focus-title { font-size: var(--mt-font-size-lg); }
   li.mt-focus-row { grid-template-columns: minmax(0, 1fr); }
   .mt-focus-row-badges { justify-content: flex-start; }
-  .mt-cards-view > .mt-view-controls { padding: 8px 12px 0; }
+  .mt-cards-view > .mt-view-controls {
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding: 8px 12px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .mt-cards-view > .mt-view-controls::-webkit-scrollbar { display: none; }
+  .mt-cards-view > .mt-view-controls > * { flex: 0 0 auto; }
+  .mt-topic-tree-toggle {
+    width: var(--mt-control-size-compact);
+    min-width: var(--mt-control-size-compact);
+    padding: 0;
+  }
+  .mt-topic-tree-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .mt-view-control { gap: 4px; }
+  .mt-view-control .mt-filter-heading { font-size: 0.65rem; letter-spacing: .02em; }
+  .mt-view-control > .mt-field-compact { padding-inline: 6px 1.35rem; }
   .mt-groups:not(.is-horizontal, .is-flat) { scroll-snap-type: x mandatory; scroll-padding-inline: 12px; }
   /* Column pager: names every column, marks the one in view, and jumps on tap. */
   /* flex: none keeps the column flex parent from shrinking the pager, a scroll container, and clipping its chips. */
