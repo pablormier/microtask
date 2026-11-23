@@ -308,12 +308,18 @@ li.mt-mention-option.is-active .mt-mention-meta {
   place-items: stretch;
 }
 .mt-composer.is-zen {
-  width: 100vw;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   border-radius: 0;
-  padding: clamp(14px, 2.5vw, 24px) clamp(16px, 4vw, 40px);
+  padding:
+    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-top, 0px))
+    max(clamp(16px, 4vw, 40px), env(safe-area-inset-right, 0px))
+    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-bottom, 0px))
+    max(clamp(16px, 4vw, 40px), env(safe-area-inset-left, 0px));
 }
 .mt-composer.is-zen .mt-composer-header,
 .mt-composer.is-zen .mt-composer-content,
@@ -354,7 +360,9 @@ li.mt-mention-option.is-active .mt-mention-meta {
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
   flex: 0 0 auto;
   max-height: 36vh;
+  max-height: 36dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   margin-top: var(--mt-space-4);
   padding: 14px 16px;
   border: 1px solid var(--mt-border);
@@ -369,5 +377,26 @@ li.mt-mention-option.is-active .mt-mention-meta {
   .mt-zen-workspace.is-zen.is-split {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
+@media (max-width: 42rem) {
+  .mt-composer.is-zen .mt-composer-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mt-composer.is-zen .mt-composer-header > div:first-child { min-inline-size: 0; }
+  .mt-composer.is-zen .mt-zen-meta-badge { display: none; }
+  .mt-zen-workspace.is-zen.is-split {
+    flex: 1 1 auto;
+    grid-template-rows: minmax(10rem, 1fr) minmax(10rem, 1fr);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+@media (pointer: coarse) {
+  .mt-composer.is-zen .mt-composer-header :is(button.mt-button, .mt-segmented .mt-segment) {
+    min-block-size: 44px;
+    min-inline-size: 44px;
   }
 }

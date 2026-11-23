@@ -713,7 +713,7 @@ textarea.mt-field.is-drag-over {
   .mt-detail-navigation .mt-zen-meta-badge { display: none; }
   .mt-detail-navigation { gap: var(--mt-space-1); }
   .mt-composer-backdrop { padding: 0; place-items: stretch; }
-  .mt-composer { width: 100%; max-height: 100vh; min-height: 100vh; border-radius: 0; }
+  .mt-composer { width: 100%; max-height: 100vh; max-height: 100dvh; min-height: 100vh; min-height: 100dvh; border-radius: 0; }
   .mt-composer-shortcut { display: none; }
   .mt-composer-body.mt-field { flex: 1 1 auto; }
   .mt-property-grid { grid-template-columns: minmax(0, 1fr); }
@@ -731,6 +731,7 @@ textarea.mt-field.is-drag-over {
 
 .mt-content-editor-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--mt-space-2);
@@ -742,12 +743,18 @@ textarea.mt-field.is-drag-over {
 .mt-detail.is-zen {
   display: flex;
   flex-direction: column;
-  width: 100vw;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   border-radius: 0;
-  padding: clamp(14px, 2.5vw, 24px) clamp(16px, 4vw, 40px);
+  padding:
+    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-top, 0px))
+    max(clamp(16px, 4vw, 40px), env(safe-area-inset-right, 0px))
+    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-bottom, 0px))
+    max(clamp(16px, 4vw, 40px), env(safe-area-inset-left, 0px));
   overflow: hidden;
 }
 .mt-detail.is-zen .mt-detail-header {
@@ -774,7 +781,9 @@ textarea.mt-field.is-drag-over {
   order: -1;
   align-self: stretch;
   max-height: 45vh;
+  max-height: 45dvh;
   overflow: auto;
+  overscroll-behavior: contain;
   margin-block-end: var(--mt-space-4);
 }
 .mt-detail.is-zen .mt-detail-layout {
@@ -814,6 +823,26 @@ textarea.mt-field.is-drag-over {
 .mt-detail.is-zen textarea.mt-content-input:focus-visible {
   outline: 2px solid var(--mt-focus);
   outline-offset: 4px;
+}
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. */
+@media (max-width: 42rem) {
+  .mt-detail.is-zen .mt-detail-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .mt-detail.is-zen .mt-detail-heading {
+    flex: 1 1 12rem;
+    min-inline-size: 0;
+  }
+  .mt-detail.is-zen .mt-detail-navigation {
+    margin-inline-start: auto;
+  }
+}
+@media (pointer: coarse) {
+  .mt-detail.is-zen :is(.mt-detail-header, .mt-content-editor-toolbar) :is(button.mt-button, .mt-segmented .mt-segment, .mt-menu-trigger) {
+    min-block-size: 44px;
+    min-inline-size: 44px;
+  }
 }
 
 
