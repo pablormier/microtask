@@ -80,30 +80,26 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   padding: 11px 13px 12px;
   cursor: pointer;
 }
-/* The title leads the card; priority sits at the trailing edge of its first line. */
-.mt-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--mt-space-2);
-  margin-bottom: 4px;
-}
-.mt-card-header .mt-title { flex: 1 1 auto; min-width: 0; margin: 0; }
-.mt-card-header-end { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+/* Order menu floats at the top-right corner on hover/focus without reserving layout space. */
 .mt-card-ordered {
   display: inline-flex;
   align-items: center;
   color: var(--mt-text-muted);
   opacity: .75;
 }
-.mt-card-ordered .mt-icon { width: 13px; height: 13px; }
-.mt-card-header .mt-priority { flex-shrink: 0; }
+.mt-card-ordered .mt-icon { width: 12px; height: 12px; }
+.mt-card-inline-menu {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 2;
+}
 .mt-card-inline-menu > summary.mt-menu-trigger {
-  width: 24px;
-  height: 24px;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
+  width: 22px;
+  height: 22px;
+  border-color: var(--mt-control-border);
+  background: var(--mt-button-surface);
+  box-shadow: var(--mt-shadow-control);
   color: var(--mt-text-muted);
   opacity: 0;
   transition: opacity .12s ease;
@@ -133,7 +129,7 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   font-family: var(--mt-font-family-mono);
   font-size: var(--mt-font-size-xs);
 }
-.mt-title { margin: 6px 0 4px; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); line-height: 1.35; overflow-wrap: anywhere; }
+.mt-title { margin: 0 0 3px; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); line-height: 1.35; overflow-wrap: anywhere; }
 /* Topic path on a card (plain text, like tags); filter by it from the toolbar. */
 .mt-card-topic {
   max-width: 100%;
@@ -155,7 +151,7 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
-.mt-card > .mt-due, .mt-card > .mt-status-badge { margin: 2px 6px 4px 0; }
+.mt-card > .mt-due, .mt-card > .mt-status-badge, .mt-card > .mt-priority { margin: 2px 6px 4px 0; }
 .mt-restart-badge { display: inline-block; }
 .mt-restart-badge::first-letter, .mt-due-kind::first-letter { text-transform: uppercase; }
 .mt-due-kind { display: inline-block; }
