@@ -63,7 +63,14 @@
   width: fit-content;
 }
 .mt-title-row .mt-mode-toggle { margin: 0; }
-.mt-title-row .mt-toolbar-actions { margin-left: auto; }
+.mt-title-row .mt-toolbar-end { margin-left: auto; }
+.mt-toolbar-end {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
 /* The settings menu ends the bar: a square icon, or the signed-in name in a shared workspace. */
 .mt-settings-menu { flex: 0 0 auto; }
 .mt-settings-menu > summary.mt-menu-trigger { width: var(--mt-control-size); height: var(--mt-control-size); }
@@ -323,14 +330,15 @@ dialog.mt-shortcuts-dialog::backdrop {
   .mt-title-row .mt-mode-toggle .mt-segment { flex: 1 0 auto; padding-inline: 6px; }
   /* Search and Filters show as icons so the actions fit on the brand row. */
   .mt-title-row { flex-wrap: wrap; }
+  .mt-toolbar-end { gap: 6px; }
   .mt-toolbar-actions { gap: 6px; }
   .mt-account-name, .mt-capture-resume-label { display: none; }
   .mt-timers-menu > summary.mt-menu-trigger { padding-inline: 6px; }
   .mt-settings-menu > summary.mt-menu-trigger.has-name { width: var(--mt-control-size); padding: 0; }
-  /* The timers list spans the action row, below it, so it stays on screen. */
-  .mt-toolbar-actions { position: relative; }
-  .mt-toolbar-actions .mt-timers-menu { position: static; }
-  .mt-toolbar-actions .mt-timers-menu-items { right: 0; left: 0; width: auto; }
+  /* The timers list spans the title row, below it, so it stays on screen. */
+  .mt-title-row { position: relative; }
+  .mt-title-row .mt-timers-menu { position: static; }
+  .mt-title-row .mt-timers-menu-items { right: 0; left: 0; width: auto; }
   /* The logo alone names the app; the wordmark stays for screen readers. */
   .mt-brand-wordmark { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .mt-filter-toggle .mt-badge { min-width: 1.25rem; padding-inline: 5px; }

@@ -29,33 +29,10 @@
           <button class="mt-segment" type="button" :aria-pressed="mode === 'focus'" @click="mode = 'focus'">Focus</button>
           <button class="mt-segment" type="button" :aria-pressed="mode === 'deadlines'" @click="mode = 'deadlines'">Deadlines</button>
         </div>
-        <!-- Primary action first; conditional items sit after Filters so New, Search, and Filters stay anchored. -->
-        <div class="mt-toolbar-actions">
-          <button type="button" class="mt-button mt-button-primary mt-capture-new" @click="whenReady(() => beginNewCapture({ currentTarget: $el }))">
-            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 5v14M5 12h14"/>
-            </svg>
-            <span>New</span>
-          </button>
-          <button type="button" class="mt-button mt-quick-search-trigger"
-                  @click="whenReady(() => openQuickSearch())" aria-label="Quick search"
-                  :title="'Quick search (' + quickSearchShortcutLabel() + ')'">
-            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
-            </svg>
-          </button>
-          <button type="button" class="mt-button mt-filter-toggle" x-show="filtersApply()"
-                  :aria-expanded="filtersOpen" aria-controls="mt-filters"
-                  :aria-label="'Filters, ' + activeFilterCount() + ' active'"
-                  :title="activeFilterCount() ? 'Filters (' + activeFilterCount() + ' active)' : 'Filters'"
-                  @click="whenReady(() => { filtersOpen = !filtersOpen; })">
-            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/>
-              <circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>
-            </svg>
-            <span class="mt-badge mt-badge-accent" x-show="activeFilterCount() > 0" x-text="activeFilterCount()"></span>
-          </button>
+        <!-- Running timers sit to the left of the action-group separator; primary and utility actions stay anchored on the right. -->
+        <div class="mt-toolbar-end">
           <details class="mt-card-menu mt-timers-menu" x-show="runningTimerList().length" x-cloak
+                   @toggle="if ($el.open) placeTimerMenu($el)"
                    @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
             <summary class="mt-menu-trigger mt-timers-trigger"
                      :aria-label="runningTimerList().length === 1 ? '1 running timer' : runningTimerList().length + ' running timers'"
@@ -63,7 +40,7 @@
               <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5"/></svg>
               <span class="mt-badge mt-badge-accent" x-text="runningTimerList().length"></span>
             </summary>
-            <div class="mt-card-menu-items mt-menu-start mt-timers-menu-items">
+            <div class="mt-card-menu-items mt-timers-menu-items">
               <span class="mt-menu-label">Running timers</span>
               <template x-for="timer in runningTimerList()" :key="timer.id">
                 <a class="mt-timers-item" :href="referenceHref(timer)" @click="$el.closest('details').open = false">
@@ -73,13 +50,38 @@
               </template>
             </div>
           </details>
-          <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
-                  aria-label="Resume draft" title="Resume draft" @click="captureComposer.resume(captureContext(), $event)">
-            <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13 7l4 4"/></svg>
-            <span class="mt-capture-resume-label">Resume draft</span>
-          </button>
-          <!-- Always present at the far right: display settings, and the account behind a sign-in proxy. -->
-          <details class="mt-card-menu mt-settings-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
+          <div class="mt-toolbar-actions">
+            <button type="button" class="mt-button mt-button-primary mt-capture-new" @click="whenReady(() => beginNewCapture({ currentTarget: $el }))">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              <span>New</span>
+            </button>
+            <button type="button" class="mt-button mt-quick-search-trigger"
+                    @click="whenReady(() => openQuickSearch())" aria-label="Quick search"
+                    :title="'Quick search (' + quickSearchShortcutLabel() + ')'">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+              </svg>
+            </button>
+            <button type="button" class="mt-button mt-filter-toggle" x-show="filtersApply()"
+                    :aria-expanded="filtersOpen" aria-controls="mt-filters"
+                    :aria-label="'Filters, ' + activeFilterCount() + ' active'"
+                    :title="activeFilterCount() ? 'Filters (' + activeFilterCount() + ' active)' : 'Filters'"
+                    @click="whenReady(() => { filtersOpen = !filtersOpen; })">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/>
+                <circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>
+              </svg>
+              <span class="mt-badge mt-badge-accent" x-show="activeFilterCount() > 0" x-text="activeFilterCount()"></span>
+            </button>
+            <button type="button" class="mt-button mt-capture-resume" x-show="captureComposer.draft && !captureComposer.open"
+                    aria-label="Resume draft" title="Resume draft" @click="captureComposer.resume(captureContext(), $event)">
+              <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16v4ZM13 7l4 4"/></svg>
+              <span class="mt-capture-resume-label">Resume draft</span>
+            </button>
+            <!-- Always present at the far right: display settings, and the account behind a sign-in proxy. -->
+            <details class="mt-card-menu mt-settings-menu" @click.outside="$el.open = false" @keydown.escape.stop="$el.open = false; $el.querySelector('summary').focus()">
             <summary class="mt-menu-trigger mt-settings-trigger" :class="{ 'has-name': hosted }" aria-label="Display settings" title="Display settings"
                      :aria-label="hosted ? 'Signed in as ' + hosted.user + (hosted.email ? ' (' + hosted.email + ')' : '') + ', display settings' : (signOutUrl ? 'Account and display settings' : 'Display settings')"
                      :title="hosted ? (hosted.email ? hosted.user + ' (' + hosted.email + ')' : hosted.user) : (signOutUrl ? 'Account and display settings' : 'Display settings')">
@@ -123,6 +125,7 @@
               </template>
             </div>
           </details>
+          </div>
         </div>
       </div>
       <search id="mt-filters" class="mt-filters" aria-label="Search and filters" x-show="filtersOpen && filtersApply()" x-cloak>

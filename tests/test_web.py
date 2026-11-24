@@ -2586,14 +2586,16 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
     def test_toolbar_actions_wait_for_load_and_composer_offers_discard_only_with_content(self) -> None:
         self.assertEqual(self.render_dashboard().returncode, 0)
         rendered = self.output.read_text()
-        toolbar = rendered[rendered.index('class="mt-toolbar-actions"'):rendered.index('<search id="mt-filters"')]
+        toolbar = rendered[rendered.index('class="mt-toolbar-end"'):rendered.index('<search id="mt-filters"')]
         # New, Search and Filters never look disabled while loading; a click waits for the workspace.
         self.assertNotIn(':disabled="!ready"', toolbar)
-        # Primary New action sits first, followed by permanent utilities, then conditional items, with Settings anchored at the end.
+        # Running timers sit before the actions separator; inside actions, New sits first, then utilities, Resume draft, and Settings.
         order = [toolbar.index(marker) for marker in (
-            "mt-capture-new", "mt-quick-search-trigger", "mt-filter-toggle", "mt-timers-menu", "mt-capture-resume",
-            "mt-settings-menu")]
+            "mt-timers-menu", "mt-toolbar-actions", "mt-capture-new", "mt-quick-search-trigger", "mt-filter-toggle",
+            "mt-capture-resume", "mt-settings-menu")]
         self.assertEqual(order, sorted(order))
+        self.assertIn('class="mt-card-menu-items mt-timers-menu-items"', toolbar)
+        self.assertIn('@toggle="if ($el.open) placeTimerMenu($el)"', toolbar)
         self.assertNotIn("clearFilters()", toolbar)
         self.assertNotIn("mt-account-menu", rendered)
         self.assertEqual(rendered.count('class="mt-card-menu mt-settings-menu"'), 1)
