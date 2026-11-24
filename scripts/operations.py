@@ -978,6 +978,7 @@ def _convert_locked(
     query: str,
     destination: str,
     *,
+    expected_hash: str | None = None,
     status: str | None = None,
     task_type: str | None = None,
     next_action: str | None = None,
@@ -998,6 +999,8 @@ def _convert_locked(
         statuses=open_statuses(resolved) if to_note else None,
         match_mode=match_mode,
     )
+    if expected_hash is not None and card_format.content_hash(item.raw).casefold() != expected_hash.casefold():
+        raise ConflictError("conflict: item changed since it was loaded (content hash mismatch)", exit_code=1)
     if item.kind == destination:
         raise InputError(f"convert {destination} destination requires a {'task' if to_note else 'note'} source")
     if by is not None and item.is_task:
@@ -1027,7 +1030,6 @@ def _convert_locked(
         updated,
         failure_prefix="conversion failed validation; change rolled back",
         summary=f"Converted to {destination}: {item.path.relative_to(resolved.root)}",
-        receipt_fn=lambda saved, updated=True: item_receipt(saved, updated=updated, ws=resolved),
     )
 
 
@@ -1036,6 +1038,7 @@ def op_convert(
     query: str,
     destination: str,
     *,
+    expected_hash: str | None = None,
     status: str | None = None,
     task_type: str | None = None,
     next_action: str | None = None,
@@ -1048,7 +1051,7 @@ def op_convert(
     return _run_write_operation(
         ws,
         lambda resolved: _convert_locked(
-            resolved, query, destination, status=status, task_type=task_type,
+            resolved, query, destination, expected_hash=expected_hash, status=status, task_type=task_type,
             next_action=next_action, by=by, match_mode=match_mode,
         ),
         sync=sync,

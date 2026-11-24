@@ -31,44 +31,43 @@
                   </template>
                 </details>
                 <div class="mt-title" x-text="task.title"></div>
-                <span class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" x-text="task.priority"></span>
-                <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-show="showCardStatus(task) && task.status" x-text="statusText(task.status)"></span>
-                <template x-if="task.topic && settings[mode]?.group !== 'topic'">
-                  <div class="mt-card-topic" :title="'Topic: ' + task.topic" x-text="topicSegments(task.topic).join(' › ')"></div>
-                </template>
-                <span class="mt-badge mt-badge-warning mt-needs-review" x-show="task.needs_review">Needs review</span>
-                <span class="mt-badge mt-badge-accent mt-timer-badge" x-show="timerRunningFor(task) && !timerStale(task)" :title="timerBadgeTitle(task)" x-text="timerBadgeLabel(task)"></span>
-                <span class="mt-badge mt-badge-warning" x-show="timerStale(task)" title="This timer has run longer than the warning threshold. Check the duration before saving.">Check timer</span>
-                <template x-if="task.claimed_by">
-                  <div class="mt-ref" :title="'Claimed at ' + task.claimed_at" x-text="'Working: ' + task.claimed_by"></div>
-                </template>
-                <template x-if="task.due">
-                  <div class="mt-card-due">
-                    <time class="mt-badge mt-due" :class="dueClass(task)" :datetime="task.due" :title="task.due" x-text="'Due ' + dateLabel(task.due)"></time>
-                    <template x-if="showCardDeadlineProgress(task)">
-                      <span class="mt-progress-ring" :title="deadlineProgressTitle(task)" role="progressbar" :aria-label="'Time elapsed toward ' + task.title" :aria-valuenow="deadlineProgressPercent(task)" aria-valuemin="0" aria-valuemax="100">
-                        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                          <circle class="mt-progress-ring-track" cx="10" cy="10" r="7.5"/>
-                          <circle class="mt-progress-ring-fill" cx="10" cy="10" r="7.5" pathLength="100" :style="'stroke-dashoffset:' + (100 - deadlineProgressPercent(task)) + ';--mt-deadline-elapsed:' + deadlineProgressPercent(task) + '%'"/>
-                        </svg>
-                      </span>
-                    </template>
-                  </div>
-                </template>
-                <template x-if="cardDate(task)">
-                  <time class="mt-card-date" :datetime="cardDate(task)" :title="cardDate(task)" x-text="(task.status === 'done' ? 'Completed ' : 'Updated ') + dateLabel(cardDate(task))"></time>
-                </template>
+                <div class="mt-card-meta">
+                  <span class="mt-badge mt-priority" x-show="hasPriority(task.priority)" :class="priorityClass(task.priority)" :title="'Priority: ' + task.priority" x-text="task.priority"></span>
+                  <template x-if="task.due">
+                    <span class="mt-card-due">
+                      <time class="mt-badge mt-due" :class="dueClass(task)" :datetime="task.due" :title="'Due ' + dateLabel(task.due)" x-text="'Due ' + shortDateLabel(task.due)"></time>
+                      <template x-if="showCardDeadlineProgress(task)">
+                        <span class="mt-progress-ring" :title="deadlineProgressTitle(task)" role="progressbar" :aria-label="'Time elapsed toward ' + task.title" :aria-valuenow="deadlineProgressPercent(task)" aria-valuemin="0" aria-valuemax="100">
+                          <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                            <circle class="mt-progress-ring-track" cx="10" cy="10" r="7.5"/>
+                            <circle class="mt-progress-ring-fill" cx="10" cy="10" r="7.5" pathLength="100" :style="'stroke-dashoffset:' + (100 - deadlineProgressPercent(task)) + ';--mt-deadline-elapsed:' + deadlineProgressPercent(task) + '%'"/>
+                          </svg>
+                        </span>
+                      </template>
+                    </span>
+                  </template>
+                  <span class="mt-badge mt-status-badge" :class="statusBadgeClass(task.status)" x-show="showCardStatus(task) && task.status" x-text="statusText(task.status)"></span>
+                  <span class="mt-badge mt-badge-warning mt-needs-review" x-show="task.needs_review">Needs review</span>
+                  <span class="mt-badge mt-badge-accent mt-timer-badge" x-show="timerRunningFor(task) && !timerStale(task)" :title="timerBadgeTitle(task)" x-text="timerBadgeLabel(task)"></span>
+                  <span class="mt-badge mt-badge-warning" x-show="timerStale(task)" title="This timer has run longer than the warning threshold. Check the duration before saving.">Check timer</span>
+                  <template x-if="needsRestartStep(task)">
+                    <span class="mt-badge mt-badge-danger mt-badge-square mt-restart-badge">needs restart step</span>
+                  </template>
+                  <template x-if="task.claimed_by">
+                    <span class="mt-ref mt-card-claim" :title="'Claimed at ' + task.claimed_at" x-text="'Working: ' + task.claimed_by"></span>
+                  </template>
+                  <template x-if="cardDate(task)">
+                    <time class="mt-card-date" :datetime="cardDate(task)" :title="dateLabel(cardDate(task))" x-text="(task.status === 'done' ? 'Completed ' : 'Updated ') + shortDateLabel(cardDate(task))"></time>
+                  </template>
+                  <template x-if="task.topic && settings[mode]?.group !== 'topic'">
+                    <span class="mt-card-topic" :title="'Topic: ' + task.topic" x-text="topicSegments(task.topic).join(' › ')"></span>
+                  </template>
+                </div>
                 <template x-if="task.next_action">
                   <div class="mt-next" x-text="task.next_action"></div>
                 </template>
                 <template x-if="!task.next_action && task.excerpt">
                   <div class="mt-next" x-text="task.excerpt"></div>
-                </template>
-                <template x-if="task.kind === 'task' && hasTrackedTime(task)">
-                  <div class="mt-time-line" x-text="savedTimeLabel(task)"></div>
-                </template>
-                <template x-if="needsRestartStep(task)">
-                  <span class="mt-badge mt-badge-danger mt-badge-square mt-restart-badge">needs restart step</span>
                 </template>
                 <div class="mt-card-footer">
                   <div class="mt-tags">
@@ -77,6 +76,10 @@
                     </template>
                   </div>
                   <div class="mt-card-footer-meta">
+                    <span class="mt-card-time" x-show="task.kind === 'task' && hasTrackedTime(task)" :title="savedTimeLabel(task)">
+                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                      <span x-text="savedTimeShort(task)"></span>
+                    </span>
                     <span class="mt-card-ordered" x-show="task.order" title="Custom order" aria-label="Custom order">
                       <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
                     </span>

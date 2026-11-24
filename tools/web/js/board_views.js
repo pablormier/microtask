@@ -111,6 +111,7 @@ function createBoardViews() {
     timeLeft(task) { return this.spanUntil(this.dueDate(task.due)); },
     deadlineTimeLeft(task) { return formatDeadlineTimeLeft(task.due, this.now); },
     dateLabel(value) { return formatCardDate(value); },
+    shortDateLabel(value) { return formatCardShortDate(value, this.now); },
     deadlineDateLabel(task) { return this.dateLabel(task.due); },
 
     savedTimeSeconds(task) { return Math.max(0, Number((task && task.time_seconds) || 0)); },
@@ -153,6 +154,7 @@ function createBoardViews() {
 
     hasTrackedTime(task) { return this.savedTimeSeconds(task) > 0; },
     savedTimeLabel(task) { return "Total " + this.formatTrackedTime(this.savedTimeSeconds(task)); },
+    savedTimeShort(task) { return formatCompactDuration(this.savedTimeSeconds(task)); },
 
     timerSessionLabel(task) {
       const timer = task && this.runningTimers[task.id];

@@ -85,6 +85,9 @@ def prepare_command_inputs(root_parser: argparse.ArgumentParser, args: argparse.
         args.file = "-"
     if args.command == "edit":
         _validate_edit_args(root_parser, args)
+    if args.command == "convert" and getattr(args, "expected_hash", None) is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", args.expected_hash):
+            root_parser.error("--expected-hash must be a 64-character SHA-256 hex digest")
     if args.command in {"add", "note"}:
         _validate_capture_args(root_parser, args)
     # Input is read before acquiring locks. Only one input may consume stdin.
@@ -434,6 +437,7 @@ def command_convert(args: argparse.Namespace, ws: Workspace | None = None) -> in
             status=getattr(args, "status", None),
             task_type=getattr(args, "task_type", None),
             next_action=getattr(args, "next_action", None),
+            expected_hash=getattr(args, "expected_hash", None),
             match_mode=args.match_mode,
             quiet_sync=args.as_json,
         ),

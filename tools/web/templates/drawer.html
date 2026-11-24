@@ -35,6 +35,13 @@
                     <button type="button" class="mt-button mt-button-compact" x-show="canOrderCard(selected)" @click="$el.closest('details').open = false; orderCard(selected, { position: 'top' })" :disabled="busy || draftBusy || !!contentEditor.open">Move to top</button>
                     <button type="button" class="mt-button mt-button-compact" x-show="canOrderCard(selected) && selected?.order" @click="$el.closest('details').open = false; orderCard(selected, { position: 'clear' })" :disabled="busy || draftBusy || !!contentEditor.open">Reset order</button>
                     <button type="button" class="mt-button mt-button-compact" x-show="selected && !selected.processing_instructions && textPropertyEditing !== 'processing_instructions'" @click="$el.closest('details').open = false; editTextProperty('processing_instructions')" :disabled="busy || draftBusy || propertyEditor.saving || detailLoading || !!contentEditor.open">Add processing instructions</button>
+                    <button type="button" class="mt-button mt-button-compact"
+                            x-show="showConvertCard(selected)"
+                            @click="if (canConvertCard(selected)) { $el.closest('details').open = false; convertSelected(); }"
+                            :disabled="!canConvertCard(selected)"
+                            :title="convertDisabledReason(selected)"
+                            :aria-busy="busy"
+                            x-text="selected?.kind === 'note' ? 'Convert to task' : 'Convert to note'"></button>
                     <button type="button" class="mt-button mt-button-compact" @click="archiveSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.archived ? 'Unarchive' : 'Archive'"></button>
                     <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
                   </div>

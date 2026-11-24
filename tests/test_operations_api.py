@@ -139,6 +139,46 @@ class OperationsApiTests(unittest.TestCase):
         self.assertEqual(len(second_entries), 1)
         self.assertEqual(second_entries[0]["elapsed_seconds"], 45)
 
+    def test_op_convert_expected_hash_guards_stale_writes(self) -> None:
+        note_path = self.write_card("2026-06-15-090400-convert-note", "Convertible Note", kind="note")
+        note_item = store.Card.read(note_path)
+        ref = f"@{note_item.short_ref}"
+        initial_hash = card_format.content_hash(note_item.raw)
+
+        to_task = operations.op_convert(
+            self.ws,
+            ref,
+            "task",
+            expected_hash=initial_hash,
+            status="active",
+            sync=False,
+        )
+        self.assertEqual(to_task.card.kind, "task")
+        self.assertEqual(to_task.card.frontmatter["status"], "active")
+        self.assertEqual(to_task.receipt["properties"]["kind"], "task")
+        self.assertEqual(to_task.receipt["properties"]["status"], "active")
+        self.assertIn("body", to_task.receipt)
+
+        with self.assertRaises(store.ConflictError):
+            operations.op_convert(
+                self.ws,
+                ref,
+                "note",
+                expected_hash=initial_hash,
+                sync=False,
+            )
+
+        task_hash = str(to_task.receipt["content_hash"])
+        to_note = operations.op_convert(
+            self.ws,
+            ref,
+            "note",
+            expected_hash=task_hash,
+            sync=False,
+        )
+        self.assertEqual(to_note.card.kind, "note")
+        self.assertEqual(to_note.card.frontmatter["comments"][-1]["text"].startswith("Converted from task"), True)
+
 
 if __name__ == "__main__":
     unittest.main()

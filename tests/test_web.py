@@ -2672,6 +2672,125 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_convert_endpoint_guards_hash_and_task_constraints(self) -> None:
+        note_path = self.write_note("2026-06-22-091500-convert-web", "Convert from web")
+        claimed_path = self.write_task(
+            "active",
+            "2026-06-22-091600-claimed-web",
+            "Claimed task",
+            "",
+        )
+        process, url = self.start_interactive_web()
+        try:
+            payload = self.get_json(url + "api/items")
+            token = payload["meta"]["api_token"]
+            note = self.get_card(url, next(item for item in payload["tasks"] if item["id"] == note_path.stem))
+            claimed = self.get_card(url, next(item for item in payload["tasks"] if item["id"] == claimed_path.stem))
+            status, moved = self.post_json(url + "api/move", token, {"ref": claimed["ref"], "status": "doing"})
+            self.assertEqual(status, 200, moved)
+            claimed = self.get_card(url, next(item for item in moved["tasks"] if item["id"] == claimed_path.stem))
+
+            # Stale hash is rejected with 409 Conflict.
+            status, conflict = self.post_json(
+                url + "api/convert",
+                token,
+                {
+                    "ref": note["ref"],
+                    "destination": "task",
+                    "expected_hash": "0" * 64,
+                },
+            )
+            self.assertEqual(status, 409, conflict)
+            self.assertTrue(conflict.get("conflict"))
+
+            # Note -> task succeeds and returns updated dashboard payload.
+            status, to_task = self.post_json(
+                url + "api/convert",
+                token,
+                {
+                    "ref": note["ref"],
+                    "destination": "task",
+                    "expected_hash": note["content_hash"],
+                },
+            )
+            self.assertEqual(status, 200, to_task)
+            task_item = self.get_card(url, next(item for item in to_task["tasks"] if item["id"] == note_path.stem))
+            self.assertEqual(task_item["kind"], "task")
+
+            # Claimed task -> note is rejected with 400.
+            status, rejected = self.post_json(
+                url + "api/convert",
+                token,
+                {
+                    "ref": claimed["ref"],
+                    "destination": "note",
+                    "expected_hash": claimed["content_hash"],
+                },
+            )
+            self.assertEqual(status, 400, rejected)
+            self.assertIn("claim", rejected.get("error", "").lower())
+
+            # Task -> note succeeds and appends conversion comment.
+            status, to_note = self.post_json(
+                url + "api/convert",
+                token,
+                {
+                    "ref": task_item["ref"],
+                    "destination": "note",
+                    "expected_hash": task_item["content_hash"],
+                },
+            )
+            self.assertEqual(status, 200, to_note)
+            note_again = self.get_card(url, next(item for item in to_note["tasks"] if item["id"] == note_path.stem))
+            self.assertEqual(note_again["kind"], "note")
+            self.assertTrue(any("Converted from task" in c["text"] for c in note_again.get("comments", [])))
+        finally:
+            self.stop_interactive_web(process)
+
+    def test_convert_ui_guardrails_in_js(self) -> None:
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        probe = (
+            'const assert = require("node:assert/strict");\n'
+            'global.window = { addEventListener() {}, location: { search: "", hash: "" }, matchMedia: () => ({ matches: false, addEventListener() {} }) };\n'
+            'global.document = { hidden: false, documentElement: { dataset: {} }, addEventListener() {}, '
+            'getElementById: () => ({ textContent: JSON.stringify({ api_token: "t", workspace_key: "k", demo: false }) }) };\n'
+            'global.localStorage = { getItem: () => null, setItem() {} };\n'
+            'global.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };\n'
+            f'eval({json.dumps(load_js(SOURCE_ROOT / "tools/web"))} + `\n'
+            'const app = taskBoard();\n'
+            'const note = { id: "n1", kind: "note", content_hash: "a".repeat(64) };\n'
+            'assert.equal(app.showConvertCard(note), true);\n'
+            'assert.equal(app.canConvertCard(note), true);\n'
+            'assert.equal(app.convertDisabledReason(note), "");\n'
+            'const openTask = { id: "t1", kind: "task", status: "active", claimed_by: "", tracked_seconds: 0 };\n'
+            'assert.equal(app.showConvertCard(openTask), true);\n'
+            'assert.equal(app.canConvertCard(openTask), true);\n'
+            'const doneTask = { id: "t2", kind: "task", status: "done" };\n'
+            'assert.equal(app.showConvertCard(doneTask), false);\n'
+            'assert.equal(app.canConvertCard(doneTask), false);\n'
+            'const claimedTask = { id: "t3", kind: "task", status: "doing", claimed_by: "alice" };\n'
+            'assert.equal(app.showConvertCard(claimedTask), true);\n'
+            'assert.equal(app.canConvertCard(claimedTask), false);\n'
+            'assert.match(app.convertDisabledReason(claimedTask), /claim/i);\n'
+            'const timedTask = { id: "t4", kind: "task", status: "active", time_seconds: 60 };\n'
+            'assert.equal(app.showConvertCard(timedTask), true);\n'
+            'assert.equal(app.canConvertCard(timedTask), false);\n'
+            'assert.match(app.convertDisabledReason(timedTask), /tracked time/i);\n'
+            'app.runningTimers = { t5: { started_at: "2026-11-24T10:00:00Z" } };\n'
+            'const runningTask = { id: "t5", kind: "task", status: "active" };\n'
+            'assert.equal(app.canConvertCard(runningTask), false);\n'
+            'assert.match(app.convertDisabledReason(runningTask), /running timer/i);\n'
+            'app.runningTimers = {};\n'
+            'app.propertyEditor.changed = () => true;\n'
+            'assert.equal(app.canConvertCard(note), false);\n'
+            'assert.match(app.convertDisabledReason(note), /property changes/i);\n'
+            '`);'
+        )
+        result = subprocess.run([node], input=probe, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 class MdvizUnchangedTests(unittest.TestCase):
     def test_mdviz_behavior_remains(self) -> None:

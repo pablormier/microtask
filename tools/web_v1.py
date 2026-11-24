@@ -348,6 +348,35 @@ def _v1_done(ws: Workspace, body: dict, by: str | None) -> tuple[HTTPStatus, dic
     )
 
 
+def _v1_convert(ws: Workspace, body: dict, by: str | None) -> tuple[HTTPStatus, dict[str, object]]:
+    query = _require_str(body, "query", non_empty=True)
+    destination = _require_str(body, "destination", non_empty=True)
+    if destination not in {"task", "note"}:
+        raise _BadInput("destination must be task or note")
+    match_mode = _require_match_mode(body)
+    expected_hash = body.get("expected_hash")
+    if expected_hash is not None and not web_actions._valid_sha256(expected_hash):
+        raise _BadInput("expected_hash must be a 64-character SHA-256 hex digest")
+    status = _optional_str(body, "status")
+    task_type = _optional_str(body, "task_type")
+    next_action = _optional_str(body, "next_action")
+    return _run_v1_operation(
+        ws,
+        lambda resolved: operations.op_convert(
+            resolved,
+            query,
+            destination,
+            expected_hash=expected_hash,
+            status=status,
+            task_type=task_type,
+            next_action=next_action,
+            by=by,
+            match_mode=match_mode,
+            sync=False,
+        ),
+    )
+
+
 def v1_requires_snapshot(path: str, body: dict) -> bool:
     return path == "/api/v1/move" and bool(body.get("takeover", False))
 
@@ -365,6 +394,8 @@ def handle_v1_post(ws: Workspace, path: str, body: dict, actor=None) -> tuple[HT
             return _v1_comment(ws, body, by)
         if path == "/api/v1/done":
             return _v1_done(ws, body, by)
+        if path == "/api/v1/convert":
+            return _v1_convert(ws, body, by)
     except _BadInput as error:
         return error.status, {"error": error.message, "exit_code": error.exit_code}
     return HTTPStatus.NOT_FOUND, {"error": "not found", "exit_code": 1}

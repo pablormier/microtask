@@ -696,6 +696,7 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     convert.add_argument("--status", help="status when converting a note to task; defaults to settings")
     convert.add_argument("--task-type", dest="task_type", help="task type when converting a note to task")
     convert.add_argument("--next-action", help="optional next action when converting a note to task")
+    convert.add_argument("--expected-hash", help="whole-card SHA-256 from read --json; refuse if the card changed")
     convert.add_argument("--json", dest="as_json", action="store_true", help="return the converted card receipt as JSON")
     convert.description = (
         "Change a card's kind in place (same file and ID). Converting a task to a note records its status, type, "

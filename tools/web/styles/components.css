@@ -127,6 +127,14 @@ summary.mt-menu-trigger:focus-visible { outline: 2px solid var(--mt-focus); outl
   font-weight: 500;
 }
 .mt-card-menu-items > button.mt-button:enabled:hover { border-color: transparent; background: var(--mt-surface-hover); box-shadow: none; }
+.mt-card-menu-items > button.mt-button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--mt-text-disabled);
+  opacity: 1;
+  cursor: default;
+  box-shadow: none;
+}
 .mt-card-menu-items.mt-menu-start { right: auto; left: 0; }
 
 input.mt-field, select.mt-field, textarea.mt-field {

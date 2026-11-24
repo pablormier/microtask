@@ -109,6 +109,8 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
 }
 @media (hover: none) {
   .mt-card-inline-menu > summary.mt-menu-trigger { opacity: 1; }
+  /* The always-visible trigger would otherwise cover the end of the title. */
+  .mt-card:has(> .mt-card-inline-menu:not([style*="display: none"])) > .mt-title { padding-right: 26px; }
 }
 .mt-card:has(.mt-card-inline-menu[open]) { z-index: 4; }
 .mt-card-menu-items.mt-card-order-bar {
@@ -120,21 +122,38 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   min-width: 0;
   padding: 3px;
 }
-.mt-card-due { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+.mt-card-due { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
 .mt-card-due .mt-due { margin: 0; }
 .mt-ref {
   color: var(--mt-text-muted);
   font-family: var(--mt-font-family-mono);
   font-size: var(--mt-font-size-xs);
 }
-.mt-title { margin: 0 0 3px; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); line-height: 1.35; overflow-wrap: anywhere; }
+.mt-title { margin: 0; color: var(--mt-text); font-weight: 600; font-size: var(--mt-font-size-md); line-height: 1.35; overflow-wrap: anywhere; }
+/* Everything about a card's state shares one wrapping row under the title:
+   priority, due date, status and flags first, then the topic path, which takes
+   the remaining width and truncates. */
+.mt-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 6px;
+  min-width: 0;
+}
+.mt-card-meta > .mt-badge, .mt-card-meta > .mt-status-badge, .mt-card-meta > .mt-needs-review,
+.mt-card-meta > .mt-restart-badge { margin: 0; }
+.mt-card-meta > .mt-card-claim { font-size: var(--mt-font-size-xs); }
+/* No row (and no gap) when nothing in it is visible. */
+.mt-card-meta:not(:has(> :not(template):not([style*="display: none"]))) { display: none; }
 /* Topic path on a card (plain text, like tags); filter by it from the toolbar. */
 .mt-card-topic {
+  flex: 1 1 6rem;
+  min-width: 0;
   max-width: 100%;
-  margin: 0 0 4px;
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-xs);
-  line-height: 1.35;
+  line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -147,26 +166,29 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   line-height: 1.45;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  margin-top: 6px;
+  -webkit-line-clamp: 2;
 }
-.mt-card > .mt-due, .mt-card > .mt-status-badge, .mt-card > .mt-priority { margin: 2px 6px 4px 0; }
 .mt-restart-badge { display: inline-block; }
 .mt-restart-badge::first-letter, .mt-due-kind::first-letter { text-transform: uppercase; }
 .mt-due-kind { display: inline-block; }
-.mt-time-line {
-  margin-top: 4px;
-  color: var(--mt-text-muted);
-  font-family: var(--mt-font-family-mono);
-  font-size: var(--mt-font-size-xs);
-  font-variant-numeric: tabular-nums;
-}
 .mt-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
-/* Tags and activity share the last card row; the count sits at the trailing edge. */
-/* Tags, activity and the card reference share the last row; the reference sits at the trailing edge. */
-.mt-card-footer { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 8px; margin-top: 8px; }
+/* Tags, tracked time, activity and the card reference share the last row; the reference sits at the trailing edge. */
+.mt-card-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; }
 .mt-card-footer-meta { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; margin-left: auto; }
 .mt-card-ref { flex: 0 0 auto; line-height: 1.6; }
 .mt-card-footer .mt-tags { flex: 1 1 auto; max-width: 100%; margin-top: 0; }
+.mt-card-time {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  color: var(--mt-text-muted);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
 .mt-comment-count {
   display: inline-flex;
   flex: 0 0 auto;
@@ -178,7 +200,7 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
   font-variant-numeric: tabular-nums;
   line-height: 1.45;
 }
-.mt-comment-count .mt-icon { flex-basis: 14px; width: 14px; height: 14px; stroke-width: 2; }
+.mt-card-time .mt-icon, .mt-comment-count .mt-icon { flex-basis: 14px; width: 14px; height: 14px; stroke-width: 2; }
 
 /* Horizontal swimlane layout */
 .mt-groups.is-horizontal {

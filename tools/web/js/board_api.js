@@ -392,6 +392,49 @@ function createBoardApi() {
       this.apiPost("/api/done", { ref: this.selected.ref });
     },
 
+    showConvertCard(card) {
+      return Boolean(card && (card.kind === "note" || (card.kind === "task" && card.status !== "done")));
+    },
+
+    convertDisabledReason(card) {
+      if (!card) return "";
+      if (this.busy || this.draftBusy || this.detailLoading) {
+        return "Finish the current action before converting";
+      }
+      if (this.contentEditor && this.contentEditor.open) {
+        return "Close the content editor before converting";
+      }
+      if (this.propertyEditor && typeof this.propertyEditor.changed === "function" && this.propertyEditor.changed()) {
+        return "Save or reset property changes before converting";
+      }
+      if (card.kind === "task") {
+        if (card.status === "done") return "Done tasks cannot be converted to notes";
+        if (card.claimed_by) return "Release the claim before converting to a note";
+        if (this.timerRunningFor(card) || this.hasTrackedTime(card)) {
+          return "Tasks with tracked time or a running timer cannot be converted to a note";
+        }
+      }
+      return "";
+    },
+
+    canConvertCard(card) {
+      return Boolean(this.showConvertCard(card) && !this.convertDisabledReason(card));
+    },
+
+    async convertSelected() {
+      if (!this.canConvertCard(this.selected)) return null;
+      const destination = this.selected.kind === "note" ? "task" : "note";
+      const payload = await this.apiPost("/api/convert", {
+        ref: this.selected.ref,
+        destination,
+        expected_hash: this.selected.content_hash || "",
+      });
+      if (payload && this.selected && this.propertyEditor && typeof this.propertyEditor.begin === "function") {
+        this.propertyEditor.begin(this.selected, this.taskDefaults);
+      }
+      return payload;
+    },
+
     archiveSelected() {
       if (!this.selected || this.busy) return;
       this.apiPost("/api/archive", { ref: this.selected.ref, archived: !this.selected.archived });

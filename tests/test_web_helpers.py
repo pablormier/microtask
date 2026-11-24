@@ -34,6 +34,11 @@ assert.equal(elapsedPercentage(100, 100, 99), 0);
 assert.equal(elapsedPercentage('invalid', 200, 150), 0);
 assert.equal(formatTrackedDuration(-1), '00h 00m 00s');
 assert.equal(formatTrackedDuration(3723.9), '01h 02m 03s');
+assert.equal(formatCompactDuration(3723.9), '1h 02m');
+assert.equal(formatCompactDuration(125), '2m');
+assert.equal(formatCompactDuration(-5), '0s');
+assert.equal(formatCardShortDate('2026-11-23', new Date(2026, 0, 5).getTime()), new Date(2026, 10, 23).toLocaleString(undefined, { day: 'numeric', month: 'short' }));
+assert.equal(formatCardShortDate('2027-01-02', new Date(2026, 0, 5).getTime()), formatCardDate('2027-01-02'));
 """)
 
     def test_metadata_defaults_and_tags_are_independent_copies(self) -> None:

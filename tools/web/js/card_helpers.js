@@ -75,6 +75,20 @@ function formatCardDate(value) {
   return date.toLocaleString(undefined, options);
 }
 
+// Card faces drop the year for dates in the current year; the full date stays in the title.
+function formatCardShortDate(value, now) {
+  if (!value) return "—";
+  const date = parseCardDueDate(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  if (date.getFullYear() !== new Date(now).getFullYear()) return formatCardDate(value);
+  const options = { day: "numeric", month: "short" };
+  if (String(value).includes("T")) {
+    options.hour = "2-digit";
+    options.minute = "2-digit";
+  }
+  return date.toLocaleString(undefined, options);
+}
+
 function formatTimeUntil(target, now) {
   const diff = target.getTime() - now;
   const end = diff >= 0 ? target : new Date(now);
@@ -115,6 +129,15 @@ function formatTrackedDuration(seconds) {
   return String(hours).padStart(2, "0") + "h "
     + String(minutes).padStart(2, "0") + "m "
     + String(secs).padStart(2, "0") + "s";
+}
+
+function formatCompactDuration(seconds) {
+  const whole = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  if (hours) return hours + "h " + String(minutes).padStart(2, "0") + "m";
+  if (minutes) return minutes + "m";
+  return whole + "s";
 }
 
 function elapsedPercentage(start, end, now) {

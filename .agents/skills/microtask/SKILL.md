@@ -109,5 +109,5 @@ temporary files stay on this machine, so a saved card must include the content
 and source links it needs. Write card references as plain @ref without backticks
 in card text so they render as links.
 
-With `--json`, add, note, edit, move, done, and comment return the saved card, so
+With `--json`, add, note, edit, move, done, convert, and comment return the saved card, so
 report its reference without reading it again; each change is already validated.

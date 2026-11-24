@@ -23,7 +23,7 @@ from cli_helpers import emit_json, emit_query_output, emit_receipt, query_output
 
 SUPPORTED_REMOTE_COMMANDS = {
     "add", "note", "list", "search", "read", "move", "edit", "comment", "done",
-    "settings", "topic", "focus",
+    "convert", "settings", "topic", "focus",
 }
 
 
@@ -261,6 +261,14 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
             return _remote_post(remote_url, token, args, "/api/v1/done", {
                 "notes": list(args.notes or []),
                 "comments": list(args.comments or []),
+            })
+        if args.command == "convert":
+            return _remote_post(remote_url, token, args, "/api/v1/convert", {
+                "destination": args.destination,
+                "expected_hash": getattr(args, "expected_hash", None),
+                "status": getattr(args, "status", None),
+                "task_type": getattr(args, "task_type", None),
+                "next_action": getattr(args, "next_action", None),
             })
     except RemoteError as error:
         print(f"error: {error.message}", file=sys.stderr)

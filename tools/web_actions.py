@@ -479,6 +479,41 @@ def handle_done(ws: Workspace, item: dict, body: dict, by: str | None = None) ->
     )
 
 
+def handle_convert(ws: Workspace, item: dict, body: dict, by: str | None = None) -> tuple[HTTPStatus, dict]:
+    """Convert a card between task and note, guarded by the loaded content hash."""
+    expected_hash = body.get("expected_hash")
+    if not _valid_sha256(expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    if expected_hash != item.get("content_hash"):
+        return HTTPStatus.CONFLICT, {"error": "card changed since it was loaded; refresh and retry", "conflict": True}
+    destination = body.get("destination")
+    if destination not in {"task", "note"}:
+        return HTTPStatus.BAD_REQUEST, {"error": "destination must be task or note"}
+    status = body.get("status")
+    task_type = body.get("task_type")
+    next_action = body.get("next_action")
+    for key, value in (("status", status), ("task_type", task_type), ("next_action", next_action)):
+        if value is not None and (not isinstance(value, str) or not valid_utf8(value)):
+            return HTTPStatus.BAD_REQUEST, {"error": f"{key} must be valid UTF-8 text"}
+    return _run_operation(
+        ws,
+        lambda ws: operations.op_convert(
+            ws,
+            item["ref"],
+            destination,
+            expected_hash=expected_hash,
+            status=status,
+            task_type=task_type,
+            next_action=next_action,
+            by=by,
+            match_mode="exact",
+            sync=False,
+        ),
+        f"Converted to {destination}",
+        include_saved_ref=True,
+    )
+
+
 def handle_flag_update(field: str, message: str):
     def _handler(ws: Workspace, item: dict, body: dict, by: str | None = None) -> tuple[HTTPStatus, dict]:
         flag = body.get(field)
@@ -568,6 +603,7 @@ ITEM_ACTION_HANDLERS = {
     "/api/time-stop": handle_time_stop,
     "/api/time-cancel": handle_time_cancel,
     "/api/done": handle_done,
+    "/api/convert": handle_convert,
     "/api/archive": handle_flag_update("archived", "Archive updated"),
     "/api/hidden": handle_flag_update("hidden", "Visibility updated"),
 }

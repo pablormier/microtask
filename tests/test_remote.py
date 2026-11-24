@@ -439,6 +439,63 @@ class RemoteModeTests(unittest.TestCase):
         self.assertEqual(bad_focus.returncode, 2)
         self.assertIn("read-only", bad_focus.stderr)
 
+    def test_remote_convert_roundtrip_and_hash_guard(self) -> None:
+        noted = self.run_remote_mt("note", "Remote convertible note", "--json", token=self.alice_token)
+        self.assertEqual(noted.returncode, 0, noted.stderr)
+        note_receipt = json.loads(noted.stdout)
+        ref = note_receipt["ref"]
+        stale_hash = note_receipt["content_hash"]
+
+        to_task = self.run_remote_mt(
+            "convert", ref, "task", "--status", "active", "--expected-hash", stale_hash, "--json",
+            token=self.alice_token,
+        )
+        self.assertEqual(to_task.returncode, 0, to_task.stderr)
+        task_receipt = json.loads(to_task.stdout)
+        self.assertTrue(task_receipt["changed"])
+        self.assertEqual(task_receipt["properties"]["kind"], "task")
+        self.assertEqual(task_receipt["properties"]["status"], "active")
+        self.assertIn("body", task_receipt)
+
+        # CLI --expected-hash with a stale hash fails with conflict.
+        stale_cli = self.run_remote_mt(
+            "convert", ref, "note", "--expected-hash", stale_hash,
+            token=self.alice_token,
+        )
+        self.assertNotEqual(stale_cli.returncode, 0)
+        self.assertIn("hash mismatch", stale_cli.stderr)
+
+        # Direct POST /api/v1/convert with a stale expected_hash returns 409 Conflict.
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            body = json.dumps({
+                "query": ref,
+                "destination": "note",
+                "expected_hash": stale_hash,
+            }).encode("utf-8")
+            conn.request(
+                "POST",
+                "/api/v1/convert",
+                body=body,
+                headers={
+                    "Authorization": f"Bearer {self.alice_token}",
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                },
+            )
+            resp = conn.getresponse()
+            self.assertEqual(resp.status, 409)
+        finally:
+            conn.close()
+
+        to_note = self.run_remote_mt("convert", ref, "note", "--json", token=self.alice_token)
+        self.assertEqual(to_note.returncode, 0, to_note.stderr)
+        back_receipt = json.loads(to_note.stdout)
+        self.assertTrue(back_receipt["changed"])
+        read_note = self.run_remote_mt("read", ref, "--json", token=self.alice_token)
+        self.assertEqual(read_note.returncode, 0, read_note.stderr)
+        self.assertEqual(json.loads(read_note.stdout)["properties"]["kind"], "note")
+
 
 if __name__ == "__main__":
     unittest.main()
