@@ -803,13 +803,29 @@ textarea.mt-field.is-drag-over {
     max(clamp(16px, 4vw, 40px), env(safe-area-inset-left, 0px));
   overflow: hidden;
 }
+/* Zen header: one bar across the screen (editing tools left, card actions right),
+   then the title as the document heading across the full writing column. */
 .mt-detail.is-zen .mt-detail-header {
   position: static;
-  margin: 0 auto;
-  padding: 0 0 12px;
-  width: min(72ch, 100%);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
 }
-.mt-detail.is-zen:has(.mt-zen-workspace.is-split) .mt-detail-header,
+.mt-detail.is-zen .mt-zen-bar-tools { order: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mt-detail.is-zen .mt-detail-navigation { order: 2; margin-inline-start: auto; }
+.mt-detail.is-zen .mt-detail-heading {
+  order: 3;
+  flex: 1 1 100%;
+  max-width: min(72ch, 100%);
+  margin: clamp(12px, 4vh, 40px) auto 14px;
+}
+.mt-detail.is-zen .mt-detail-identity,
+.mt-detail.is-zen .mt-content-editor-toolbar { display: none; }
+.mt-detail.is-zen .mt-detail-header h2 { font-size: clamp(1.45rem, 2.2vw, 1.85rem); }
+.mt-detail.is-zen:has(.mt-zen-workspace.is-split) .mt-detail-heading { max-width: min(140ch, 100%); }
 .mt-detail.is-zen:has(.mt-zen-workspace.is-split) .mt-detail-layout {
   width: min(140ch, 100%);
 }
@@ -870,22 +886,18 @@ textarea.mt-field.is-drag-over {
   outline: 2px solid var(--mt-focus);
   outline-offset: 4px;
 }
+/* Breakpoint: narrow (56rem, 896px). See styles/README.md. The property summary would
+   crowd the bar. */
+@media (max-width: 56rem) {
+  .mt-detail.is-zen .mt-zen-meta-badge { display: none; }
+}
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
-  .mt-detail.is-zen .mt-detail-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .mt-detail.is-zen .mt-detail-heading {
-    flex: 1 1 12rem;
-    min-inline-size: 0;
-  }
-  .mt-detail.is-zen .mt-detail-navigation {
-    margin-inline-start: auto;
-  }
+  .mt-detail.is-zen .mt-zen-attach > span { display: none; }
+  .mt-detail.is-zen .mt-detail-heading { margin-top: 8px; }
 }
 @media (pointer: coarse) {
-  .mt-detail.is-zen :is(.mt-detail-header, .mt-content-editor-toolbar) :is(button.mt-button, .mt-segmented .mt-segment, .mt-menu-trigger) {
+  .mt-detail.is-zen .mt-detail-header :is(button.mt-button, .mt-segmented .mt-segment, .mt-menu-trigger) {
     min-block-size: 44px;
     min-inline-size: 44px;
   }

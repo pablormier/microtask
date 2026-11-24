@@ -19,6 +19,21 @@
                   <template x-if="!propertyEditor.form"><span x-text="selected?.title"></span></template>
                 </h2>
               </div>
+              <!-- Zen editing tools sit in the top bar beside the card actions; the title runs full width below. -->
+              <div class="mt-zen-bar-tools" x-show="contentEditor.open && contentEditor.zen">
+                <div class="mt-segmented mt-zen-view-toggle" role="group" aria-label="Zen editor view">
+                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'write'" @click="contentEditor.setZenView(contentContext(), 'write')">Write</button>
+                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'split'" @click="contentEditor.setZenView(contentContext(), 'split')">Split</button>
+                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'preview'" @click="contentEditor.setZenView(contentContext(), 'preview')">Preview</button>
+                </div>
+                <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-attach"
+                        aria-label="Attach file" title="Attach file or paste image"
+                        :disabled="draftBusy || contentEditor.saving || attachmentUploading"
+                        @click="$refs.contentAttachInput && $refs.contentAttachInput.click()">
+                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                  <span>Attach</span>
+                </button>
+              </div>
               <div class="mt-detail-navigation">
                 <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-meta-toggle"
                         x-show="contentEditor.zen && propertyEditor.form"
@@ -46,6 +61,12 @@
                     <button type="button" class="mt-button mt-button-compact" @click="hideSelected()" :disabled="busy || draftBusy || !!contentEditor.open" :aria-busy="busy" x-text="selected?.hidden ? 'Show in lists' : 'Hide from lists'"></button>
                   </div>
                 </details>
+                <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-zen-exit"
+                        x-show="contentEditor.open && contentEditor.zen"
+                        aria-label="Exit Zen mode" title="Exit Zen mode (Esc)"
+                        @click="contentEditor.toggleZen(contentContext())">
+                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7"/></svg>
+                </button>
                 <button class="mt-button mt-button-quiet mt-button-icon mt-close" type="button" aria-label="Close preview" @click="clearSelection()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
               </div>
             </header>
@@ -98,11 +119,6 @@
                       <div class="mt-segmented" role="group" aria-label="Content editor mode" x-show="!contentEditor.zen">
                         <button class="mt-segment" type="button" :aria-pressed="contentEditor.tab === 'write'" @click="contentEditor.tab = 'write'">Write</button>
                         <button class="mt-segment" type="button" :aria-pressed="contentEditor.tab === 'preview'" @click="contentEditor.tab = 'preview'">Preview</button>
-                      </div>
-                      <div class="mt-segmented mt-zen-view-toggle" role="group" aria-label="Zen editor view" x-show="contentEditor.zen">
-                        <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'write'" @click="contentEditor.setZenView(contentContext(), 'write')">Write</button>
-                        <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'split'" @click="contentEditor.setZenView(contentContext(), 'split')">Split</button>
-                        <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'preview'" @click="contentEditor.setZenView(contentContext(), 'preview')">Preview</button>
                       </div>
                       <div class="mt-editor-toolbar-actions">
                         <input type="file" multiple class="mt-attach-input" x-ref="contentAttachInput"
