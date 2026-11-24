@@ -169,13 +169,15 @@ def validate_records(properties: dict[str, object]) -> list[str]:
                 errors.append(f"{prefix} must be a mapping")
                 continue
             if field == "comments":
-                if set(record) not in ({"at", "text"}, {"at", "text", "by"}):
-                    errors.append(f"{prefix} must contain exactly at and text, and optionally by")
+                if not {"at", "text"}.issubset(record) or not set(record).issubset({"at", "text", "by", "edited"}):
+                    errors.append(f"{prefix} must contain at and text, and optionally by and edited")
                     continue
                 if "by" in record and not is_single_line_text(record["by"]):
                     errors.append(f"{prefix}.by must be a non-empty, single-line name")
                 if not isinstance(record.get("at"), str) or not is_metadata_time(record["at"]):
                     errors.append(f"{prefix}.at must be an ISO date or local timestamp")
+                if "edited" in record and (not isinstance(record["edited"], str) or not is_metadata_time(record["edited"])):
+                    errors.append(f"{prefix}.edited must be an ISO date or local timestamp")
                 if not isinstance(record.get("text"), str) or not record["text"].strip():
                     errors.append(f"{prefix}.text must be non-empty text")
                 continue

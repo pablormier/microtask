@@ -669,14 +669,27 @@ def _register_mutation_parsers(sub: argparse._SubParsersAction) -> None:
     order.add_argument("--json", dest="as_json", action="store_true", help="return the updated card receipt as JSON")
     order.set_defaults(func=command_order)
 
-    comment = sub.add_parser("comment", help="append a timestamped comment to one task or note")
+    comment = sub.add_parser("comment", help="append, edit, or delete a timestamped comment on one task or note")
     comment.add_argument("query", nargs="+", help="case-insensitive title, id, or body substring")
     comment.add_argument(
-        "-m", "--message", dest="comments", action="append", required=True,
-        help="comment text; may be repeated",
+        "-m", "--message", "-c", "--comment", dest="comments", action="append", default=[],
+        help="comment text; may be repeated when appending",
+    )
+    comment_mode = comment.add_mutually_exclusive_group()
+    comment_mode.add_argument(
+        "--edit", type=int, metavar="INDEX",
+        help="edit the 1-based comment at INDEX (use -1 for the last comment)",
+    )
+    comment_mode.add_argument(
+        "--delete", type=int, metavar="INDEX",
+        help="delete the 1-based comment at INDEX (use -1 for the last comment)",
+    )
+    comment.add_argument(
+        "--expected-hash", metavar="HASH",
+        help="fail with a conflict if the card changed since this SHA-256 content hash",
     )
     comment.add_argument("--by", metavar="USERNAME",
-                         help="record this name as the comment's author; without it the comment has no author")
+                         help="record this name as the comment's author (or check ownership for --edit/--delete)")
     add_match_mode_arguments(comment)
     comment.add_argument("--json", dest="as_json", action="store_true", help="return the updated card receipt as JSON")
     comment.set_defaults(func=command_comment)

@@ -347,18 +347,56 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
+  justify-content: space-between;
   gap: 2px 8px;
   margin-bottom: 4px;
   font-size: var(--mt-font-size-xs);
+}
+.mt-comment-meta-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
 }
 .mt-comment-entry .mt-comment-author {
   color: var(--mt-text);
   font-weight: 600;
 }
-.mt-comment-entry time {
+.mt-comment-entry time,
+.mt-comment-edited {
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-xs);
   font-variant-numeric: tabular-nums;
+}
+.mt-comment-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.mt-comment-entry:hover .mt-comment-actions,
+.mt-comment-entry:focus-within .mt-comment-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .mt-comment-actions { opacity: 1; }
+}
+.mt-comment-actions .mt-button {
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: var(--mt-font-size-xs);
+}
+.mt-comment-delete-btn:hover:not(:disabled),
+.mt-comment-delete-btn:focus-visible:not(:disabled) {
+  color: var(--mt-danger, #b91c1c);
+}
+.mt-comment-edit-form { margin-top: 4px; }
+.mt-comment-edit-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mt-space-1);
 }
 .mt-comment-body { font-size: var(--mt-font-size-sm); line-height: 1.55; }
 .mt-comment-body > :first-child { margin-top: 0; }

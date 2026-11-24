@@ -31,10 +31,11 @@ The experiments establish prediction performance.
 
 - **Frontmatter** (between the `---` lines) holds the title, kind, status,
   other properties, comments, and saved time entries.
-- **Comments** are `at` and `text`, and also `by` when the author is known. A
+- **Comments** are `at` and `text`, and optionally `by` (when the author is
+  known) and `edited` (the local timestamp when the comment was last edited). A
   comment written in a shared workspace, or with `mt comment --by NAME`, has
-  `by`. Older microtask versions reject a card with a `by` comment, so upgrade
-  every reader before anyone writes attributed comments (see
+  `by`. Older microtask versions reject a card with a `by` or `edited` comment,
+  so upgrade every reader before anyone writes them (see
   [Shared workspace](hosting.md#shared-workspace)).
 - **Time**: finished sessions are `time_entries`; a timer that is running is
   the task's `timer` property (below).

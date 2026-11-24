@@ -323,12 +323,60 @@ def _v1_edit(ws: Workspace, body: dict, by: str | None) -> tuple[HTTPStatus, dic
     )
 
 
-def _v1_comment(ws: Workspace, body: dict, by: str | None) -> tuple[HTTPStatus, dict[str, object]]:
+def _v1_comment(ws: Workspace, body: dict, by: str | None, *, actor=None) -> tuple[HTTPStatus, dict[str, object]]:
     query = _require_str(body, "query", non_empty=True)
+    match_mode = _require_match_mode(body)
+    edit_index = body.get("edit")
+    delete_index = body.get("delete")
+    if edit_index is not None and delete_index is not None:
+        raise _BadInput("give either edit or delete, not both")
+    expected_hash = body.get("expected_hash")
+    if expected_hash is not None and not web_actions._valid_sha256(expected_hash):
+        raise _BadInput("expected_hash must be a 64-character SHA-256 hex digest")
+    is_admin = bool(actor and getattr(actor, "admin", False))
+    if edit_index is not None:
+        if isinstance(edit_index, bool) or not isinstance(edit_index, int):
+            raise _BadInput("edit must be an integer comment index")
+        comments = _optional_str_list(body, "comments")
+        if not comments or len(comments) != 1:
+            raise _BadInput("edit requires a single non-empty comment string in comments")
+        return _run_v1_operation(
+            ws,
+            lambda resolved: operations.op_comment_edit(
+                resolved,
+                query,
+                edit_index,
+                comments[0],
+                expected_hash=expected_hash,
+                by=by,
+                is_admin=is_admin,
+                match_mode=match_mode,
+                one_based=True,
+                sync=False,
+            ),
+        )
+    if delete_index is not None:
+        if isinstance(delete_index, bool) or not isinstance(delete_index, int):
+            raise _BadInput("delete must be an integer comment index")
+        if _optional_str_list(body, "comments"):
+            raise _BadInput("delete does not accept comments")
+        return _run_v1_operation(
+            ws,
+            lambda resolved: operations.op_comment_delete(
+                resolved,
+                query,
+                delete_index,
+                expected_hash=expected_hash,
+                by=by,
+                is_admin=is_admin,
+                match_mode=match_mode,
+                one_based=True,
+                sync=False,
+            ),
+        )
     comments = _optional_str_list(body, "comments")
     if not comments:
         raise _BadInput("comments must be a non-empty list of strings")
-    match_mode = _require_match_mode(body)
     return _run_v1_operation(
         ws,
         lambda resolved: operations.op_comment(resolved, query, comments, by=by, match_mode=match_mode, sync=False),
@@ -378,7 +426,10 @@ def _v1_convert(ws: Workspace, body: dict, by: str | None) -> tuple[HTTPStatus, 
 
 
 def v1_requires_snapshot(path: str, body: dict) -> bool:
-    return path == "/api/v1/move" and bool(body.get("takeover", False))
+    return (
+        (path == "/api/v1/move" and bool(body.get("takeover", False)))
+        or (path == "/api/v1/comment" and body.get("delete") is not None)
+    )
 
 
 def handle_v1_post(ws: Workspace, path: str, body: dict, actor=None) -> tuple[HTTPStatus, dict[str, object]]:
@@ -391,7 +442,7 @@ def handle_v1_post(ws: Workspace, path: str, body: dict, actor=None) -> tuple[HT
         if path == "/api/v1/edit":
             return _v1_edit(ws, body, by)
         if path == "/api/v1/comment":
-            return _v1_comment(ws, body, by)
+            return _v1_comment(ws, body, by, actor=actor)
         if path == "/api/v1/done":
             return _v1_done(ws, body, by)
         if path == "/api/v1/convert":

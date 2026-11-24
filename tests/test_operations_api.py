@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -178,6 +179,77 @@ class OperationsApiTests(unittest.TestCase):
         )
         self.assertEqual(to_note.card.kind, "note")
         self.assertEqual(to_note.card.frontmatter["comments"][-1]["text"].startswith("Converted from task"), True)
+
+    def test_comment_edit_and_delete_operations_and_cli(self) -> None:
+        path = self.write_card("2026-06-15-090500-comment-ops", "Comment Ops Task")
+        ref = f"@{store.Card.read(path).short_ref}"
+
+        operations.op_comment(self.ws, ref, ["First comment", "Second comment"], sync=False)
+        card = store.Card.read(path)
+        initial_hash = card_format.content_hash(card.raw)
+
+        # No-op edit returns changed=False without setting edited.
+        noop = operations.op_comment_edit(self.ws, ref, 0, "First comment", expected_hash=initial_hash, sync=False)
+        self.assertFalse(noop.changed)
+        self.assertNotIn("edited", noop.card.frontmatter["comments"][0])
+
+        # Edit first comment with valid expected_hash.
+        edited = operations.op_comment_edit(self.ws, ref, 0, "First comment (updated)", expected_hash=initial_hash, sync=False)
+        self.assertTrue(edited.changed)
+        first_comment = edited.card.frontmatter["comments"][0]
+        self.assertEqual(first_comment["text"], "First comment (updated)")
+        self.assertIn("edited", first_comment)
+        self.assertEqual(card_format.validate_records(edited.card.frontmatter), [])
+
+        # Stale hash raises ConflictError.
+        with self.assertRaises(store.ConflictError):
+            operations.op_comment_edit(self.ws, ref, 0, "Stale", expected_hash=initial_hash, sync=False)
+        with self.assertRaises(store.ConflictError):
+            operations.op_comment_delete(self.ws, ref, 0, expected_hash=initial_hash, sync=False)
+
+        # Out-of-range index raises InputError.
+        with self.assertRaises(store.InputError):
+            operations.op_comment_edit(self.ws, ref, 5, "Nope", sync=False)
+
+        # Delete second comment via 1-based -1, then delete remaining comment via 1-based 1.
+        deleted_last = operations.op_comment_delete(self.ws, ref, -1, one_based=True, sync=False)
+        self.assertEqual(len(deleted_last.card.frontmatter["comments"]), 1)
+        deleted_first = operations.op_comment_delete(self.ws, ref, 1, one_based=True, sync=False)
+        self.assertNotIn("comments", deleted_first.card.frontmatter)
+
+    def test_cli_comment_edit_and_delete(self) -> None:
+        path = self.write_card("2026-06-15-090600-cli-comments", "CLI Comment Task")
+        ref = f"@{store.Card.read(path).short_ref}"
+
+        def run_mt(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [str(SOURCE_ROOT / "mt"), "-R", str(self.root), *args],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False,
+            )
+
+        self.assertEqual(run_mt("comment", ref, "-m", "One", "-c", "Two").returncode, 0)
+        card_hash = card_format.content_hash(path.read_text(encoding="utf-8"))
+
+        # Edit 1-based index 1 using -c alias and --expected-hash.
+        edited = run_mt("comment", ref, "--edit", "1", "-c", "One edited", "--expected-hash", card_hash)
+        self.assertEqual(edited.returncode, 0, edited.stderr)
+        comments = store.Card.read(path).frontmatter["comments"]
+        self.assertEqual(comments[0]["text"], "One edited")
+        self.assertIn("edited", comments[0])
+
+        # Stale --expected-hash fails.
+        stale = run_mt("comment", ref, "--edit", "1", "-m", "Stale", "--expected-hash", card_hash)
+        self.assertNotEqual(stale.returncode, 0)
+
+        # Invalid flag combinations fail with exit code 2.
+        self.assertEqual(run_mt("comment", ref, "--edit", "1").returncode, 2)
+        self.assertEqual(run_mt("comment", ref, "--delete", "1", "-m", "nope").returncode, 2)
+        self.assertEqual(run_mt("comment", ref, "--edit", "1", "--delete", "1", "-m", "nope").returncode, 2)
+
+        # Delete last comment using -1.
+        deleted = run_mt("comment", ref, "--delete", "-1")
+        self.assertEqual(deleted.returncode, 0, deleted.stderr)
+        self.assertEqual([c["text"] for c in store.Card.read(path).frontmatter["comments"]], ["One edited"])
 
 
 if __name__ == "__main__":

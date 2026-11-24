@@ -1242,7 +1242,7 @@ for(const kind of ['task','note']) {
   const body='## Next action\n\nOrdinary body.\n\n```python\nunfinished';
   const card={kind,body,processing_instructions:'Check source.\n```python\nunfinished',
     next_action:kind==='task'?'Compare methods.':'',
-    comments:[{at:'2026-11-10',text:'History line one.\nLine two.'}]};
+    comments:[{at:'2026-11-10',text:'History line one.\nLine two.',edited:'2026-11-11T09:00:00'}]};
   const document={innerHTML:''},activity={innerHTML:''};
   renderPreview(card,document);
   const bodyCalls=parsed.slice();renderPropertyPanels(card,activity);
@@ -1257,6 +1257,7 @@ console.log(JSON.stringify({results}));
             # Each comment, and each text property, is its own Markdown document.
             self.assertEqual(row['activityCalls'], ['History line one.\nLine two.'])
             self.assertIn('Comments (1)', row['activity'])
+            self.assertIn('title="Edited 2026-11-11T09:00:00">(edited)</span>', row['activity'])
             self.assertEqual(row['document'], '<p>rendered</p>')
             self.assertNotIn('Next action</h3>', row['activity'])
             self.assertEqual(row['propertyCalls'],
@@ -1824,6 +1825,93 @@ console.log(JSON.stringify({ protectedResults, mathRendered, renderedHtml }));
 """)
         self.assertEqual(result["priority"], "high")
         self.assertTrue(result["shared"])
+
+    def test_comment_edit_and_delete_ui_state_and_guards(self) -> None:
+        result = self.run_node(r"""
+(async () => {
+  if (typeof global.document.createElement !== "function") {
+    global.document.createElement = () => ({ innerHTML: "" });
+  }
+  const app = taskBoard(); app.$nextTick = callback => callback(); app.$refs = {};
+  app.ready = true; app.interactive = true; app.workspaceKey = "ws"; app.apiToken = "token";
+  app.hosted = { user: "alice", admin: false };
+
+  const canModifySelf = app.canModifyComment({ by: "alice", text: "hi" });
+  const canModifyOther = app.canModifyComment({ by: "bob", text: "hi" });
+  app.hosted = { user: "root", admin: true };
+  const canModifyAdmin = app.canModifyComment({ by: "bob", text: "hi" });
+  app.hosted = null;
+  const canModifySingle = app.canModifyComment({ text: "hi" });
+
+  const baseCard = {
+    id: "card-1", ref: "@card1", kind: "task", title: "Card", status: "active",
+    priority: "none", tags: [], body: "Body", content_hash: "a".repeat(64),
+    comments: [
+      { at: "2026-11-10", text: "First" },
+      { at: "2026-11-11", text: "Second" },
+      { at: "2026-11-12", text: "Third" },
+    ],
+  };
+  app.tasks = [baseCard];
+  app.showCard(baseCard);
+  // Start an unsaved property edit in the sidebar.
+  app.propertyEditor.form.priority = "high";
+
+  // Start editing comment 2 ("Third") and modify text.
+  app.startEditComment(app.commentEntries[2]);
+  app.commentEditText = "Third edited";
+  const unsavedBeforeSwitch = app.hasUnsavedCommentEdit();
+
+  // Clicking Edit on comment 0 when confirm returns false keeps editing comment 2.
+  let confirmCalls = 0;
+  global.window.confirm = () => { confirmCalls += 1; return false; };
+  app.startEditComment(app.commentEntries[0]);
+  const keptIndex = app.commentEditingIndex;
+  const keptText = app.commentEditText;
+
+  // Deleting comment 0 while editing comment 2 shifts commentEditingIndex from 2 -> 1 and keeps property edits.
+  global.window.confirm = () => true;
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({
+      message: "Comment deleted",
+      tasks: [{
+        ...baseCard,
+        content_hash: "b".repeat(64),
+        comments: [
+          { at: "2026-11-11", text: "Second" },
+          { at: "2026-11-12", text: "Third" },
+        ],
+      }],
+    }),
+  });
+  await app.deleteComment(app.commentEntries[0]);
+  // deleteComment doesn't return the promise, flush microtasks:
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  console.log(JSON.stringify({
+    canModifySelf, canModifyOther, canModifyAdmin, canModifySingle,
+    unsavedBeforeSwitch, confirmCalls, keptIndex, keptText,
+    shiftedIndex: app.commentEditingIndex,
+    propPriority: app.propertyEditor.form.priority,
+    propConflict: app.propertyEditor.conflict,
+    baselineHash: app.propertyEditor.baselineHash,
+  }));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+""")
+        self.assertTrue(result["canModifySelf"])
+        self.assertFalse(result["canModifyOther"])
+        self.assertTrue(result["canModifyAdmin"])
+        self.assertTrue(result["canModifySingle"])
+        self.assertTrue(result["unsavedBeforeSwitch"])
+        self.assertEqual(result["confirmCalls"], 1)
+        self.assertEqual(result["keptIndex"], 2)
+        self.assertEqual(result["keptText"], "Third edited")
+        self.assertEqual(result["shiftedIndex"], 1)
+        self.assertEqual(result["propPriority"], "high")
+        self.assertFalse(result["propConflict"])
+        self.assertEqual(result["baselineHash"], "b" * 64)
 
 if __name__ == "__main__":
     unittest.main()

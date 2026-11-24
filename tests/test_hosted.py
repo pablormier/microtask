@@ -552,12 +552,74 @@ class CommentTests(SharedWorkspaceCase):
         self.assertEqual([c.get("by") for c in detail["comments"] if c["text"] == "hello"], ["alice"])
 
     def test_comment_records_accept_only_at_text_and_by(self) -> None:
-        good = {"comments": [{"at": "2026-01-01", "text": "a"}, {"at": "2026-01-01", "text": "b", "by": "alice"}]}
+        good = {"comments": [
+            {"at": "2026-01-01", "text": "a"},
+            {"at": "2026-01-01", "text": "b", "by": "alice"},
+            {"at": "2026-01-01", "text": "c", "by": "alice", "edited": "2026-01-02T10:00:00"},
+        ]}
         self.assertEqual(card_format.validate_records(good), [])
         for bad in ({"at": "2026-01-01", "text": "a", "by": ""}, {"at": "2026-01-01", "text": "a", "who": "x"},
-                    {"at": "2026-01-01", "by": "alice"}, {"at": "2026-01-01", "text": "a", "by": "x\ny"}):
+                    {"at": "2026-01-01", "by": "alice"}, {"at": "2026-01-01", "text": "a", "by": "x\ny"},
+                    {"at": "2026-01-01", "text": "a", "edited": "not-a-timestamp"}):
             with self.subTest(bad):
                 self.assertTrue(card_format.validate_records({"comments": [bad]}))
+
+    def test_hosted_comment_edit_and_delete_permissions_and_v1(self) -> None:
+        card = self.add_task("Shared Comments")
+        self.start()
+        self.assertEqual(self.post("/api/comment", "bob", {"ref": card["ref"], "message": "bob note"})[0], 200)
+        self.assertEqual(self.post("/api/comment", "alice", {"ref": card["ref"], "message": "alice note"})[0], 200)
+
+        current_hash = card_format.content_hash(self.card_path(card).read_text())
+
+        # Bob cannot edit or delete Alice's comment (index 1).
+        status, payload = self.post("/api/comment-edit", "bob", {
+            "ref": card["ref"], "index": 1, "message": "hijack", "expected_hash": current_hash,
+        })
+        self.assertEqual(status, 409, payload)
+        status, payload = self.post("/api/comment-delete", "bob", {
+            "ref": card["ref"], "index": 1, "expected_hash": current_hash,
+        })
+        self.assertEqual(status, 409, payload)
+
+        # Bob can edit his own comment (index 0).
+        status, payload = self.post("/api/comment-edit", "bob", {
+            "ref": card["ref"], "index": 0, "message": "bob note edited", "expected_hash": current_hash,
+        })
+        self.assertEqual(status, 200, payload)
+        comments = card_format.parse_document(self.card_path(card).read_text())[0]["comments"]
+        self.assertEqual(comments[0]["text"], "bob note edited")
+        self.assertIn("edited", comments[0])
+
+        # Admin (root) can delete Bob's comment.
+        updated_hash = card_format.content_hash(self.card_path(card).read_text())
+        status, payload = self.post("/api/comment-delete", "root", {
+            "ref": card["ref"], "index": 0, "expected_hash": updated_hash,
+        })
+        self.assertEqual(status, 200, payload)
+        comments = card_format.parse_document(self.card_path(card).read_text())[0]["comments"]
+        self.assertEqual([c["text"] for c in comments], ["alice note"])
+
+        # /api/v1/comment supports --edit and --delete (1-based).
+        status, payload = self.post("/api/v1/comment", "alice", {
+            "query": card["ref"], "edit": 1, "comments": ["alice note v1"], "match_mode": "exact",
+        })
+        self.assertEqual(status, 200, payload)
+        comments = card_format.parse_document(self.card_path(card).read_text())[0]["comments"]
+        self.assertEqual(comments[0]["text"], "alice note v1")
+        self.assertIn("edited", comments[0])
+
+        # /api/v1/comment rejects delete paired with comments.
+        status, payload = self.post("/api/v1/comment", "alice", {
+            "query": card["ref"], "delete": 1, "comments": ["nope"], "match_mode": "exact",
+        })
+        self.assertEqual(status, 400, payload)
+
+        status, payload = self.post("/api/v1/comment", "alice", {
+            "query": card["ref"], "delete": -1, "match_mode": "exact",
+        })
+        self.assertEqual(status, 200, payload)
+        self.assertNotIn("comments", card_format.parse_document(self.card_path(card).read_text())[0])
 
     def test_cli_comment_by_is_written_only_when_given(self) -> None:
         self.add_task("Plain")

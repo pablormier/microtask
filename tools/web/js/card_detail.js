@@ -41,7 +41,25 @@ function createDetailController() {
       renderPreview(this.selected, preview);
       enableTaskCheckboxes(preview);
       this.previewHtml = preview.innerHTML;
-      this.commentsHtml = renderCommentsHtml(this.selected);
+      const comments = Array.isArray(this.selected.comments) ? this.selected.comments : [];
+      const spans = ((this.selected.reference_spans || {}).comments || []);
+      this.commentEntries = comments.map((comment, index) => {
+        const value = comment && typeof comment.text === "string" ? comment.text : "";
+        const at = comment && comment.at || "";
+        const edited = comment && typeof comment.edited === "string" ? comment.edited : "";
+        const by = comment && typeof comment.by === "string" ? comment.by : "";
+        return {
+          index,
+          at,
+          atLabel: at ? formatCardDate(at) : "",
+          edited,
+          by,
+          text: value,
+          bodyHtml: (typeof window !== "undefined" && window.marked && window.DOMPurify)
+            ? renderMarkdown(this.selected, referenceSource(this.selected, "comments", value, spans[index]))
+            : "",
+        };
+      });
       this.timeEntriesHtml = renderTimeEntriesHtml(this.selected);
       if (this.activityTab === "time" && !this.hasTimeActivityTab()) {
         this.activityTab = "comments";
@@ -261,15 +279,65 @@ function createDetailController() {
       else this.moveSelected();
     },
 
+    canModifyComment(comment) {
+      if (!comment) return false;
+      if (!this.hosted || !this.hosted.user) return true;
+      if (this.hosted.admin) return true;
+      return comment.by === this.hosted.user;
+    },
+
+    autoGrowTextarea(el) {
+      if (!el || !el.style) return;
+      el.style.height = "auto";
+      el.style.height = Math.max(el.scrollHeight, 60) + "px";
+    },
+
+    hasUnsavedCommentEdit() {
+      if (this.commentEditingIndex < 0 || !this.selected || !Array.isArray(this.selected.comments)) return false;
+      const original = this.selected.comments[this.commentEditingIndex];
+      const originalText = original && typeof original.text === "string" ? original.text : "";
+      return this.commentEditText !== originalText;
+    },
+
+    startEditComment(entry) {
+      if (!entry || this.busy || this.commentEditingIndex === entry.index) return;
+      if (this.hasUnsavedCommentEdit() && typeof window !== "undefined" && typeof window.confirm === "function" &&
+          !window.confirm("Discard unsaved comment changes?")) {
+        return;
+      }
+      this.commentEditingIndex = entry.index;
+      this.commentEditText = entry.text || "";
+      if (this.commentEditMention) this.commentEditMention.closeMention();
+      this.$nextTick(() => {
+        const input = this.$refs && this.$refs.commentEditInput;
+        if (input) {
+          this.autoGrowTextarea(input);
+          if (typeof input.focus === "function") input.focus();
+          if (typeof input.setSelectionRange === "function") {
+            const end = input.value.length;
+            input.setSelectionRange(end, end);
+          }
+        }
+      });
+    },
+
+    cancelEditComment() {
+      this.commentEditingIndex = -1;
+      this.commentEditText = "";
+      if (this.commentEditMention) this.commentEditMention.closeMention();
+    },
+
     canLeaveCard() {
       if (this.busy || this.draftBusy) return false;
       const propDirty = Boolean(this.selected && this.propertyEditor.changed());
       const bodyDirty = Boolean(this.contentEditor.open && this.contentEditor.text !== this.contentEditor.original);
-      if (propDirty || bodyDirty) {
+      const commentDirty = this.hasUnsavedCommentEdit();
+      if (propDirty || bodyDirty || commentDirty) {
         if (typeof window !== "undefined" && typeof window.confirm === "function" &&
             !window.confirm("Discard unsaved changes?")) return false;
         if (propDirty) this.propertyEditor.discard(this.selected, this.taskDefaults);
       }
+      this.cancelEditComment();
       this.contentEditor.close(this.contentContext(), { force: true });
       return true;
     },
@@ -354,10 +422,11 @@ function createDetailController() {
       this.propertyEditor.offerBackup(task);
       this.commentText = "";
       if (this.commentMention) this.commentMention.closeMention();
+      this.cancelEditComment();
       this.actionMessage = "";
       this.actionError = false;
       this.previewHtml = "";
-      this.commentsHtml = "";
+      this.commentEntries = [];
       this.timeEntriesHtml = "";
       this.activityTab = "comments";
       this.textPropertyHtml = {};
@@ -380,7 +449,6 @@ function createDetailController() {
       this.detailLoading = true;
       if (!preserveError) this.detailError = "";
       this.previewHtml = "";
-      this.commentsHtml = "";
       this.timeEntriesHtml = "";
       try {
         const response = await fetch("/api/item?id=" + encodeURIComponent(identity), { cache: "no-store" });
@@ -436,7 +504,7 @@ function createDetailController() {
       this.previousCardId = null;
       this.detailReturnFocus = null;
       this.previewHtml = "";
-      this.commentsHtml = "";
+      this.commentEntries = [];
       this.timeEntriesHtml = "";
       this.activityTab = "comments";
       this.moveDestination = "";
@@ -446,6 +514,7 @@ function createDetailController() {
       this.propertyEditor.conflict = false;
       this.commentText = "";
       if (this.commentMention) this.commentMention.closeMention();
+      this.cancelEditComment();
       this.actionMessage = "";
       this.actionError = false;
       this.$nextTick(() => {

@@ -288,11 +288,53 @@ function createBoardApi() {
     commentSelected() {
       const message = this.commentText.trim();
       if (!this.selected || !message || this.attachmentUploading) return;
-      this.apiPost("/api/comment", { ref: this.selected.ref, message }).then(payload => {
+      this.saveBodyKeepingProperties(() => this.apiPost("/api/comment", { ref: this.selected.ref, message })).then(payload => {
         if (payload) {
           this.commentText = "";
           if (this.commentMention) this.commentMention.closeMention();
           this.notify("Comment added");
+        }
+      });
+    },
+
+    saveEditComment() {
+      const message = this.commentEditText.trim();
+      if (!this.selected || this.commentEditingIndex < 0 || !message || this.attachmentUploading || this.busy) return;
+      const index = this.commentEditingIndex;
+      const original = Array.isArray(this.selected.comments) ? this.selected.comments[index] : null;
+      if (original && typeof original.text === "string" && original.text.trim() === message) {
+        this.cancelEditComment();
+        return;
+      }
+      this.saveBodyKeepingProperties(() => this.apiPost("/api/comment-edit", {
+        ref: this.selected.ref,
+        index,
+        message,
+        expected_hash: String(this.selected.content_hash || ""),
+      })).then(payload => {
+        if (payload) {
+          this.cancelEditComment();
+          this.notify("Comment updated");
+        }
+      });
+    },
+
+    deleteComment(entry) {
+      if (!this.selected || !entry || this.busy) return;
+      if (typeof window !== "undefined" && typeof window.confirm === "function" &&
+          !window.confirm("Delete this comment?")) return;
+      this.saveBodyKeepingProperties(() => this.apiPost("/api/comment-delete", {
+        ref: this.selected.ref,
+        index: entry.index,
+        expected_hash: String(this.selected.content_hash || ""),
+      })).then(payload => {
+        if (payload) {
+          if (this.commentEditingIndex === entry.index) {
+            this.cancelEditComment();
+          } else if (this.commentEditingIndex > entry.index) {
+            this.commentEditingIndex -= 1;
+          }
+          this.notify("Comment deleted");
         }
       });
     },
@@ -323,6 +365,12 @@ function createBoardApi() {
         return {
           getText: () => this.commentText,
           setText: next => { this.commentText = next; },
+        };
+      }
+      if (target === "commentEdit") {
+        return {
+          getText: () => this.commentEditText,
+          setText: next => { this.commentEditText = next; },
         };
       }
       return null;

@@ -1,5 +1,5 @@
       <template x-if="selected">
-        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (commentMention?.mention?.open) { commentMention.closeMention(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
+        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (commentMention?.mention?.open) { commentMention.closeMention(); } else if (commentEditMention?.mention?.open) { commentEditMention.closeMention(); } else if (commentEditingIndex !== -1) { cancelEditComment(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
@@ -225,9 +225,79 @@
                          :hidden="activityTab !== 'comments' ? 'until-found' : false"
                          @beforematch="activityTab = 'comments'">
                       <div class="mt-activity-panel-body">
-                        <div class="mt-activity-comments" x-show="commentsHtml" x-html="commentsHtml"
-                             @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)"
-                             @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                        <div class="mt-activity-comments" x-show="commentEntries.length">
+                          <div class="mt-comment-history">
+                            <template x-for="entry in commentEntries" :key="entry.index">
+                              <article class="mt-comment-entry" :class="{ 'is-editing': commentEditingIndex === entry.index }">
+                                <div class="mt-comment-meta">
+                                  <div class="mt-comment-meta-info">
+                                    <span class="mt-comment-author" x-show="entry.by" x-text="entry.by"></span>
+                                    <time :datetime="entry.at" :title="entry.at" x-text="entry.atLabel"></time>
+                                    <span class="mt-comment-edited" x-show="entry.edited" :title="'Edited ' + entry.edited">(edited)</span>
+                                  </div>
+                                  <div class="mt-comment-actions" x-show="canModifyComment(entry) && commentEditingIndex !== entry.index">
+                                    <button type="button" class="mt-button mt-button-quiet mt-button-compact"
+                                            :disabled="busy" @click="startEditComment(entry)">Edit</button>
+                                    <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-comment-delete-btn"
+                                            :disabled="busy" @click="deleteComment(entry)">Delete</button>
+                                  </div>
+                                </div>
+                                <template x-if="commentEditingIndex !== entry.index">
+                                  <div class="mt-comment-body" x-html="entry.bodyHtml"
+                                       @click="openReference($event)" @mouseover="onReferenceHover($event)" @mouseout="onReferenceLeave($event)"
+                                       @focusin="onReferenceHover($event)" @focusout="onReferenceLeave($event)"></div>
+                                </template>
+                                <template x-if="commentEditingIndex === entry.index">
+                                  <form class="mt-comment-composer mt-comment-edit-form" @submit.prevent="saveEditComment()">
+                                    <div class="mt-comment-composer-box" :class="{ 'is-drag-over': attachmentDragTarget === 'commentEdit' }">
+                                      <textarea class="mt-comment-input" x-ref="commentEditInput" x-model="commentEditText" :disabled="busy"
+                                                rows="2"
+                                                @input="autoGrowTextarea($el); commentEditMention.updateMention(commentEditMentionContext(), $el)"
+                                                @paste="handleAttachmentPaste('commentEdit', $event, $el)"
+                                                @dragover="handleAttachmentDragOver('commentEdit', $event)"
+                                                @dragleave="handleAttachmentDragLeave('commentEdit')"
+                                                @drop="handleAttachmentDrop('commentEdit', $event, $el)"
+                                                @click="commentEditMention.updateMention(commentEditMentionContext(), $el)"
+                                                @keydown="commentEditMention.handleMentionKeydown(commentEditMentionContext(), $event, $el)"
+                                                @keyup="commentEditMention.handleMentionKeyup(commentEditMentionContext(), $event, $el)"
+                                                @scroll="commentEditMention.repositionMention($el)"
+                                                @blur="commentEditMention.closeMention()"
+                                                :aria-expanded="String(Boolean(commentEditMention.mention?.open && commentEditMention.mention?.items?.length))"
+                                                aria-controls="mt-comment-edit-mention-list"
+                                                aria-autocomplete="list"
+                                                :aria-activedescendant="(commentEditMention.mention?.open && commentEditMention.mention?.items?.length) ? ('mt-comment-edit-mention-' + commentEditMention.mention.activeIndex) : null"
+                                                @keydown.escape.stop.prevent="if (commentEditMention?.mention?.open) { commentEditMention.closeMention(); } else { cancelEditComment(); }"
+                                                @keydown.meta.enter.prevent="if (!busy && !attachmentUploading && commentEditText.trim()) saveEditComment()"
+                                                @keydown.ctrl.enter.prevent="if (!busy && !attachmentUploading && commentEditText.trim()) saveEditComment()"
+                                                aria-label="Edit comment text" placeholder="Edit comment…"></textarea>
+                                      {comment_edit_mention_menu}
+                                      <div class="mt-comment-composer-bar">
+                                        <input type="file" multiple class="mt-attach-input" x-ref="commentEditAttachInput"
+                                               @change="handleAttachmentPick('commentEdit', $event, $refs.commentEditInput)"
+                                               :disabled="busy || attachmentUploading">
+                                        <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-button-compact"
+                                                aria-label="Attach file to comment" title="Attach file or paste image"
+                                                :disabled="busy || attachmentUploading"
+                                                @click="$refs.commentEditAttachInput.click()">
+                                          <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                                          </svg>
+                                        </button>
+                                        <div class="mt-comment-edit-buttons">
+                                          <button type="button" class="mt-button mt-button-quiet mt-button-compact"
+                                                  :disabled="busy" @click="cancelEditComment()">Cancel</button>
+                                          <button type="submit" class="mt-button mt-button-compact mt-button-primary"
+                                                  :disabled="busy || attachmentUploading || !commentEditText.trim()"
+                                                  :aria-busy="busy">Save</button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </form>
+                                </template>
+                              </article>
+                            </template>
+                          </div>
+                        </div>
                         <form class="mt-comment-composer" @submit.prevent="commentSelected()">
                           <div class="mt-comment-composer-box" :class="{ 'is-drag-over': attachmentDragTarget === 'comment' }">
                             <textarea class="mt-comment-input" x-ref="commentInput" x-model="commentText" :disabled="busy"

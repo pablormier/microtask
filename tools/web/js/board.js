@@ -92,7 +92,7 @@ function taskBoard() {
     previousCardId: null,
     requestedCardId: null,
     previewHtml: "",
-    commentsHtml: "",
+    commentEntries: [],
     timeEntriesHtml: "",
     activityTab: "comments",
     textPropertyHtml: {},
@@ -100,8 +100,13 @@ function taskBoard() {
     moveDestination: "",
     contentEditor: createContentEditor(),
     commentText: "",
+    commentEditingIndex: -1,
+    commentEditText: "",
     commentMention: typeof mentionMethods === "function"
       ? mentionMethods({ setText: (_self, ctx, nextText) => ctx.setText(nextText), mentionIdPrefix: "mt-comment-mention-" })
+      : null,
+    commentEditMention: typeof mentionMethods === "function"
+      ? mentionMethods({ setText: (_self, ctx, nextText) => ctx.setText(nextText), mentionIdPrefix: "mt-comment-edit-mention-" })
       : null,
     attachmentDragTarget: "",
     _attachmentUploadCount: 0,
@@ -469,6 +474,14 @@ function taskBoard() {
       };
     },
 
+    commentEditMentionContext() {
+      return {
+        getCards: () => this.tasks,
+        setText: next => { this.commentEditText = next; },
+        nextTick: callback => this.$nextTick(callback),
+      };
+    },
+
     cardMetadataConfig() {
       return {
         task_defaults: this.taskDefaults,
@@ -500,6 +513,7 @@ function taskBoard() {
       if (this.memberChanging) return false;
       if (this.selected && this.propertyEditor.changed()) return true;
       if (this.contentEditor.open && this.contentEditor.text !== this.contentEditor.original) return true;
+      if (this.hasUnsavedCommentEdit()) return true;
       return this.captureComposer.hasUnpersisted(this.captureContext());
     },
 

@@ -30,6 +30,7 @@ from card_render import (  # noqa: F401 - re-exported for callers
     card_capture_fields,
     check_claim,
     clean_text_values,
+    delete_comment,
     parse_tag_json,
     render_converted_note,
     render_converted_task,
@@ -42,6 +43,7 @@ from card_render import (  # noqa: F401 - re-exported for callers
     topic_rename_plan,
     transition_claim,
     unassigned_priority,
+    update_comment,
     validate_shared_metadata,
     workspace_topic_counts,
     workspace_topic_tree,
@@ -844,6 +846,184 @@ def op_comment(
         quiet_sync=quiet_sync,
         action="comment",
         by=by,
+    )
+
+
+def _resolve_comment_index(item: Card, index: int, *, one_based: bool) -> int:
+    comments = item.frontmatter.get("comments")
+    if not isinstance(comments, list) or not comments:
+        raise InputError("card has no comments", exit_code=1)
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise InputError("comment index must be an integer", exit_code=1)
+    if one_based:
+        if index == 0:
+            raise InputError("comment index is 1-based (use 1 for the first comment, or -1 for the last)", exit_code=1)
+        resolved = index - 1 if index > 0 else len(comments) + index
+        if not (0 <= resolved < len(comments)):
+            raise InputError(f"comment index {index} out of range (1..{len(comments)})", exit_code=1)
+        return resolved
+    if not (0 <= index < len(comments)):
+        raise InputError(f"comment index {index + 1} out of range (1..{len(comments)})", exit_code=1)
+    return index
+
+
+def _comment_edit_locked(
+    resolved: Workspace,
+    query: str,
+    index: int,
+    text: str,
+    *,
+    expected_hash: str | None = None,
+    by: str | None = None,
+    is_admin: bool = False,
+    match_mode: str = "exact",
+    one_based: bool = False,
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    query = query.strip()
+    if not query:
+        raise InputError("comment edit requires a non-empty query")
+    if not isinstance(text, str) or not text.strip():
+        raise InputError("comment edit requires non-empty text")
+    item = _resolve_unique_card(resolved, query, match_mode=match_mode)
+    if expected_hash is not None and card_format.content_hash(item.raw).casefold() != expected_hash.casefold():
+        raise ConflictError("conflict: item changed since it was loaded (content hash mismatch)", exit_code=1)
+    resolved_index = _resolve_comment_index(item, index, one_based=one_based)
+    author = current_username(by, ws=resolved) if by is not None else None
+    comments = item.frontmatter.get("comments", [])
+    existing_text = comments[resolved_index].get("text") if isinstance(comments[resolved_index], dict) else None
+    cleaned = text.strip()
+    if existing_text == cleaned:
+        if author is not None and not is_admin and comments[resolved_index].get("by") != author:
+            raise ConflictError("you can only edit or delete your own comments", exit_code=1)
+        return WriteResult(
+            card=item,
+            receipt=saved_receipt(item, updated=False, ws=resolved),
+            message=f"No changes: {item.path.relative_to(resolved.root)}",
+            changed=False,
+        )
+    edited_at = now_stamp()
+    try:
+        updated = card_format.replace_property(item.raw, "updated", edited_at)
+        updated = update_comment(updated, resolved_index, cleaned, edited_at, by=author, is_admin=is_admin)
+    except CardInputError as error:
+        raise ConflictError(str(error), exit_code=1) from error
+    except ValueError as error:
+        raise InputError(f"comment edit failed: {error}", exit_code=1) from error
+    return _commit_item_write(
+        resolved,
+        item,
+        updated,
+        expected=item.raw.encode("utf-8"),
+        failure_prefix="comment edit failed validation; change rolled back",
+        summary=f"Edited comment and validated: {item.path.relative_to(resolved.root)}",
+    )
+
+
+def op_comment_edit(
+    ws: Workspace | None,
+    query: str,
+    index: int,
+    text: str,
+    *,
+    expected_hash: str | None = None,
+    by: str | None = None,
+    is_admin: bool = False,
+    match_mode: str = "exact",
+    one_based: bool = False,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Edit an existing comment at `index` on a task or note."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _comment_edit_locked(
+            resolved,
+            query,
+            index,
+            text,
+            expected_hash=expected_hash,
+            by=by,
+            is_admin=is_admin,
+            match_mode=match_mode,
+            one_based=one_based,
+        ),
+        sync=sync,
+        quiet_sync=quiet_sync,
+        action="comment-edit",
+        by=by,
+    )
+
+
+def _comment_delete_locked(
+    resolved: Workspace,
+    query: str,
+    index: int,
+    *,
+    expected_hash: str | None = None,
+    by: str | None = None,
+    is_admin: bool = False,
+    match_mode: str = "exact",
+    one_based: bool = False,
+) -> WriteResult:
+    _require_mutation_lock(resolved)
+    query = query.strip()
+    if not query:
+        raise InputError("comment delete requires a non-empty query")
+    item = _resolve_unique_card(resolved, query, match_mode=match_mode)
+    if expected_hash is not None and card_format.content_hash(item.raw).casefold() != expected_hash.casefold():
+        raise ConflictError("conflict: item changed since it was loaded (content hash mismatch)", exit_code=1)
+    resolved_index = _resolve_comment_index(item, index, one_based=one_based)
+    author = current_username(by, ws=resolved) if by is not None else None
+    deleted_at = now_stamp()
+    try:
+        updated = card_format.replace_property(item.raw, "updated", deleted_at)
+        updated = delete_comment(updated, resolved_index, by=author, is_admin=is_admin)
+    except CardInputError as error:
+        raise ConflictError(str(error), exit_code=1) from error
+    except ValueError as error:
+        raise InputError(f"comment delete failed: {error}", exit_code=1) from error
+    return _commit_item_write(
+        resolved,
+        item,
+        updated,
+        expected=item.raw.encode("utf-8"),
+        failure_prefix="comment delete failed validation; change rolled back",
+        summary=f"Deleted comment and validated: {item.path.relative_to(resolved.root)}",
+    )
+
+
+def op_comment_delete(
+    ws: Workspace | None,
+    query: str,
+    index: int,
+    *,
+    expected_hash: str | None = None,
+    by: str | None = None,
+    is_admin: bool = False,
+    match_mode: str = "exact",
+    one_based: bool = False,
+    sync: bool = True,
+    quiet_sync: bool = True,
+) -> WriteResult:
+    """Delete an existing comment at `index` on a task or note, requiring a local history snapshot."""
+    return _run_write_operation(
+        ws,
+        lambda resolved: _comment_delete_locked(
+            resolved,
+            query,
+            index,
+            expected_hash=expected_hash,
+            by=by,
+            is_admin=is_admin,
+            match_mode=match_mode,
+            one_based=one_based,
+        ),
+        sync=sync,
+        quiet_sync=quiet_sync,
+        action="comment-delete",
+        by=by,
+        require_history=True,
     )
 
 

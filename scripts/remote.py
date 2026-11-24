@@ -254,9 +254,16 @@ def dispatch_remote(remote_url: str, root_parser: argparse.ArgumentParser, args:
                 "tag_remove": list(args.tag_remove) if getattr(args, "tag_remove", None) is not None else None,
             })
         if args.command == "comment":
-            return _remote_post(remote_url, token, args, "/api/v1/comment", {
+            payload: dict[str, object] = {
                 "comments": list(args.comments or []),
-            })
+            }
+            if getattr(args, "edit", None) is not None:
+                payload["edit"] = args.edit
+            if getattr(args, "delete", None) is not None:
+                payload["delete"] = args.delete
+            if getattr(args, "expected_hash", None) is not None:
+                payload["expected_hash"] = args.expected_hash
+            return _remote_post(remote_url, token, args, "/api/v1/comment", payload)
         if args.command == "done":
             return _remote_post(remote_url, token, args, "/api/v1/done", {
                 "notes": list(args.notes or []),

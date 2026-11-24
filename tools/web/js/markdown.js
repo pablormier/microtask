@@ -201,10 +201,14 @@ function renderCommentsHtml(task) {
   const entries = comments.map((comment, index) => {
     const value = comment && typeof comment.text === "string" ? comment.text : "";
     const at = comment && comment.at || "";
+    const edited = comment && typeof comment.edited === "string" ? comment.edited : "";
     const by = comment && typeof comment.by === "string" ? comment.by : "";
+    const editedHtml = edited
+      ? '<span class="mt-comment-edited" title="Edited ' + escapeHtml(edited) + '">(edited)</span>'
+      : "";
     const meta = (by ? '<span class="mt-comment-author">' + escapeHtml(by) + "</span>" : "") +
       '<time datetime="' + escapeHtml(at) + '" title="' + escapeHtml(at) + '">' +
-      escapeHtml(at ? formatCardDate(at) : "") + "</time>";
+      escapeHtml(at ? formatCardDate(at) : "") + "</time>" + editedHtml;
     return '<article class="mt-comment-entry"><div class="mt-comment-meta">' + meta +
       '</div><div class="mt-comment-body">' +
       renderMarkdown(task, referenceSource(task, "comments", value, spans[index])) + "</div></article>";

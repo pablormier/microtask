@@ -63,6 +63,63 @@ def append_comments(raw: str, comments: list[str], timestamp: str, by: str | Non
     return card_format.render_document(properties, body)
 
 
+def _resolve_comment_record(
+    raw: str,
+    index: int,
+    *,
+    by: str | None = None,
+    is_admin: bool = False,
+) -> tuple[dict[str, object], str, list[object], int]:
+    properties, body = card_format.parse_document(raw)
+    records = properties.get("comments")
+    if not isinstance(records, list) or not records:
+        raise ValueError("card has no comments")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0 or index >= len(records):
+        raise ValueError(f"comment index {index + 1} out of range (1..{len(records)})")
+    record = records[index]
+    if not isinstance(record, dict):
+        raise ValueError("comment entry must be a mapping")
+    if by is not None and not is_admin and record.get("by") != by:
+        raise CardInputError("you can only edit or delete your own comments")
+    return properties, body, records, index
+
+
+def update_comment(
+    raw: str,
+    index: int,
+    text: str,
+    timestamp: str,
+    *,
+    by: str | None = None,
+    is_admin: bool = False,
+) -> str:
+    """Replace one comment's text at 0-based `index` and record its `edited` timestamp."""
+    cleaned = text.strip()
+    if not cleaned:
+        raise ValueError("comment text must be non-empty")
+    properties, body, records, resolved_index = _resolve_comment_record(raw, index, by=by, is_admin=is_admin)
+    record = dict(records[resolved_index])
+    record["text"] = cleaned
+    record["edited"] = timestamp
+    records[resolved_index] = record
+    return card_format.render_document(properties, body)
+
+
+def delete_comment(
+    raw: str,
+    index: int,
+    *,
+    by: str | None = None,
+    is_admin: bool = False,
+) -> str:
+    """Remove one comment at 0-based `index`, dropping `comments` when the last one is removed."""
+    properties, body, records, resolved_index = _resolve_comment_record(raw, index, by=by, is_admin=is_admin)
+    records.pop(resolved_index)
+    if not records:
+        properties.pop("comments", None)
+    return card_format.render_document(properties, body)
+
+
 def blank_line_separator(body: str) -> str:
     if not body:
         return ""

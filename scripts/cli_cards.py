@@ -32,6 +32,8 @@ from operations import (
     capture_title,
     op_bulk_edit,
     op_comment,
+    op_comment_delete,
+    op_comment_edit,
     op_complete,
     op_convert,
     op_create,
@@ -384,12 +386,54 @@ def command_order(args: argparse.Namespace, ws: Workspace | None = None) -> int:
 
 
 def command_comment(args: argparse.Namespace, ws: Workspace | None = None) -> int:
+    edit_index = getattr(args, "edit", None)
+    delete_index = getattr(args, "delete", None)
+    expected_hash = getattr(args, "expected_hash", None)
+    by = getattr(args, "by", None)
+    if edit_index is not None:
+        if len(args.comments) != 1:
+            print("error: --edit requires exactly one -m/--message", file=sys.stderr)
+            return 2
+        return _cli_call_op(
+            lambda: op_comment_edit(
+                ws,
+                " ".join(args.query),
+                edit_index,
+                args.comments[0],
+                expected_hash=expected_hash,
+                by=by,
+                match_mode=args.match_mode,
+                one_based=True,
+                quiet_sync=args.as_json,
+            ),
+            as_json=args.as_json,
+        )
+    if delete_index is not None:
+        if args.comments:
+            print("error: --delete does not accept -m/--message", file=sys.stderr)
+            return 2
+        return _cli_call_op(
+            lambda: op_comment_delete(
+                ws,
+                " ".join(args.query),
+                delete_index,
+                expected_hash=expected_hash,
+                by=by,
+                match_mode=args.match_mode,
+                one_based=True,
+                quiet_sync=args.as_json,
+            ),
+            as_json=args.as_json,
+        )
+    if not args.comments:
+        print("error: comment requires -m/--message (or --edit / --delete)", file=sys.stderr)
+        return 2
     return _cli_call_op(
         lambda: op_comment(
             ws,
             " ".join(args.query),
             args.comments,
-            by=getattr(args, "by", None),
+            by=by,
             match_mode=args.match_mode,
             quiet_sync=args.as_json,
         ),

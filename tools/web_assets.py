@@ -164,6 +164,13 @@ def load_template(web_dir: Path = WEB_DIR) -> str:
             ctx_expr="commentMentionContext()",
             input_expr="$refs.commentInput",
         ))
+        .replace("{comment_edit_mention_menu}", _render_mention_menu(
+            mention_menu,
+            mention_id="mt-comment-edit-mention",
+            controller="commentEditMention",
+            ctx_expr="commentEditMentionContext()",
+            input_expr="$refs.commentEditInput",
+        ))
     )
     capture_composer = (
         (templates_dir / "capture_composer.html").read_text(encoding="utf-8")

@@ -419,6 +419,70 @@ def handle_comment(ws: Workspace, item: dict, body: dict, by: str | None = None)
     )
 
 
+def handle_comment_edit(
+    ws: Workspace,
+    item: dict,
+    body: dict,
+    by: str | None = None,
+    *,
+    is_admin: bool = False,
+) -> tuple[HTTPStatus, dict]:
+    expected_hash = body.get("expected_hash")
+    if not _valid_sha256(expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    index = body.get("index")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        return HTTPStatus.BAD_REQUEST, {"error": "index must be a non-negative integer"}
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return HTTPStatus.BAD_REQUEST, {"error": "comment requires text"}
+    return _run_operation(
+        ws,
+        lambda ws: operations.op_comment_edit(
+            ws,
+            item["ref"],
+            index,
+            message,
+            expected_hash=expected_hash,
+            by=by,
+            is_admin=is_admin,
+            match_mode="exact",
+            sync=False,
+        ),
+        "Comment updated",
+    )
+
+
+def handle_comment_delete(
+    ws: Workspace,
+    item: dict,
+    body: dict,
+    by: str | None = None,
+    *,
+    is_admin: bool = False,
+) -> tuple[HTTPStatus, dict]:
+    expected_hash = body.get("expected_hash")
+    if not _valid_sha256(expected_hash):
+        return HTTPStatus.BAD_REQUEST, {"error": "expected_hash must be a SHA-256 hash"}
+    index = body.get("index")
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        return HTTPStatus.BAD_REQUEST, {"error": "index must be a non-negative integer"}
+    return _run_operation(
+        ws,
+        lambda ws: operations.op_comment_delete(
+            ws,
+            item["ref"],
+            index,
+            expected_hash=expected_hash,
+            by=by,
+            is_admin=is_admin,
+            match_mode="exact",
+            sync=False,
+        ),
+        "Comment deleted",
+    )
+
+
 def handle_time_start(ws: Workspace, item: dict, body: dict, by: str | None = None) -> tuple[HTTPStatus, dict]:
     if item["kind"] != "task" or item["status"] == "done":
         return HTTPStatus.BAD_REQUEST, {"error": "only open tasks can start a timer"}
@@ -599,6 +663,8 @@ ITEM_ACTION_HANDLERS = {
     "/api/move": handle_move,
     "/api/order": handle_order,
     "/api/comment": handle_comment,
+    "/api/comment-edit": handle_comment_edit,
+    "/api/comment-delete": handle_comment_delete,
     "/api/time-start": handle_time_start,
     "/api/time-stop": handle_time_stop,
     "/api/time-cancel": handle_time_cancel,
@@ -624,7 +690,7 @@ HOSTED_HANDLERS = {
     "/api/focus-clear": handle_focus_clear,
 }
 # Actions that remove or overwrite work. A pre-mutation local history snapshot is required before they run.
-SNAPSHOT_BEFORE = {"/api/delete", "/api/takeover", "/api/topic-rename"}
+SNAPSHOT_BEFORE = {"/api/delete", "/api/takeover", "/api/topic-rename", "/api/comment-delete"}
 
 
 def handle_api_action(ws: Workspace, path: str, body: dict, actor=None) -> tuple[HTTPStatus, dict]:
@@ -650,6 +716,8 @@ def handle_api_action(ws: Workspace, path: str, body: dict, actor=None) -> tuple
     item = item_by_ref(ws, body.get("ref"))
     if item is None:
         return HTTPStatus.BAD_REQUEST, {"error": "unknown item ref"}
+    if path in {"/api/comment-edit", "/api/comment-delete"}:
+        return item_handler(ws, item, body, by, is_admin=bool(actor and actor.admin))
     return item_handler(ws, item, body, by)
 
 
