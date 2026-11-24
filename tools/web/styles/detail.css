@@ -178,19 +178,18 @@ textarea.mt-detail-title-input:disabled { opacity: 1; cursor: default; }
 .mt-preview > h2 { font-size: 1.15rem; }
 .mt-preview > :first-child { margin-top: 0; }
 /* Next action and processing instructions: labelled sections with in-place editors. */
+/* Each one is a callout attached to the content, so no rule is needed between them. */
 .mt-text-property {
   min-width: 0;
   margin-top: var(--mt-space-4);
-  padding-top: var(--mt-space-3);
-  border-top: 1px solid var(--mt-border);
-}
-.mt-text-property.is-next-action {
   padding: 10px 14px 12px;
   border: 1px solid var(--mt-border);
-  border-left: 3px solid var(--mt-accent);
+  border-left: 3px solid var(--mt-border-strong);
   border-radius: var(--mt-radius-md);
   background: var(--mt-surface-subdued);
 }
+.mt-text-property + .mt-text-property { margin-top: var(--mt-space-2); }
+.mt-text-property.is-next-action { border-left-color: var(--mt-accent); }
 .mt-text-property-header {
   display: flex;
   align-items: center;
@@ -228,12 +227,16 @@ button.mt-button.mt-text-property-edit {
 }
 .mt-text-property-editor .mt-layout-group { justify-content: flex-end; gap: var(--mt-space-2); }
 
-/* Unified Activity section: inline Comments + Time entries tabs. */
+/* Activity (comments and time entries) is a tinted panel that matches Properties,
+   so the card's content visibly ends where the panel begins. Entries are separated
+   by spacing, not rules. */
 .mt-detail-activity {
   min-width: 0;
-  margin-top: 24px;
-  padding-top: var(--mt-space-4);
-  border-top: 1px solid var(--mt-border);
+  margin-top: 28px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-lg);
+  background: var(--mt-surface-subdued);
 }
 .mt-activity-header {
   display: flex;
@@ -241,18 +244,18 @@ button.mt-button.mt-text-property-edit {
   align-items: center;
   justify-content: space-between;
   gap: var(--mt-space-2) var(--mt-space-4);
-  border-bottom: 1px solid var(--mt-border);
-  padding-bottom: 2px;
+  min-height: var(--mt-control-size-compact);
 }
-.mt-activity-header h3 {
-  padding-bottom: 6px;
-}
+/* Tabs use the segmented control look shared with the editor view toggles. */
 .mt-activity-tabs {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  max-width: 100%;
   overflow-x: auto;
-  margin-bottom: -3px;
+  padding: 3px;
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-segment-track);
 }
 button.mt-button.mt-activity-tab {
   position: relative;
@@ -263,9 +266,9 @@ button.mt-button.mt-activity-tab {
   width: auto;
   min-height: var(--mt-control-size-compact);
   margin: 0;
-  padding: 4px 10px 8px;
+  padding: 3px 10px;
   border: 0;
-  border-radius: var(--mt-radius-sm) var(--mt-radius-sm) 0 0;
+  border-radius: calc(var(--mt-radius-md) - 2px);
   background: transparent;
   color: var(--mt-text-muted);
   box-shadow: none;
@@ -275,25 +278,29 @@ button.mt-button.mt-activity-tab {
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
-  transition: color .12s ease, background-color .12s ease;
+  transition: color .12s ease, background-color .12s ease, box-shadow .12s ease;
 }
 button.mt-button.mt-activity-tab:enabled:hover {
   color: var(--mt-text);
-  background: var(--mt-surface-hover);
+  background: color-mix(in srgb, var(--mt-segment-selected) 55%, transparent);
 }
 button.mt-button.mt-activity-tab:focus-visible {
   outline: 2px solid var(--mt-focus);
   outline-offset: -2px;
 }
 button.mt-button.mt-activity-tab[aria-selected="true"] {
+  background: var(--mt-segment-selected);
   color: var(--mt-text);
+  box-shadow: var(--mt-shadow-segment);
 }
-/* Draw the selected underline with border-block-end so it survives forced-colors mode. */
-button.mt-button.mt-activity-tab[aria-selected="true"]::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  border-block-end: 2px solid var(--mt-accent);
+/* Backgrounds vanish in forced-colors mode; an underline keeps the selected tab visible. */
+@media (forced-colors: active) {
+  button.mt-button.mt-activity-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset: auto 6px 1px;
+    border-block-end: 2px solid CanvasText;
+  }
 }
 .mt-activity-tab-count {
   display: inline-flex;
@@ -302,7 +309,7 @@ button.mt-button.mt-activity-tab[aria-selected="true"]::after {
   min-width: 1.25rem;
   padding: 0 5px;
   border-radius: var(--mt-radius-pill);
-  background: var(--mt-surface-quiet);
+  background: var(--mt-segment-selected);
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-xs);
   font-weight: 600;
@@ -328,21 +335,19 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-sm);
 }
-.mt-comment-history { display: grid; }
-/* Comments are a clean inline thread; reset Pico's card styling for <article>. */
+.mt-comment-history { display: grid; gap: var(--mt-space-2); }
+/* Each comment is a light card on the activity panel; reset Pico's <article> styling. */
 .mt-comment-entry {
   min-width: 0;
   margin: 0;
-  padding: 10px 0;
-  border: 0;
-  border-top: 1px solid var(--mt-border);
-  border-radius: 0;
-  background: transparent;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface);
   box-shadow: none;
   overflow-wrap: anywhere;
 }
-.mt-comment-entry:first-child { padding-top: 2px; border-top: 0; }
-.mt-comment-entry:last-child { padding-bottom: 2px; }
+.mt-comment-entry.is-editing { padding: 8px; }
 .mt-comment-meta {
   display: flex;
   flex-wrap: wrap;
@@ -407,7 +412,10 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
 .mt-time-entry-list {
   display: grid;
   margin: 0;
-  padding: 0;
+  padding: 4px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-md);
+  background: var(--mt-surface);
   list-style: none;
 }
 .mt-time-entry {
@@ -416,11 +424,11 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 12px;
-  padding: 8px 2px;
-  border-top: 1px solid var(--mt-border);
+  padding: 7px 10px;
+  border-radius: var(--mt-radius-sm);
   font-size: var(--mt-font-size-sm);
 }
-.mt-time-entry:first-child { padding-top: 2px; border-top: 0; }
+.mt-time-entry:nth-child(even) { background: var(--mt-surface-subdued); }
 .mt-time-entry-when {
   display: flex;
   flex-wrap: wrap;
