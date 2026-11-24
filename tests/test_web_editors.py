@@ -255,5 +255,35 @@ try {
 }
 """)
 
+    def test_comment_mention_controller_and_template_wiring(self) -> None:
+        self.run_node(r"""
+let commentText = 'See @log';
+const cards = [{ref:'@4e91a7c2', title:'Fix login timeout bug', kind:'task', status:'active'}];
+const controller = mentionMethods({
+  setText: (_self, ctx, nextText) => ctx.setText(nextText),
+  mentionIdPrefix: 'mt-comment-mention-',
+});
+const ctx = { getCards: () => cards, setText: next => { commentText = next; }, nextTick: fn => fn() };
+const textarea = {
+  value: commentText,
+  selectionStart: commentText.length,
+  focus(){},
+  setSelectionRange(){},
+};
+controller.updateMention(ctx, textarea);
+assert.equal(controller.mention.open, true);
+assert.equal(controller.mention.items[0].ref, '@4e91a7c2');
+controller.pickMention(ctx, controller.mention.items[0], textarea);
+assert.equal(commentText, 'See @4e91a7c2 ');
+assert.equal(controller.mention.open, false);
+""")
+        import sys
+        sys.path.insert(0, str(ROOT / "tools"))
+        import web_assets
+        html = web_assets.load_template()
+        self.assertIn('id="mt-comment-mention-list"', html)
+        self.assertIn('commentMention.pickMention(commentMentionContext(), item, $refs.commentInput)', html)
+        self.assertNotIn("{comment_mention_menu}", html)
+
 if __name__ == "__main__":
     unittest.main()

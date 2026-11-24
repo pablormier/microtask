@@ -353,6 +353,7 @@ function createDetailController() {
       this.propertyEditor.begin(task, this.taskDefaults);
       this.propertyEditor.offerBackup(task);
       this.commentText = "";
+      if (this.commentMention) this.commentMention.closeMention();
       this.actionMessage = "";
       this.actionError = false;
       this.previewHtml = "";
@@ -444,6 +445,7 @@ function createDetailController() {
       this.propertyEditor.baselineHash = "";
       this.propertyEditor.conflict = false;
       this.commentText = "";
+      if (this.commentMention) this.commentMention.closeMention();
       this.actionMessage = "";
       this.actionError = false;
       this.$nextTick(() => {

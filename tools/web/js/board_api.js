@@ -291,6 +291,7 @@ function createBoardApi() {
       this.apiPost("/api/comment", { ref: this.selected.ref, message }).then(payload => {
         if (payload) {
           this.commentText = "";
+          if (this.commentMention) this.commentMention.closeMention();
           this.notify("Comment added");
         }
       });

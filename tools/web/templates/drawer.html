@@ -1,5 +1,5 @@
       <template x-if="selected">
-        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
+        <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (commentMention?.mention?.open) { commentMention.closeMention(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
@@ -225,13 +225,24 @@
                           <div class="mt-comment-composer-box" :class="{ 'is-drag-over': attachmentDragTarget === 'comment' }">
                             <textarea class="mt-comment-input" x-ref="commentInput" x-model="commentText" :disabled="busy"
                                       rows="2"
+                                      @input="commentMention.updateMention(commentMentionContext(), $el)"
                                       @paste="handleAttachmentPaste('comment', $event, $el)"
                                       @dragover="handleAttachmentDragOver('comment', $event)"
                                       @dragleave="handleAttachmentDragLeave('comment')"
                                       @drop="handleAttachmentDrop('comment', $event, $el)"
+                                      @click="commentMention.updateMention(commentMentionContext(), $el)"
+                                      @keydown="commentMention.handleMentionKeydown(commentMentionContext(), $event, $el)"
+                                      @keyup="commentMention.handleMentionKeyup(commentMentionContext(), $event, $el)"
+                                      @scroll="commentMention.repositionMention($el)"
+                                      @blur="commentMention.closeMention()"
+                                      :aria-expanded="String(Boolean(commentMention.mention?.open && commentMention.mention?.items?.length))"
+                                      aria-controls="mt-comment-mention-list"
+                                      aria-autocomplete="list"
+                                      :aria-activedescendant="(commentMention.mention?.open && commentMention.mention?.items?.length) ? ('mt-comment-mention-' + commentMention.mention.activeIndex) : null"
                                       @keydown.meta.enter.prevent="if (!busy && !attachmentUploading && commentText.trim()) commentSelected()"
                                       @keydown.ctrl.enter.prevent="if (!busy && !attachmentUploading && commentText.trim()) commentSelected()"
                                       aria-label="Comment text" placeholder="Write a comment…"></textarea>
+                            {comment_mention_menu}
                             <div class="mt-comment-composer-bar">
                               <input type="file" multiple class="mt-attach-input" x-ref="commentAttachInput"
                                      @change="handleAttachmentPick('comment', $event, $refs.commentInput)"

@@ -100,6 +100,9 @@ function taskBoard() {
     moveDestination: "",
     contentEditor: createContentEditor(),
     commentText: "",
+    commentMention: typeof mentionMethods === "function"
+      ? mentionMethods({ setText: (_self, ctx, nextText) => ctx.setText(nextText), mentionIdPrefix: "mt-comment-mention-" })
+      : null,
     attachmentDragTarget: "",
     _attachmentUploadCount: 0,
     attachmentUploading: false,
@@ -457,6 +460,14 @@ function taskBoard() {
 
     ...createBoardViews(),
     ...createBoardApi(),
+
+    commentMentionContext() {
+      return {
+        getCards: () => this.tasks,
+        setText: next => { this.commentText = next; },
+        nextTick: callback => this.$nextTick(callback),
+      };
+    },
 
     cardMetadataConfig() {
       return {

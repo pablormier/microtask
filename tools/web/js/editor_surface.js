@@ -21,24 +21,11 @@ function formatZenMetaSummary(opts, instructions) {
   return parts.join(" · ");
 }
 
-function zenWorkspaceMethods(config = {}) {
-  const getText = config.getText;
+function mentionMethods(config = {}) {
   const setText = config.setText;
   const mentionIdPrefix = config.mentionIdPrefix || "mt-mention-";
-  const getPreviewCard = config.getPreviewCard || (() => ({}));
-  const canEnterZen = config.canEnterZen || (() => true);
-  const onBeforeToggleZen = config.onBeforeToggleZen;
-
-  const focusEditor = (ctx) => {
-    if (ctx && typeof ctx.focusInput === "function") ctx.focusInput();
-  };
 
   return {
-    zen: false,
-    zenView: "write",
-    zenMetaOpen: false,
-    previewHtml: "",
-    _previewTimer: null,
     mention: typeof createMentionAutocomplete === "function" ? createMentionAutocomplete() : null,
 
     updateMention(ctx, textarea) {
@@ -87,6 +74,26 @@ function zenWorkspaceMethods(config = {}) {
     repositionMention(textarea) {
       if (this.mention) this.mention.reposition(textarea);
     },
+  };
+}
+
+function zenWorkspaceMethods(config = {}) {
+  const getText = config.getText;
+  const getPreviewCard = config.getPreviewCard || (() => ({}));
+  const canEnterZen = config.canEnterZen || (() => true);
+  const onBeforeToggleZen = config.onBeforeToggleZen;
+
+  const focusEditor = (ctx) => {
+    if (ctx && typeof ctx.focusInput === "function") ctx.focusInput();
+  };
+
+  return {
+    zen: false,
+    zenView: "write",
+    zenMetaOpen: false,
+    previewHtml: "",
+    _previewTimer: null,
+    ...mentionMethods(config),
 
     refreshPreview(ctx) {
       const text = getText(this);
