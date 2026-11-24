@@ -393,12 +393,12 @@ function createBoardApi() {
 
     archiveSelected() {
       if (!this.selected || this.busy) return;
-      this.apiPost("/api/archive", { ref: this.selected.ref, value: !this.selected.archived });
+      this.apiPost("/api/archive", { ref: this.selected.ref, archived: !this.selected.archived });
     },
 
     hideSelected() {
       if (!this.selected || this.busy) return;
-      this.apiPost("/api/hidden", { ref: this.selected.ref, value: !this.selected.hidden });
+      this.apiPost("/api/hidden", { ref: this.selected.ref, hidden: !this.selected.hidden });
     },
 
     startTimer(task) {

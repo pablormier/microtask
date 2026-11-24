@@ -914,9 +914,9 @@ view_labels:
             'app.tasks.push({...data.find(t => t.hidden), id: "hidden-followup", status: "waiting"});\n'
             'const followups = ids(app.followupTasks());\n'
             'app.selected = data.find(t => t.hidden); \n'
-            'let request; app.apiPost = (path, payload) => { request = {path, payload}; };\n'
-            'app.hideSelected(); app.clearFilters();\n'
-            'console.log(JSON.stringify({normal, included, followups, request, reset: app.showHidden}));\n'
+            'let requests = []; app.apiPost = (path, payload) => { requests.push({path, payload}); };\n'
+            'app.hideSelected(); app.archiveSelected(); app.clearFilters();\n'
+            'console.log(JSON.stringify({normal, included, followups, requests, reset: app.showHidden}));\n'
             '`);\n'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True, check=False)
@@ -933,8 +933,10 @@ view_labels:
         self.assertEqual(payload["included"]["notes"], [self.note.stem])
         self.assertNotEqual(payload["included"]["focus"], self.tasks[1].stem)
         self.assertEqual(payload["followups"], [])
-        self.assertEqual(payload["request"]["path"], "/api/hidden")
-        self.assertIs(payload["request"]["payload"]["value"], False)
+        self.assertEqual(payload["requests"][0]["path"], "/api/hidden")
+        self.assertIs(payload["requests"][0]["payload"]["hidden"], False)
+        self.assertEqual(payload["requests"][1]["path"], "/api/archive")
+        self.assertIs(payload["requests"][1]["payload"]["archived"], True)
         self.assertIs(payload["reset"], False)
 
     def test_running_timer_list_badge_and_menu_labels(self) -> None:
