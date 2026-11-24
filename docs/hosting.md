@@ -380,13 +380,6 @@ HTTP Basic Auth or a VPN), the menu shows the signed-in identity without a sign-
 - **Claims and timers.** Dashboard actions run as the signed-in person. Changing
   the properties or body of a task another person has claimed, and starting a
   timer on it, are refused with 409.
-- **Tasks in progress.** The shared workspace sets `rules.doing_limit_scope:
-  per_claimant`. Then `rules.max_doing_tasks` is the number each person may
-  have in `doing`, and not the number for the whole workspace. Moving a task
-  to `doing` and taking over a claim are both checked, by the CLI, the
-  dashboard and `mt validate` alike. Tasks in `doing` that nobody has claimed
-  count together as one more group with the same limit. The default,
-  `workspace`, counts every task in `doing` together, as before.
 
 ### Administrators
 
@@ -476,10 +469,7 @@ sudo /opt/microtask/current/deploy/add-shared.sh --admin alice team team.mt.exam
 `add-shared.sh` takes a workspace name, a public host name and the allowed email
 addresses (more with `--emails-file FILE`). It creates `/srv/mt/team` with
 `mt init --data` and the system account `mt-team` (no login shell, home
-`/srv/mt/team`) that owns it, sets `rules.doing_limit_scope: per_claimant` with the
-indentation of the other entries under `rules:`, checks with `mt validate` and
-`mt settings --json` that the workspace accepts it, and commits that,
-writes `/etc/mt/team.env` (port, host, administrators and the path of the
+`/srv/mt/team`) that owns it, writes `/etc/mt/team.env` (port, host, administrators and the path of the
 secret) and a new random secret in `/etc/mt/team.secret` (mode 600, owned by
 `mt-team`), writes
 `/etc/caddy/mt-users/team.caddy`, adds the addresses to the oauth2-proxy emails

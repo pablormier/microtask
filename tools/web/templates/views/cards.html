@@ -58,6 +58,8 @@
                         :title="'Show ' + crumb.path" @click="filters.topic = [crumb.path]" x-text="crumb.label"></button>
               </span>
             </template>
+            <button type="button" class="mt-button mt-button-quiet mt-topic-crumb-mode" x-show="noSubtopics"
+                    title="Excluding subtopics; click to include subtopics" @click="toggleNoSubtopics()">no subtopics</button>
             <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-crumb-clear" aria-label="Clear topic filter" title="Clear topic filter" @click="clearFilter('topic')">
               <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 7 10 10M7 17 17 7"/></svg>
             </button>
@@ -80,35 +82,47 @@
                 </button>
               </div>
             </div>
-            <button type="button" class="mt-button mt-button-quiet mt-topic-tree-all" :class="{ 'is-selected': !filters.topic.length }"
-                    :aria-current="!filters.topic.length ? 'true' : null" @click="clearFilter('topic')">
-              <span>All topics</span>
-            </button>
-            <p class="mt-topic-tree-empty" x-show="!topicTree.length">No topics yet.</p>
-            <ul class="mt-topic-tree-list" aria-label="Topic folders" x-show="topicTree.length">
-              <template x-for="node in visibleTopicNodes()" :key="node.path">
-                <li class="mt-topic-tree-item">
-                  <div class="mt-topic-tree-row" :class="{ 'is-selected': filterHas('topic', node.path) }"
-                       :style="{ paddingLeft: (4 + node.depth * 14) + 'px' }">
-                    <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-tree-disclosure"
-                            x-show="node.hasChildren"
-                            :class="{ 'is-expanded': node.expanded }"
-                            :aria-expanded="String(node.expanded)"
-                            :aria-label="(node.expanded ? 'Collapse ' : 'Expand ') + node.name"
-                            @click.stop="toggleTopicExpanded(node.path)">
-                      <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
-                    </button>
-                    <span class="mt-topic-tree-spacer" x-show="!node.hasChildren" aria-hidden="true"></span>
-                    <button type="button" class="mt-button mt-button-quiet mt-topic-tree-label"
-                            :aria-current="filterHas('topic', node.path) ? 'true' : null"
-                            :title="node.path" @click="selectTopicNode(node.path, $event)">
-                      <span class="mt-topic-tree-name" x-text="node.name"></span>
-                      <span class="mt-picker-count" x-show="node.count" x-text="node.count" :title="node.count === 1 ? '1 card' : node.count + ' cards'"></span>
-                    </button>
-                  </div>
-                </li>
-              </template>
-            </ul>
+            <div class="mt-topic-tree-body">
+              <button type="button" class="mt-button mt-button-quiet mt-topic-tree-all" :class="{ 'is-selected': !filters.topic.length }"
+                      :aria-current="!filters.topic.length ? 'true' : null" @click="clearFilter('topic')">
+                <span>All topics</span>
+              </button>
+              <p class="mt-topic-tree-empty" x-show="!topicTree.length">No topics yet.</p>
+              <ul class="mt-topic-tree-list" aria-label="Topic folders" x-show="topicTree.length">
+                <template x-for="node in visibleTopicNodes()" :key="node.path">
+                  <li class="mt-topic-tree-item">
+                    <div class="mt-topic-tree-row" :class="{ 'is-selected': filterHas('topic', node.path), 'is-empty-folder': noSubtopics && node.hasChildren && !node.own }"
+                         :style="{ paddingLeft: (4 + node.depth * 14) + 'px' }">
+                      <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-topic-tree-disclosure"
+                              x-show="node.hasChildren"
+                              :class="{ 'is-expanded': node.expanded }"
+                              :aria-expanded="String(node.expanded)"
+                              :aria-label="(node.expanded ? 'Collapse ' : 'Expand ') + node.name"
+                              @click.stop="toggleTopicExpanded(node.path)">
+                        <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+                      </button>
+                      <span class="mt-topic-tree-spacer" x-show="!node.hasChildren" aria-hidden="true"></span>
+                      <button type="button" class="mt-button mt-button-quiet mt-topic-tree-label"
+                              :aria-current="filterHas('topic', node.path) ? 'true' : null"
+                              :title="node.path" @click="selectTopicNode(node.path, $event)">
+                        <span class="mt-topic-tree-name" x-text="node.name"></span>
+                        <span class="mt-picker-count"
+                              x-show="noSubtopics ? node.own : node.count"
+                              x-text="noSubtopics ? node.own : node.count"
+                              :title="noSubtopics ? (node.own === 1 ? '1 direct card' : node.own + ' direct cards') : (node.count === 1 ? '1 card' : node.count + ' cards')"></span>
+                      </button>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+            <div class="mt-topic-tree-footer">
+              <label class="mt-checkbox-filter mt-topic-tree-subtopics"
+                     :title="noSubtopics ? 'Showing only cards directly in the selected topic' : 'Showing cards in the selected topic and its subtopics'">
+                <input type="checkbox" :checked="!noSubtopics" @change="setNoSubtopics(!$event.target.checked)">
+                <span>Include subtopics</span>
+              </label>
+            </div>
           </aside>
           </template>
           <nav class="mt-column-pager" aria-label="Board columns" x-show="settings[mode].group !== 'none' && layout !== 'horizontal'">

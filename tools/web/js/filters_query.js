@@ -121,9 +121,10 @@ function createFilterController() {
         // Topics show their full path; other values show their option label.
         const labels = new Map(names.length && key !== "topic" ? this.filterChoices(key).map(row => [row.name, row.label]) : []);
         const shown = names.map(name => labels.get(name) || name);
+        const directSuffix = key === "topic" && names.length && this.noSubtopics ? " (no subtopics)" : "";
         return {
           key, label, search: SEARCHABLE_FILTERS.includes(key), multi: this.pickerMulti(key), active: names.length > 0,
-          summary: !names.length ? label : label + (names.length > 2 ? " · " + names.length : ": " + shown.join(", ")),
+          summary: !names.length ? label : label + (names.length > 2 ? " · " + names.length : ": " + shown.join(", ")) + directSuffix,
           note: key === "status" && statusIgnored ? "Status does not filter " + (this.mode === "notes" ? "notes" : "the archive") : ""
         };
       });
@@ -198,14 +199,23 @@ function createFilterController() {
       const extra = {};
       this.showHidden = false;
       this.needsReviewOnly = false;
+      let hasNoSubtopicsParam = false;
       for (const name of new Set(params.keys())) {
         if (PAGE_PARAMS.includes(name)) continue;
         const values = params.getAll(name).map(value => (name === "topic" ? topicSegments(value).join("/") : value).trim()).filter(Boolean);
         if (name === "text") filters.text = values[values.length - 1] || "";
         else if (FILTER_LISTS.includes(name)) filters[name] = values;
+        else if (name === "no_subtopics") {
+          hasNoSubtopicsParam = true;
+          const last = (values[values.length - 1] || "").toLowerCase();
+          this.noSubtopics = last === "true" || last === "1";
+        }
         else if (name === "needs_review" && values[values.length - 1] === "true") this.needsReviewOnly = true;
         else if (name === "hidden" && values[values.length - 1] === "include") this.showHidden = true;
         else if (values.length) extra[name] = values;
+      }
+      if (!hasNoSubtopicsParam && filters.topic.length > 0) {
+        this.noSubtopics = false;
       }
       // One Updated option when the address holds exactly its range; any other date range stays as is.
       const range = Object.keys(extra).filter(name => name.startsWith("updated_")).sort().join();
@@ -240,6 +250,7 @@ function createFilterController() {
     collectionQuery() {
       const query = { ...this.extraQuery };
       for (const key of FILTER_LISTS) if (this.filterValues(key).length) query[key] = this.filterValues(key);
+      if (this.noSubtopics && this.filterValues("topic").length) query.no_subtopics = "true";
       if (this.filters.text.trim()) query.text = this.filters.text.trim();
       Object.assign(query, UPDATED_RANGES[this.filters.updated]);
       if (this.showHidden) query.hidden = "include";

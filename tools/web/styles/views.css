@@ -286,6 +286,24 @@ button.mt-topic-crumb {
 button.mt-topic-crumb:hover { background: var(--mt-surface-hover); color: var(--mt-accent); }
 button.mt-topic-crumb:focus-visible { outline: 2px solid var(--mt-focus); outline-offset: 1px; }
 button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
+button.mt-topic-crumb-mode {
+  width: auto;
+  min-height: 0;
+  margin: 0 0 0 4px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--mt-accent) 30%, var(--mt-border));
+  border-radius: var(--mt-radius-pill);
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent);
+  font-size: var(--mt-font-size-xs);
+  font-weight: 600;
+  line-height: 1.35;
+}
+button.mt-button.mt-button-quiet.mt-topic-crumb-mode:enabled:hover {
+  border-color: var(--mt-accent);
+  background: var(--mt-accent-soft);
+  color: var(--mt-accent-hover);
+}
 .mt-topic-crumb-clear { margin-left: 2px; }
 .mt-view-control {
   display: inline-flex;
@@ -321,16 +339,25 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
   min-width: 13.5rem;
   max-width: 17.5rem;
   margin: 0 0 16px 18px;
-  padding: 10px 8px;
+  padding: 10px 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   border-radius: var(--mt-radius-lg);
+  overflow: hidden;
+}
+.mt-topic-tree-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 .mt-topic-tree-header {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -343,6 +370,29 @@ button.mt-topic-crumb[aria-current="location"] { font-weight: 600; }
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+.mt-topic-tree-footer {
+  flex: none;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--mt-border);
+}
+.mt-checkbox-filter.mt-topic-tree-subtopics {
+  width: 100%;
+  min-height: 0;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--mt-radius-sm);
+  background: transparent;
+  color: var(--mt-text-muted);
+  font-weight: 500;
+}
+.mt-checkbox-filter.mt-topic-tree-subtopics:hover {
+  background: var(--mt-surface-hover);
+  color: var(--mt-text);
+}
+.mt-topic-tree-row.is-empty-folder:not(.is-selected) .mt-topic-tree-label {
+  color: var(--mt-text-muted);
 }
 .mt-topic-tree-header h2 {
   margin: 0;

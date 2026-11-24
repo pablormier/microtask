@@ -13,8 +13,6 @@ from vendor import yaml
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 
-# What rules.max_doing_tasks counts: all doing tasks together, or the doing tasks of each claimant.
-DOING_LIMIT_SCOPES = ("workspace", "per_claimant")
 CORE_STATUSES = ("inbox", "active", "doing", "waiting", "done")
 _STATUS_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
@@ -161,8 +159,6 @@ def load_policy(root: Path) -> dict:
     if not valid_max_attachment:
         raise ValueError("settings rules.max_attachment_mb must be a positive number")
     rules.setdefault("max_attachment_mb", 10)
-    if rules.get("doing_limit_scope", "workspace") not in DOING_LIMIT_SCOPES:
-        raise ValueError("settings rules.doing_limit_scope must be workspace or per_claimant")
     done_window = rules.get("done_window", "2w")
     if not isinstance(done_window, str) or card_format.relative_date(done_window, date.today()) is None:
         raise ValueError("settings rules.done_window must be an age like 2w, 30d, or 1m")

@@ -197,33 +197,30 @@ const setup = app => {
   app.statuses = ['inbox', 'active', 'doing', 'done'];
   app.priorityOrder = ['urgent', 'high', 'none'];
   app.dueKinds = ['deadline', 'target'];
-  app.maxDoingTasks = 1;
   return app;
 };
 const card = (id, extra = {}) => ({id, kind: 'task', status: 'active', priority: 'none', project: null, tags: [], title: id, ...extra});
 const summary = groups => groups.map(g => [g.key, g.items.map(i => i.id)]);
 """
 
-    def test_status_groups_keep_policy_order_empty_groups_wip_label(self) -> None:
+    def test_status_groups_keep_policy_order_and_empty_groups(self) -> None:
         result = self.run_node(self.GROUP_SETUP + r"""
 const app = setup(taskBoard());
 app.tasks = [card('a'), card('d1', {status: 'doing'}), card('x1', {status: 'done'}), card('x2', {status: 'done'}),
   card('x3', {status: 'done'}), card('n', {kind: 'note', status: ''})];
-app.doingTotal = 1;
 const groups = app.groupCards(app.tasks, 'status', {workflow: true});
 const plain = app.groupCards(app.tasks, 'status');
 console.log(JSON.stringify({keys: groups.map(g => g.key), labels: groups.map(g => g.label), counts: groups.map(g => g.countLabel),
-  done: groups[3].items.map(i => i.id), empty: groups[0].empty, over: groups[2].className['is-over-limit'],
+  done: groups[3].items.map(i => i.id), empty: groups[0].empty,
   quiet: groups[3].className['is-quiet'], plainKeys: plain.map(g => g.key), plainLabel: plain[1].label,
   plainDone: plain.find(g => g.key === 'done').items.length}));
 """)
         self.assertEqual(result["keys"], ["inbox", "active", "doing", "done", ""])
-        self.assertEqual(result["labels"][2], "doing (1/1 max)")
+        self.assertEqual(result["labels"][2], "doing")
         self.assertEqual(result["labels"][4], "Ungrouped")
         self.assertEqual(result["counts"], ["0", "1", "1", "3", "1"])
         self.assertEqual(result["done"], ["x1", "x2", "x3"])
         self.assertEqual(result["empty"], "No tasks.")
-        self.assertTrue(result["over"])
         self.assertTrue(result["quiet"])
         self.assertEqual(result["plainKeys"], ["active", "doing", "done", ""])
         self.assertEqual(result["plainDone"], 3)
@@ -281,7 +278,7 @@ console.log(JSON.stringify({tasks, notes, archive, all, noteGroup: app.settings.
         self.assertEqual(result["noteGroup"], "none")
         self.assertIn("status", result["taskOptions"])
         self.assertIn("type", result["taskOptions"])
-        self.assertEqual(result["keys"], ["group", "group"])
+        self.assertEqual(result["keys"], ["group", "sort", "group", "sort"])
 
     def test_due_kind_labels_are_plain_and_unassigned_is_priority_only(self) -> None:
         result = self.run_node(self.GROUP_SETUP + r"""
@@ -309,15 +306,15 @@ const blocked = taskBoard(); blocked.loadSettings(); blocked.saveSettings();
 console.log(JSON.stringify({defaults, reloaded: reloaded.settings, sanitized: sanitized.settings, broken: broken.settings, blocked: blocked.settings}));
 """)
         self.assertEqual(result["defaults"], {
-            "tasks": {"group": "status"}, "notes": {"group": "none"},
-            "archive": {"kind": "task", "group": "none"}, "deadlines": {"group": "due_kind"}})
-        self.assertEqual(result["reloaded"]["archive"], {"kind": "all", "group": "project"})
-        self.assertEqual(result["reloaded"]["notes"], {"group": "tag"})
+            "tasks": {"group": "status", "sort": "default"}, "notes": {"group": "none", "sort": "default"},
+            "archive": {"kind": "task", "group": "none", "sort": "default"}, "deadlines": {"group": "due_kind"}})
+        self.assertEqual(result["reloaded"]["archive"], {"kind": "all", "group": "project", "sort": "default"})
+        self.assertEqual(result["reloaded"]["notes"], {"group": "tag", "sort": "default"})
         self.assertEqual(result["reloaded"]["tasks"], result["defaults"]["tasks"])
         self.assertEqual(result["reloaded"]["deadlines"], {"group": "priority"})
         # A stale kind on Tasks or Notes is ignored; an invalid group falls back to the tab default.
-        self.assertEqual(result["sanitized"]["tasks"], {"group": "status"})
-        self.assertEqual(result["sanitized"]["notes"], {"group": "none"})
+        self.assertEqual(result["sanitized"]["tasks"], {"group": "status", "sort": "default"})
+        self.assertEqual(result["sanitized"]["notes"], {"group": "none", "sort": "default"})
         self.assertEqual(result["sanitized"]["archive"], result["defaults"]["archive"])
         self.assertEqual(result["broken"], result["defaults"])
         self.assertEqual(result["blocked"], result["defaults"])

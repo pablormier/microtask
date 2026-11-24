@@ -61,7 +61,6 @@
   --mt-shadow-dialog: 0 24px 56px -12px rgba(16, 24, 40, .28), 0 0 0 1px rgba(16, 24, 40, .04);
   --mt-shadow-hover-strong: 0 4px 12px -2px rgba(16, 24, 40, .1), 0 2px 4px -2px rgba(16, 24, 40, .06);
   --mt-shadow-logo: 0 1px 2px rgba(37, 99, 235, .3);
-  --mt-shadow-limit: inset 0 0 0 1px var(--mt-danger-border);
   --mt-column-surface: #eef0f3;
   --mt-shadow-segment: 0 1px 2px rgba(16, 24, 40, .1), 0 0 0 1px rgba(16, 24, 40, .04);
   --mt-priority-urgent: #dc2626;

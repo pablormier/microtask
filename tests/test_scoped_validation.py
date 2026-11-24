@@ -93,15 +93,6 @@ class ScopedValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate time session id"):
             self.validate_changes({self.path: with_entry(self.before.decode()).encode()})
 
-    def test_doing_limit_checks_transitions_but_allows_repair(self):
-        for index in range(5):
-            self.root.joinpath(f"cards/other{index}.md").write_text(task_file(f"other{index}", "", "doing"))
-        doing = self.before.replace(b"status: inbox", b"status: doing")
-        with self.assertRaisesRegex(ValueError, "doing task limit exceeded"):
-            self.validate_changes({self.path: doing})
-        self.root.joinpath(self.path).write_bytes(doing)
-        self.validate_changes({self.path: self.before})
-
     def test_batch_and_delete_overlap_validate_replacement(self):
         capture = "12345678-1234-4234-8234-123456789abc"
         first = self.before.replace(b"id: target", f"id: target\ncapture_id: {capture}".encode())
@@ -244,7 +235,8 @@ class ScopedValidationTests(unittest.TestCase):
             operations.op_move(ws, ref, "doing", sync=False)
 
         self.assertTrue(unrelated.isdisjoint(parsed_ids))
-        self.assertEqual(set(parsed_ids), {"target", existing_doing})
+        self.assertNotIn(existing_doing, parsed_ids)
+        self.assertEqual(set(parsed_ids), {"target"})
 
     def test_timer_start_and_stop_skip_parsing_unrelated_cards(self):
         ws = tasklib.Workspace.at(self.root)

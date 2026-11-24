@@ -387,9 +387,9 @@ class AddUserScriptTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         workspace = self.root / "srv" / "mt" / "team"
-        self.assertIn("doing_limit_scope: per_claimant", (workspace / "settings.yaml").read_text())
+        self.assertTrue((workspace / "settings.yaml").is_file())
 
-    def test_shared_workspace_counts_doing_tasks_per_person_and_trusts_only_the_proxy(self) -> None:
+    def test_shared_workspace_creation_and_trusts_only_the_proxy(self) -> None:
         result = self.add_shared("--admin", "alice", "team", "team.mt.example.com",
                               "Alice@Example.com", "bob.smith+x@example.com")
         self.assertNotEqual(result.returncode, 0)  # a plus sign cannot be part of a user name
@@ -399,10 +399,10 @@ class AddUserScriptTests(unittest.TestCase):
                               "Alice@Example.com", "bob@example.com", "carol@example.com")
         self.assertEqual(result.returncode, 0, result.stderr)
         workspace = self.root / "srv" / "mt" / "team"
-        self.assertIn("doing_limit_scope: per_claimant", (workspace / "settings.yaml").read_text())
+        self.assertTrue((workspace / "settings.yaml").is_file())
         log = subprocess.run(["git", "-C", str(workspace), "log", "--oneline"],
                              check=True, capture_output=True, text=True).stdout.splitlines()
-        self.assertEqual(len(log), 2)
+        self.assertEqual(len(log), 1)
         status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain"],
                                 check=True, capture_output=True, text=True).stdout
         self.assertEqual(status, "")
@@ -764,102 +764,6 @@ class AddUserScriptTests(unittest.TestCase):
                                  "alice@example.com", "bob@example.com", "carol@example.com")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("MT_ADMINS=alice,bob,carol\n", (self.root / "etc/mt/team.env").read_text())
-
-    def create_with_settings(self, rules_text: str, edit: str = "", intercept: str = "") -> subprocess.CompletedProcess[str]:
-        """Create the team with an app whose `mt init` leaves the given line in place of max_doing_tasks.
-
-        `edit` is Python run on the settings text `t` afterwards; `intercept` is Bash run before the real app."""
-        fake = self.root.parent / f"fake-app-{self.root.name}"
-        shutil.rmtree(fake, ignore_errors=True)
-        fake.mkdir()
-        wrapper = fake / "mt"
-        wrapper.write_text(
-            "#!/usr/bin/env bash\nset -e\n"
-            f"{intercept}\n"
-            f'"{self.app}/mt" "$@"\n'
-            'dir=""; while [[ $# -gt 0 ]]; do [[ "$1" == --data ]] && dir="$2"; shift; done\n'
-            '[[ -n "$dir" ]] || exit 0\n'
-            f'python3 - "$dir/settings.yaml" <<\'PY\'\nimport sys, pathlib\n'
-            f'p = pathlib.Path(sys.argv[1]); t = p.read_text()\n'
-            f't = t.replace("  max_doing_tasks: 5\\n", {rules_text!r}, 1)\n{edit}\np.write_text(t)\nPY\n'
-            'git -C "$dir" commit -qam "Adjust settings" || true\n')
-        wrapper.chmod(0o755)
-        (fake / "tools").symlink_to(self.app / "tools")
-        env = {key: value for key, value in os.environ.items() if not key.startswith("MT_")}
-        env.update(HOME=str(self.root), GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@localhost",
-                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@localhost")
-        return subprocess.run(
-            [BASH, str(SHARED_SCRIPT), "--root", str(self.root), "--no-systemctl", "--app", str(fake),
-             "team", "team.mt.example.com", "alice@example.com"],
-            check=False, capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
-
-    def test_settings_that_already_name_the_doing_limit_scope_end_up_per_claimant(self) -> None:
-        for label, rules_text in (
-            ("missing", "  max_doing_tasks: 5\n"),
-            ("workspace", "  max_doing_tasks: 5\n  doing_limit_scope: workspace\n"),
-            ("already", "  max_doing_tasks: 5\n  doing_limit_scope: per_claimant\n"),
-            ("commented", "  max_doing_tasks: 5\n  # doing_limit_scope: workspace\n"),
-        ):
-            with self.subTest(label):
-                shutil.rmtree(self.root)
-                self.root.mkdir()
-                result = self.create_with_settings(rules_text)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                workspace = self.root / "srv/mt/team"
-                text = (workspace / "settings.yaml").read_text()
-                active = [line for line in text.splitlines() if line.startswith("  doing_limit_scope:")]
-                self.assertEqual(active, ["  doing_limit_scope: per_claimant"])
-                self.assertEqual(text.count("per_claimant"), 1)
-                status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain"],
-                                        check=True, capture_output=True, text=True).stdout
-                self.assertEqual(status, "")
-                log = subprocess.run(["git", "-C", str(workspace), "log", "--format=%s"],
-                                     check=True, capture_output=True, text=True).stdout.splitlines()
-                self.assertEqual(log.count("Count tasks in progress per person"), 0 if label == "already" else 1)
-
-    def test_settings_with_four_space_indentation_end_up_valid_and_per_claimant(self) -> None:
-        edit = ("import re\n"
-                "head, rest = t.split('\\nrules:\\n', 1)\n"
-                "body, tail = rest.split('\\n\\nlint:', 1)\n"
-                "t = head + '\\nrules:\\n' + re.sub(r'(?m)^  ', '    ', body) + '\\n\\nlint:' + tail")
-        for label, rules_text in (("missing", "  max_doing_tasks: 5\n"),
-                                  ("workspace", "  max_doing_tasks: 5\n  doing_limit_scope: workspace\n")):
-            with self.subTest(label):
-                shutil.rmtree(self.root)
-                self.root.mkdir()
-                result = self.create_with_settings(rules_text, edit=edit)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                workspace = self.root / "srv/mt/team"
-                text = (workspace / "settings.yaml").read_text()
-                self.assertIn("\n    doing_limit_scope: per_claimant\n", text)
-                self.assertEqual(text.count("doing_limit_scope"), 1)
-                settings = subprocess.run([str(self.app / "mt"), "-R", str(workspace), "settings", "--json"],
-                                          check=True, capture_output=True, text=True, env={**os.environ, "MT_WORKSPACE": ""})
-                self.assertEqual(json.loads(settings.stdout)["rules"]["doing_limit_scope"], "per_claimant")
-                valid = subprocess.run([str(self.app / "mt"), "-R", str(workspace), "validate"],
-                                       check=False, capture_output=True, text=True)
-                self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
-
-    def test_a_workspace_that_does_not_validate_after_the_settings_change_is_not_kept(self) -> None:
-        intercepts = {
-            "invalid": '[[ " $* " == *" validate "* ]] && { echo "settings.yaml is broken" >&2; exit 1; }',
-            "not read back": '[[ " $* " == *" settings "* ]] && { echo \'{"rules": {}}\'; exit 0; }',
-        }
-        # Without a rules block the script adds one, and the app then refuses it: max_doing_tasks is required.
-        no_rules = "import re\nt = re.sub(r'(?ms)^rules:.*?\\n\\n(?=lint:)', '', t)"
-        for label, intercept, edit in (("invalid", intercepts["invalid"], ""),
-                                       ("not read back", intercepts["not read back"], ""),
-                                       ("no rules block", "", no_rules)):
-            with self.subTest(label):
-                shutil.rmtree(self.root)
-                self.root.mkdir()
-                result = self.create_with_settings("  max_doing_tasks: 5\n", edit=edit, intercept=intercept)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("doing_limit_scope", result.stderr)
-                self.assertIn("removing what this run created", result.stderr)
-                for path in ("srv/mt/team", "etc/mt/team.env", "etc/mt/team.secret", "etc/mt/team.members",
-                             "etc/caddy/mt-users/team.caddy"):
-                    self.assertFalse((self.root / path).exists(), path)
 
     def test_a_user_map_with_windows_line_endings_does_not_block_other_changes(self) -> None:
         self.create_team()

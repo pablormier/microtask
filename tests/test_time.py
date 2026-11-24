@@ -187,11 +187,6 @@ class TimeTrackingTests(unittest.TestCase):
             self.assertEqual(result, 1)
         for path, raw in before.items():
             self.assertEqual(path.read_bytes(), raw)
-        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
-        rejected = self.run_mt("time", "start", second.stem)
-        self.assertNotEqual(rejected.returncode, 0)
-        for path, raw in before.items():
-            self.assertEqual(path.read_bytes(), raw)
 
     def test_bulk_lifecycle_edit_saves_time_and_releases_claim(self) -> None:
         task = self.add_task("Bulk timer lifecycle")
@@ -654,7 +649,6 @@ class TimeTrackingTests(unittest.TestCase):
 
 
     def test_concurrent_starts_keep_one_running_timer_per_task(self) -> None:
-        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 10\n")
         titles = [f"Concurrent start {index}" for index in range(8)]
         tasks = {title: self.add_task(title) for title in titles}
         barrier = threading.Barrier(len(titles))

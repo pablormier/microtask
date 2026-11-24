@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 
-from workspace import LOCAL_SETTINGS_FILE, is_data_workspace, seed_demo_workspace
+from workspace import is_data_workspace, seed_demo_workspace
 
 
 def seed(destination: Path) -> None:
@@ -18,8 +18,6 @@ def seed(destination: Path) -> None:
     with tempfile.TemporaryDirectory(prefix=".demo-", dir=destination.parent) as staging:
         root = Path(staging) / "workspace"
         seed_demo_workspace(root)
-        with (root / LOCAL_SETTINGS_FILE).open("a", encoding="utf-8") as settings:
-            settings.write("  doing_limit_scope: per_claimant\n")
         if shutil.which("git") is not None:
             subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
             subprocess.run(["git", "add", "--all"], cwd=root, check=True)

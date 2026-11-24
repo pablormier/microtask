@@ -70,8 +70,6 @@ button.mt-button.mt-column-order-reset { min-width: 22px; min-height: 22px; widt
    (an explicit min-height, as on notes, would otherwise let them be squeezed). */
 .mt-column-cards > .mt-card { flex-shrink: 0; }
 .mt-column.is-quiet { background: color-mix(in srgb, var(--mt-column-surface) 55%, var(--mt-surface-subdued)); }
-.mt-column.is-over-limit { box-shadow: var(--mt-shadow-limit); }
-.mt-column.is-over-limit .mt-count { background: var(--mt-danger-soft); color: var(--mt-danger); }
 .mt-card {
   /* Keep absolutely positioned children (e.g. .mt-sr-only) inside the card so
      they never extend a column's or the page's scroll area. */

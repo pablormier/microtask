@@ -285,11 +285,10 @@ class DraftCliTests(unittest.TestCase):
         self.assertFalse(any("Invalid type" in path.read_text(encoding="utf-8") for path in card_files(self.root, "task")))
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
-    def test_task_capture_claims_explicit_and_default_doing_and_rolls_back_at_limit(self) -> None:
+    def test_task_capture_claims_explicit_and_default_doing(self) -> None:
         policy_path = self.root / "settings.yaml"
         policy_text = policy_path.read_text(encoding="utf-8")
         policy_text = policy_text.replace("default_status: inbox", "default_status: doing")
-        policy_text = policy_text.replace("max_doing_tasks: 5", "max_doing_tasks: 2")
         policy_path.write_text(policy_text, encoding="utf-8")
         env = dict(self.env, MT_USERNAME="capture-test")
         created = "2026-10-15T10:00:00"
@@ -329,25 +328,6 @@ class DraftCliTests(unittest.TestCase):
         self.assertEqual(default_properties["status"], "doing")
         self.assertEqual(default_properties["claimed_by"], "capture-test")
         self.assertEqual(default_properties["capture_id"], default_id)
-
-        blocked_id = str(uuid.uuid4())
-        blocked = draft_store.save(
-            self.root, draft_id=blocked_id,
-            fields={"kind": "task", "mode": "new", "title": "Over limit capture",
-                    "capture_id": blocked_id, "created": created,
-                    "status": "doing", "priority": "none", "type": "task",
-                    "tags": [], "due": None, "due_kind": None},
-            body="Over limit capture", now=created,
-        )
-        failed = self.run_mt(
-            "draft", "save", blocked_id,
-            "--expected-hash", str(blocked["content_hash"]), "--json", env=env,
-        )
-        self.assertNotEqual(failed.returncode, 0)
-        self.assertIn("doing task limit exceeded", failed.stderr)
-        self.assertTrue((self.root / "drafts" / f"{blocked_id}.md").is_file())
-        self.assertFalse(any("Over limit capture" in path.read_text(encoding="utf-8")
-                             for path in card_files(self.root, "task")))
         validate = self.run_mt("validate", env=env)
         self.assertEqual(validate.returncode, 0, validate.stdout + validate.stderr)
 

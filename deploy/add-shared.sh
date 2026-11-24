@@ -35,8 +35,7 @@
 #                       names and administrators for every run (or MT_APP_DIR);
 #                       default is /opt/microtask/current
 #
-# Run it as root. The workspace counts tasks in progress per person (rules.doing_limit_scope
-# per_claimant). The service runs the app from /opt/microtask/current (see upgrade.sh) as its
+# Run it as root. The service runs the app from /opt/microtask/current (see upgrade.sh) as its
 # own system account, mt-NAME, which owns the workspace and /etc/mt/NAME.secret.
 set -euo pipefail
 
@@ -558,7 +557,7 @@ done
 
 if [[ -n "$dry_run" ]]; then
   [[ -n "$no_systemctl" ]] || echo "would create the system account $unix_user"
-  echo "would create workspace $workspace with rules.doing_limit_scope per_claimant"
+  echo "would create workspace $workspace"
   echo "would write $env_file (PORT=$port, HOST_NAME=$host, MT_ADMINS=$admin_list), $secret_file and $members_file"
   echo "would write $caddy_file for ${#emails[@]} address(es)"
   echo "would add the addresses to $oauth_emails_file"
@@ -577,52 +576,6 @@ init_log="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 "${git_identity[@]}" \
   "$app_dir/mt" init --data "$workspace" 2>&1 </dev/null)" \
   || { echo "$init_log" >&2; die "could not create the workspace"; }
 chmod 700 "$workspace"
-
-# Count tasks in progress per person, and keep that choice in the workspace's history. The line goes
-# in with the indentation of the other entries under rules:, and the app then reads the result back.
-python3 - "$workspace/settings.yaml" <<'PY' || die "could not set rules.doing_limit_scope in settings.yaml"
-import pathlib, re, sys
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").split("\n")
-rules = [i for i, line in enumerate(lines) if re.match(r"rules:", line)]
-if not rules:
-    if lines and lines[-1] == "":
-        lines.pop()
-    lines += ["", "rules:", "  doing_limit_scope: per_claimant", ""]
-else:
-    start = rules[0]
-    if len(rules) > 1 or not re.fullmatch(r"rules:[ \t]*(#.*)?", lines[start]):
-        raise SystemExit("settings.yaml has rules: in a form this script does not edit")
-    block = []
-    for i in range(start + 1, len(lines)):
-        line = lines[i]
-        if line.strip() and not line.lstrip().startswith("#") and not line[0].isspace():
-            break
-        block.append(i)
-    children = [i for i in block if lines[i].strip() and not lines[i].lstrip().startswith("#")]
-    indent = re.match(r"\s*", lines[children[0]]).group() if children else "  "
-    setting = f"{indent}doing_limit_scope: per_claimant"
-    active = [i for i in children if re.match(re.escape(indent) + r"doing_limit_scope\s*:", lines[i])]
-    if active:
-        lines[active[0]] = setting
-    else:
-        anchor = [i for i in children if re.match(re.escape(indent) + r"max_doing_tasks\s*:", lines[i])]
-        lines.insert((anchor[0] if anchor else start) + 1, setting)
-path.write_text("\n".join(lines), encoding="utf-8")
-PY
-# Check with the app itself: the workspace must be valid and read as counting per person.
-env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 "$app_dir/mt" -R "$workspace" validate >/dev/null 2>&1 </dev/null \
-  || die "settings.yaml is not valid after setting rules.doing_limit_scope; run '$app_dir/mt -R $workspace validate' on a copy to see why"
-scope_read="$(env -u MT_WORKSPACE PYTHONDONTWRITEBYTECODE=1 "$app_dir/mt" -R "$workspace" settings --json </dev/null \
-  | python3 -c 'import json, sys; print(json.load(sys.stdin).get("rules", {}).get("doing_limit_scope", ""))')" \
-  || die "could not read the settings back from the new workspace"
-[[ "$scope_read" == per_claimant ]] || die "the new workspace does not count tasks per person (rules.doing_limit_scope is '$scope_read')"
-if command -v git >/dev/null 2>&1 && [[ -d "$workspace/.git" ]]; then
-  if [[ -n "$(env "${git_identity[@]}" git -C "$workspace" status --porcelain -- settings.yaml)" ]]; then
-    env "${git_identity[@]}" git -C "$workspace" add settings.yaml
-    env "${git_identity[@]}" git -C "$workspace" commit -q -m "Count tasks in progress per person"
-  fi
-fi
 
 mkdir -p "$env_dir"
 claim_path "$env_file"

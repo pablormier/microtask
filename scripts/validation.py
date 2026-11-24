@@ -42,36 +42,36 @@ def _check_item(
     raw: str | None = None,
     collect: dict[str, list] | None = None,
     warnings: list[str] | None = None,
-) -> tuple[str | None, str | None]:
-    """Validate one card; return its (kind, status), or (None, None) when unreadable."""
+) -> str | None:
+    """Validate one card; return its kind, or None when unreadable."""
     rel = path.relative_to(data_root)
     if raw is None:
         try:
             raw = path.read_bytes().decode("utf-8")
         except (OSError, UnicodeDecodeError) as error:
             errors.append(f"{rel}: cannot read card: {error}")
-            return None, None
+            return None
     if raw.strip() == "":
         errors.append(f"{rel}: file is empty")
-        return None, None
+        return None
     fm_text, body = card_format.parse_frontmatter(raw)
     if fm_text is None:
         errors.append(f"{rel}: missing YAML frontmatter")
-        return None, None
+        return None
     try:
         fm = card_format.parse_yaml(fm_text)
     except ValueError as error:
         errors.append(f"{rel}: {error}")
-        return None, None
+        return None
     if collect is not None and isinstance(fm.get("topic"), str):
         collect["topics"].append(fm["topic"])
     kind = fm.get("kind")
     if not isinstance(fm.get("title"), str) or not isinstance(kind, str):
         errors.append(f"{rel}: card must have title and kind properties")
-        return None, None
+        return None
     if kind not in ("task", "note"):
         errors.append(f"{rel}: kind must be task or note")
-        return None, None
+        return None
     errors.extend(
         validators.run_item_validators(
             validators.CheckContext(
@@ -111,10 +111,7 @@ def _check_item(
             )
         else:
             seen_capture_ids[capture_id] = path
-    status = fm.get("status") if kind == "task" else None
-    if collect is not None and "claimants" in collect:
-        collect["claimants"][path] = _doing_claimant(fm) or ""
-    return kind, status if isinstance(status, str) else None
+    return kind
 
 
 def _item_identity(
@@ -125,14 +122,13 @@ def _item_identity(
     strict_time: bool = False,
     fm: dict | None = None,
     check_time: bool = True,
-) -> tuple[dict[str, set[str]], str | None, str | None]:
+) -> tuple[dict[str, set[str]], str | None]:
     """Only the values that can introduce cross-card conflicts.
 
-    Returns (unique_keys, doing_claimant, topic). The second value is None unless the card
-    is a doing task, in which case it is the claimant's name or "" when unclaimed.
+    Returns (unique_keys, topic).
     """
     if raw is None:
-        return {"capture_id": set(), "time session id": set()}, None, None
+        return {"capture_id": set(), "time session id": set()}, None
     if fm is None:
         fm_text, _body = card_format.parse_frontmatter(raw)
         fm = card_format.parse_yaml(fm_text) if fm_text is not None else {}
@@ -149,43 +145,17 @@ def _item_identity(
     return {
         "capture_id": {capture} if isinstance(capture, str) else set(),
         "time session id": sessions,
-    }, _doing_claimant(fm), topic if isinstance(topic, str) else None
-
-
-def _doing_claimant(fm: dict) -> str | None:
-    if fm.get("kind") != "task" or fm.get("status") != "doing":
-        return None
-    claimant = fm.get("claimed_by")
-    return claimant if isinstance(claimant, str) else ""
-
-
-def doing_limit_bucket(policy: dict, claimant: str) -> str:
-    """The group a doing task counts in: one for the workspace, or one per claimant.
-
-    With rules.doing_limit_scope per_claimant, tasks nobody has claimed share one group ("").
-    """
-    scope = policy.get("rules", {}).get("doing_limit_scope", "workspace")
-    return claimant if scope == "per_claimant" else ""
-
-
-def _doing_limit_message(policy: dict, bucket: str, count: int, limit: int) -> str:
-    if policy.get("rules", {}).get("doing_limit_scope", "workspace") != "per_claimant":
-        return f"doing task limit exceeded: {count} tasks, maximum {limit}"
-    owner = f"claimed by {bucket}" if bucket else "with no claimant"
-    return f"doing task limit exceeded: {count} tasks {owner}, maximum {limit} per claimant"
+    }, topic if isinstance(topic, str) else None
 
 
 def _may_affect_cross_card(
     fm_text: str,
     *,
-    check_doing: bool,
     topic_roots: set[str],
     capture_targets: set[str],
     session_targets: set[str],
 ) -> bool:
     """Conservative raw-frontmatter filter; returns False only if no active check can match."""
-    if check_doing and "doing" in fm_text:
-        return True
     if topic_roots and "topic" in fm_text:
         lowered = fm_text.casefold()
         if any(root in lowered for root in topic_roots):
@@ -229,8 +199,6 @@ def check_changes(
     changed_topics: list[str] = []
     seen: dict[str, dict[str, Path]] = {"capture_id": {}, "time session id": {}}
     added: dict[str, set[str]] = {key: set() for key in seen}
-    doing_delta: dict[str, int] = {}
-    changed_doing: dict[str, int] = {}
     for relative in sorted(affected):
         path = root / relative
         if path.is_symlink() or path.parent.is_symlink():
@@ -241,20 +209,13 @@ def check_changes(
             else (path.read_text(encoding="utf-8") if path.exists() else None)
         )
         try:
-            before_keys, before_doing, before_topic = _item_identity(before, path, data_root=root)
+            before_keys, before_topic = _item_identity(before, path, data_root=root)
         except ValueError:
-            before_keys, before_doing, before_topic = {key: set() for key in seen}, None, None
+            before_keys, before_topic = {key: set() for key in seen}, None
         after = decoded_changes.get(relative)
-        after_keys, after_doing, after_topic = _item_identity(after, path, data_root=root)
+        after_keys, after_topic = _item_identity(after, path, data_root=root)
         for key in added:
             added[key].update(after_keys[key] - before_keys[key])
-        if before_doing is not None:
-            bucket = doing_limit_bucket(policy, before_doing)
-            doing_delta[bucket] = doing_delta.get(bucket, 0) - 1
-        if after_doing is not None:
-            bucket = doing_limit_bucket(policy, after_doing)
-            doing_delta[bucket] = doing_delta.get(bucket, 0) + 1
-            changed_doing[bucket] = changed_doing.get(bucket, 0) + 1
         if after is not None:
             _check_item(
                 root, path, seen["time session id"],
@@ -264,17 +225,14 @@ def check_changes(
             if after_topic is not None and after_topic != before_topic:
                 changed_topics.append(after_topic)
     need_topic_scan = bool(changed_topics) and card_linter.rule_level(policy, "topic_case") != "off"
-    grown = {bucket for bucket, delta in doing_delta.items() if delta > 0}
-    if errors or (not any(added.values()) and not grown and not need_topic_scan):
+    if errors or (not any(added.values()) and not need_topic_scan):
         return ChangesReport(errors=errors, warnings=[] if errors else warnings)
 
     # Read only metadata from other cards, except when new time-session IDs
     # require checking their time logs. Do not validate unrelated card bodies.
-    other_doing: dict[str, int] = {}
     other_topics: list[str] = []
     check_added = any(added.values())
     check_time = bool(added["time session id"])
-    check_doing = bool(grown)
     topic_roots = {card_format.topic_key(topic)[0] for topic in changed_topics} if need_topic_scan else set()
     capture_targets = added["capture_id"]
     session_targets = added["time session id"]
@@ -288,21 +246,16 @@ def check_changes(
             raise ValueError(f"cannot check cross-card invariants: {relative} has no frontmatter; run mt validate")
         if not _may_affect_cross_card(
             fm_text,
-            check_doing=check_doing,
             topic_roots=topic_roots,
             capture_targets=capture_targets,
             session_targets=session_targets,
         ):
             continue
         fm = card_format.parse_yaml(fm_text)
-        claimant = _doing_claimant(fm)
-        if claimant is not None:
-            bucket = doing_limit_bucket(policy, claimant)
-            other_doing[bucket] = other_doing.get(bucket, 0) + 1
         if need_topic_scan and isinstance(fm.get("topic"), str):
             other_topics.append(fm["topic"])
         if check_added:
-            identity, _, _ = _item_identity(
+            identity, _ = _item_identity(
                 raw,
                 path,
                 data_root=root,
@@ -313,12 +266,6 @@ def check_changes(
             for key, values in added.items():
                 for value in values & identity[key]:
                     errors.append(f"{relative}: duplicate {key} '{value}' introduced by card changes")
-    limit = int(str(policy.get("rules", {}).get("max_doing_tasks") or 0))
-    if limit > 0:
-        for bucket in sorted(grown):
-            count = other_doing.get(bucket, 0) + changed_doing.get(bucket, 0)
-            if count > limit:
-                errors.append(_doing_limit_message(policy, bucket, count, limit))
     if not errors and need_topic_scan:
         warnings.extend(
             card_linter.lint_workspace(changed_topics + other_topics, policy, focus_topics=changed_topics)
@@ -351,15 +298,6 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
     errors: list[str] = []
     seen_time_sessions: dict[str, Path] = {}
     seen_capture_ids: dict[str, Path] = {}
-    rules = policy.get("rules", {})
-    raw_doing_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
-    if not isinstance(raw_doing_limit, str) or not raw_doing_limit.isdigit():
-        doing_limit = 0
-        errors.append("settings rules.max_doing_tasks must be a positive integer")
-    else:
-        doing_limit = int(raw_doing_limit)
-        if doing_limit < 1:
-            errors.append("settings rules.max_doing_tasks must be a positive integer")
 
     md_files: list[Path] = []
     if cards_root.is_symlink():
@@ -379,25 +317,16 @@ def audit_workspace(root: Path, policy: dict) -> AuditReport:
             else:
                 md_files.append(entry)
 
-    collected: dict = {"topics": [], "claimants": {}}
+    collected: dict = {"topics": []}
     warnings: list[str] = []
-    doing_counts: dict[str, int] = {}
     kind_counts = {"task": 0, "note": 0}
     for path in md_files:
-        kind, status = _check_item(
+        kind = _check_item(
             root, path, seen_time_sessions, seen_capture_ids, errors, policy,
             collect=collected, warnings=warnings,
         )
         if kind is not None:
             kind_counts[kind] += 1
-        if kind == "task" and status == "doing":
-            bucket = doing_limit_bucket(policy, collected["claimants"].get(path, ""))
-            doing_counts[bucket] = doing_counts.get(bucket, 0) + 1
-
-    if doing_limit > 0:
-        for bucket in sorted(doing_counts):
-            if doing_counts[bucket] > doing_limit:
-                errors.append(_doing_limit_message(policy, bucket, doing_counts[bucket], doing_limit))
 
     draft_root = root / "drafts"
     draft_files: list[Path] = []

@@ -64,6 +64,7 @@ class Query:
     type: tuple[str, ...] = ()
     project: tuple[str, ...] = ()
     topic: tuple[str, ...] = ()
+    no_subtopics: bool = False
     tag: tuple[str, ...] = ()
     exclude_tag: tuple[str, ...] = ()
     needs_review: bool = False
@@ -183,7 +184,7 @@ def query_from_mapping(values: Mapping, *, today: date | None = None) -> Query:
         if name in values:
             items = _values(values[name])
             parsed[name] = tuple(card_format.normalize_topic(item) for item in items) if name == "topic" else items
-    for name in ("needs_review", "triage"):
+    for name in ("no_subtopics", "needs_review", "triage"):
         if name in values:
             parsed[name] = _flag(values[name], name)
     for name in DATE_FIELDS:
@@ -248,6 +249,8 @@ def add_query_arguments(parser: argparse.ArgumentParser, *, defaults: dict | Non
     many("type", "TYPE", "select tasks of this type, case-insensitive")
     many("project", "PROJECT", "exact case-insensitive project; repeat for several")
     many("topic", "PATH", "this topic and everything under it, whole segments, case-insensitive")
+    group.add_argument("--no-subtopics", action="store_true",
+                       help="match only the given --topic path(s), without subtopics")
     many("tag", "TAG", "exact case-insensitive tag; repeat for several")
     many("exclude_tag", "TAG", "exclude cards with this tag, case-insensitive; repeat for several")
     group.add_argument("--needs-review", action="store_true", help="select cards marked for review")
@@ -450,8 +453,10 @@ def matches(card: object, query: Query, *, now: datetime) -> bool:
     if query.project and str(props.get("project") or "").casefold() not in {
             value.casefold() for value in query.project}:
         return False
-    if query.topic and not any(card_format.topic_within(props.get("topic"), path) for path in query.topic):
-        return False
+    if query.topic:
+        topic_match = card_format.topic_equals if query.no_subtopics else card_format.topic_within
+        if not any(topic_match(props.get("topic"), path) for path in query.topic):
+            return False
     card_tags = {str(tag).casefold() for tag in props.get("tags") or []}
     if query.tag and not ({tag.casefold() for tag in query.tag} & card_tags):
         return False

@@ -52,7 +52,6 @@ rules:
   auto_sync: false
   allow_public_origin: false # mt sync refuses a public GitHub origin (checked when gh is installed)
   done_window: 2w # done tasks older than this leave the board and mt list
-  max_doing_tasks: 5
   timer_warn_hours: 8 # warn about forgotten timers; never cap recorded time
   max_attachment_mb: 10 # maximum size in MB for files in attachments/
   show_year_progress: true

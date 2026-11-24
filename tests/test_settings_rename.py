@@ -17,7 +17,7 @@ import workspace as workspace_module  # noqa: E402
 
 RENAME_MESSAGE = "Rename mt-policy.yaml to settings.yaml"
 MOVE_MESSAGE = "Move microtask app out of the workspace"
-LOCAL = "rules:\n  max_doing_tasks: 4\n"
+LOCAL = "rules:\n  timer_warn_hours: 4\n"
 
 
 class SettingsRenameTests(unittest.TestCase):
@@ -103,7 +103,7 @@ class SettingsRenameTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("mt migrate", self.mt("validate").stderr)
         settings = json.loads(self.mt("settings", "--json").stdout)
-        self.assertEqual(str(settings["rules"]["max_doing_tasks"]), "4")
+        self.assertEqual(str(settings["rules"]["timer_warn_hours"]), "4")
         self.assertTrue(any("still-works" in path.name for path in (self.app / "cards").glob("*.md")))
         self.assertFalse(self.default.exists())
         self.assertFalse((self.app / "settings.yaml").exists())

@@ -118,24 +118,13 @@ class MoveTests(unittest.TestCase):
                 self.assertIn(b"move destination must be one of", rejected.stderr)
                 self.assertEqual(path.read_bytes(), before)
 
-    def test_tasks_without_next_action_can_move_and_wip_limit_rolls_back(self) -> None:
+    def test_tasks_without_next_action_can_move(self) -> None:
         no_action = self.task("No action", "", next_action=None)
         self.assertNotIn("next_action", self.read(no_action["ref"])["properties"])
         moved = self.run_mt("move", no_action["ref"], "doing")
         self.assertEqual(moved.returncode, 0, moved.stderr.decode("utf-8", errors="replace"))
         self.assertEqual(self.read(no_action["ref"])["properties"]["status"], "doing")
         self.assertEqual(self.run_mt("move", no_action["ref"], "active").returncode, 0)
-
-        policy = self.root / "settings.yaml"
-        policy.write_text(policy.read_text(encoding="utf-8").replace("max_doing_tasks: 5", "max_doing_tasks: 1"),
-                          encoding="utf-8")
-        first = self.task("First task")
-        second = self.task("Second task")
-        self.assertEqual(self.run_mt("move", first["ref"], "doing").returncode, 0)
-        blocked = self.run_mt("move", second["ref"], "doing")
-        self.assertNotEqual(blocked.returncode, 0)
-        self.assertEqual(self.read(first["ref"])["properties"]["status"], "doing")
-        self.assertEqual(self.read(second["ref"])["properties"]["status"], "inbox")
 
     def test_conversion_preserves_id_body_and_comments_without_restoring_removed_fields(self) -> None:
         task = self.task("Keep design note", "## Next action\nLiteral heading.\n",

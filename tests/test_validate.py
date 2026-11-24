@@ -367,7 +367,15 @@ class TriageCheckTests(unittest.TestCase):
         result = self.validate()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_doing_limit_counts_status_metadata_in_flat_task_files(self) -> None:
+    def test_legacy_doing_limit_settings_still_validate_and_allow_more_than_five_doing_tasks(self) -> None:
+        settings_path = self.root / "settings.yaml"
+        settings_path.write_text(
+            settings_path.read_text(encoding="utf-8").replace(
+                "  done_window: 2w",
+                "  done_window: 2w\n  max_doing_tasks: 5\n  doing_limit_scope: per_claimant",
+            ),
+            encoding="utf-8",
+        )
         for number in range(6):
             self.write_task(
                 f"doing-{number}",
@@ -377,8 +385,7 @@ class TriageCheckTests(unittest.TestCase):
 
         result = self.validate()
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("doing task limit exceeded: 6 tasks, maximum 5", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_nested_directories_in_cards_are_rejected(self) -> None:
         nested = self.root / "cards" / "doing"

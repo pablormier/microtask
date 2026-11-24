@@ -31,7 +31,7 @@ class MigrateTests(unittest.TestCase):
         legacy_workspace(self.app)
         (self.app / "drafts").mkdir(exist_ok=True)
         self.mt("add", "Old card")
-        (self.app / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 4\n")
+        (self.app / "settings.local.yaml").write_text("rules:\n  timer_warn_hours: 4\n")
         self.git("init", "--quiet", "--initial-branch=main")
         self.git("add", "-A")
         self.git("commit", "--quiet", "-m", "Everything together")
@@ -91,7 +91,7 @@ class MigrateTests(unittest.TestCase):
             self.assertEqual(self.git("ls-files", name, cwd=workspace), name)
             self.assertEqual((workspace / name).read_bytes(),
                              (self.app / "templates" / f"workspace-{name}").read_bytes())
-        self.assertEqual((workspace / "settings.local.yaml").read_text(), "rules:\n  max_doing_tasks: 4\n")
+        self.assertEqual((workspace / "settings.local.yaml").read_text(), "rules:\n  timer_warn_hours: 4\n")
         self.assertEqual(self.git("ls-files", "settings.local.yaml", cwd=workspace), "")
         self.assertFalse(any(name.startswith(("cards/", "drafts/")) for name in changes))
         ignore = (workspace / ".gitignore").read_text().splitlines()

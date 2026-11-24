@@ -41,6 +41,12 @@ class TopicPathTests(unittest.TestCase):
         self.assertFalse(card_format.topic_within("learning/rust", "learning/rus"))
         self.assertFalse(card_format.topic_within("learning", "learning/rust"))
         self.assertFalse(card_format.topic_within(None, "learning"))
+        self.assertTrue(card_format.topic_equals("learning", "learning"))
+        self.assertTrue(card_format.topic_equals("Learning/Rust", "learning/rust"))
+        self.assertFalse(card_format.topic_equals("Learning/Rust/Async", "learning/rust"))
+        self.assertFalse(card_format.topic_equals("learning", "learning/rust"))
+        self.assertFalse(card_format.topic_equals(None, "learning"))
+        self.assertFalse(card_format.topic_equals("", "learning"))
 
     def test_tree_implies_parents_counts_descendants_and_adds_suggestions(self) -> None:
         tree = card_format.topic_tree({"learning/rust/async": 2, "learning": 1, "Learning/go": 1}, ["home"])
@@ -103,8 +109,18 @@ class TopicCliTests(unittest.TestCase):
         self.assertEqual(titles("learning"), ["Deep", "Top"])
         self.assertEqual(titles("LEARNING/Rust"), ["Deep"])
         self.assertEqual(titles("learn"), [])
+        direct = sorted(item["title"] for item in json.loads(
+            self.ok("list", "--topic", "learning", "--no-subtopics", "--all", "--json")))
+        self.assertEqual(direct, ["Top"])
+        multi_direct = sorted(item["title"] for item in json.loads(
+            self.ok("list", "--topic", "learning", "--topic", "learning/rust/async", "--no-subtopics", "--all", "--json")))
+        self.assertEqual(multi_direct, ["Deep", "Top"])
+        implied_direct = json.loads(self.ok("list", "--topic", "learning/rust", "--no-subtopics", "--all", "--json"))
+        self.assertEqual(implied_direct, [])
         search = json.loads(self.ok("search", "Deep", "--topic", "learning", "--all", "--json"))
         self.assertEqual([item["title"] for item in search], ["Deep"])
+        search_direct = json.loads(self.ok("search", "Deep", "--topic", "learning", "--no-subtopics", "--all", "--json"))
+        self.assertEqual(search_direct, [])
 
     def test_date_options_accept_relative_ages_and_reject_bad_ones(self) -> None:
         self.add("Fresh")

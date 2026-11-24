@@ -218,6 +218,7 @@ function visibleTopicTreeNodes(tree, expanded) {
       name: node.name,
       depth: node.depth,
       count: node.count,
+      own: node.own !== undefined ? node.own : node.count,
       hasChildren,
       expanded: isExpanded
     });

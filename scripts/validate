@@ -10,7 +10,6 @@ Orchestrates validation of every Markdown card in cards/ (kind comes from frontm
   * due_kind is consistent with due
   * metadata time fields are YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
   * archived is a boolean when present
-  * the configured doing-task limit is not exceeded
   * notes have the note schema and no task lifecycle fields
   * task ids are unique
   * card properties, comments, and saved time records are structurally valid

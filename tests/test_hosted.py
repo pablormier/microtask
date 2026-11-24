@@ -1,4 +1,4 @@
-"""One dashboard serving a shared workspace: identity, per-person state, limits, admin rules and history."""
+"""One dashboard serving a shared workspace: identity, per-person state, admin rules and history."""
 from __future__ import annotations
 
 import hashlib
@@ -27,7 +27,6 @@ from tools import web_hosted  # noqa: E402
 import card_format  # noqa: E402
 import history  # noqa: E402
 import transaction  # noqa: E402
-import validation  # noqa: E402
 from workspace import Workspace  # noqa: E402
 
 SECRET = "test-proxy-secret-0123456789"
@@ -44,7 +43,6 @@ def clean_env() -> dict[str, str]:
 class SharedWorkspaceCase(unittest.TestCase):
     admins = frozenset({"root"})
     user_map: dict[str, str] = {}
-    scope = ""
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -53,10 +51,6 @@ class SharedWorkspaceCase(unittest.TestCase):
         init = subprocess.run([str(ROOT / "mt"), "init", "--data", str(self.root)], env=clean_env(),
                               capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False)
         self.assertEqual(init.returncode, 0, init.stderr)
-        if self.scope:
-            settings = self.root / "settings.yaml"
-            settings.write_text(settings.read_text().replace(
-                "  max_doing_tasks: 5\n", f"  max_doing_tasks: 5\n  doing_limit_scope: {self.scope}\n"))
         patcher = mock.patch.dict(os.environ, GIT_ENV)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -572,85 +566,6 @@ class CommentTests(SharedWorkspaceCase):
         text = next((self.root / "cards").glob("*.md")).read_text()
         comments = card_format.parse_document(text)[0]["comments"]
         self.assertEqual([set(comment) for comment in comments], [{"at", "text"}, {"at", "text", "by"}])
-
-
-class DoingLimitTests(SharedWorkspaceCase):
-    scope = "per_claimant"
-
-    def test_each_person_may_work_up_to_the_limit(self) -> None:
-        for number in range(6):
-            self.add_task(f"Person {number} task", doing_by=f"user{number}")
-        self.assertEqual(self.mt("validate").returncode, 0)
-        for number in range(4):
-            self.add_task(f"Extra {number}", doing_by="user0")
-        self.assertEqual(self.mt("validate").returncode, 0)  # user0 holds five
-        self.add_task("One too many")
-        refused = self.mt("move", "One too many", "doing", "--by", "user0")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("doing task limit exceeded", refused.stderr)
-        self.assertIn("user0", refused.stderr)
-
-    def test_a_takeover_that_pushes_someone_over_the_limit_fails(self) -> None:
-        for number in range(5):
-            self.add_task(f"Own {number}", doing_by="user0")
-        self.add_task("Other task", doing_by="user1")
-        refused = self.mt("move", "Other task", "doing", "--by", "user0", "--takeover")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("doing task limit exceeded", refused.stderr)
-        self.assertEqual(self.mt("validate").returncode, 0)
-        self.mt("move", "Own 0", "waiting", "--by", "user0")
-        allowed = self.mt("move", "Other task", "doing", "--by", "user0", "--takeover")
-        self.assertEqual(allowed.returncode, 0, allowed.stderr)
-
-    def test_the_audit_counts_the_same_way(self) -> None:
-        for number in range(6):
-            self.add_task(f"Task {number}", doing_by="user0" if number < 5 else "user1")
-        policy = taskweb.store.policy(self.ws)
-        self.assertEqual(validation.audit_workspace(self.root, policy).errors, [])
-        # Reassign one task by editing the file, as a merge could: user0 now holds six.
-        path = next(path for path in (self.root / "cards").glob("*task-5.md"))
-        path.write_text(path.read_text().replace("claimed_by: user1", "claimed_by: user0"))
-        errors = validation.audit_workspace(self.root, policy).errors
-        self.assertEqual(len(errors), 1)
-        self.assertIn("6 tasks claimed by user0", errors[0])
-        self.assertNotEqual(self.mt("validate").returncode, 0)
-
-    def test_unclaimed_doing_tasks_share_one_group(self) -> None:
-        for number in range(6):
-            card = self.add_task(f"Loose {number}")
-            path = self.card_path(card)
-            path.write_text(path.read_text().replace("status: inbox", "status: doing"))
-        errors = validation.audit_workspace(self.root, taskweb.store.policy(self.ws)).errors
-        self.assertEqual(len(errors), 1)
-        self.assertIn("6 tasks with no claimant", errors[0])
-        # One claimed task is a different group and is not affected.
-        self.add_task("Claimed", doing_by="user0")
-        self.assertEqual(len(validation.audit_workspace(self.root, taskweb.store.policy(self.ws)).errors), 1)
-
-    def test_dashboard_counts_the_signed_in_persons_doing_tasks(self) -> None:
-        self.add_task("Mine", doing_by="alice")
-        self.add_task("Theirs", doing_by="bob")
-        self.add_task("Theirs too", doing_by="bob")
-        self.start()
-        self.assertEqual(self.items("alice")["meta"]["doing_count"], 1)
-        self.assertEqual(self.items("bob")["meta"]["doing_count"], 2)
-
-    def test_setting_must_be_known(self) -> None:
-        settings = self.root / "settings.yaml"
-        settings.write_text(settings.read_text().replace("per_claimant", "per_team"))
-        refused = self.mt("validate")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("doing_limit_scope", refused.stderr)
-
-
-class WorkspaceScopeLimitTests(SharedWorkspaceCase):
-    def test_the_default_scope_counts_everyone_together(self) -> None:
-        for number in range(5):
-            self.add_task(f"Task {number}", doing_by=f"user{number}")
-        self.add_task("Sixth")
-        refused = self.mt("move", "Sixth", "doing", "--by", "user5")
-        self.assertNotEqual(refused.returncode, 0)
-        self.assertIn("doing task limit exceeded: 6 tasks, maximum 5", refused.stderr)
 
 
 class AdminTests(SharedWorkspaceCase):

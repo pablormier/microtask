@@ -55,23 +55,23 @@ assert.equal(second.due,source.due); assert.equal(second.due_kind,'target');
     def test_visible_topic_tree_nodes_respects_expanded_state(self) -> None:
         self.run_helpers(r"""
 const tree = [
-  { path: 'Learning', name: 'Learning', depth: 0, count: 3 },
-  { path: 'Learning/Rust', name: 'Rust', depth: 1, count: 2 },
-  { path: 'Learning/Rust/Async', name: 'Async', depth: 2, count: 1 },
-  { path: 'Learning/Go', name: 'Go', depth: 1, count: 1 },
+  { path: 'Learning', name: 'Learning', depth: 0, count: 3, own: 0 },
+  { path: 'Learning/Rust', name: 'Rust', depth: 1, count: 2, own: 1 },
+  { path: 'Learning/Rust/Async', name: 'Async', depth: 2, count: 1, own: 1 },
+  { path: 'Learning/Go', name: 'Go', depth: 1, count: 1, own: 1 },
   { path: 'Work', name: 'Work', depth: 0, count: 4 },
 ];
 assert.deepEqual(
-  visibleTopicTreeNodes(tree, {}).map(n => [n.path, n.hasChildren, n.expanded]),
-  [['Learning', true, false], ['Work', false, false]]
+  visibleTopicTreeNodes(tree, {}).map(n => [n.path, n.hasChildren, n.expanded, n.count, n.own]),
+  [['Learning', true, false, 3, 0], ['Work', false, false, 4, 4]]
 );
 assert.deepEqual(
-  visibleTopicTreeNodes(tree, { learning: true }).map(n => [n.path, n.hasChildren, n.expanded]),
+  visibleTopicTreeNodes(tree, { learning: true }).map(n => [n.path, n.hasChildren, n.expanded, n.own]),
   [
-    ['Learning', true, true],
-    ['Learning/Rust', true, false],
-    ['Learning/Go', false, false],
-    ['Work', false, false],
+    ['Learning', true, true, 0],
+    ['Learning/Rust', true, false, 1],
+    ['Learning/Go', false, false, 1],
+    ['Work', false, false, 4],
   ]
 );
 assert.deepEqual(

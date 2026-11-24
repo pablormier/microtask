@@ -221,8 +221,6 @@ def dashboard_meta(
         if label is not None and str(label)
     })
     rules = cfg.get("rules", {})
-    raw_limit = rules.get("max_doing_tasks") if isinstance(rules, dict) else None
-    max_doing = int(str(raw_limit)) if raw_limit is not None and str(raw_limit).isdigit() else 1
     item_values = items or []
     # Timers live on the cards the payload already loaded, so a refresh reads no extra files.
     timers = {
@@ -259,7 +257,6 @@ def dashboard_meta(
         "topic_tree": card_format.topic_tree(usage["topic"], operations.suggested_topics(cfg)),
         "workspace_tags": sorted(workspace_tags),
         "workspace_usage": usage,
-        "max_doing_tasks": max_doing,
         "show_year_progress": bool(rules.get("show_year_progress", True)),
         "show_deadline_progress": bool(rules.get("show_deadline_progress", True)),
         "deadline_progress_start": str(rules.get("deadline_progress_start") or "created"),
@@ -298,7 +295,7 @@ def view_topic_trees(ws: Workspace, cards: list[store.Card], query: card_query.Q
     others. Every workspace topic stays in each tree, with no count where the view has none.
     """
     by_id = {str(card.frontmatter.get("id") or card.path.stem): card for card in cards}
-    found = collection_results(cards, replace(query, topic=()), now=now, done_cutoff=done_cutoff,
+    found = collection_results(cards, replace(query, topic=(), no_subtopics=False), now=now, done_cutoff=done_cutoff,
                                open_statuses=store.open_statuses(ws))
     trees = {}
     for view in ("tasks", "notes", "archive"):
@@ -328,7 +325,7 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     ``tasks`` holds the cards in any collection, the targets of saved drafts, and the
     ``include`` IDs (the open card and its navigation trail), which are echoed back.
     Workspace-wide figures are in ``meta``. In a shared workspace ``actor`` is the signed-in
-    person: focus, drafts and the doing count are theirs, and ``hosted`` names them in ``meta``.
+    person: focus and drafts are theirs, and ``hosted`` names them in ``meta``.
     """
     transaction.migrate_legacy_timers_if_pending(ws)
     cfg = store.policy(ws)
@@ -371,12 +368,6 @@ def dashboard_payload(ws: Workspace, cache: store.CardCache, *, api_token: str =
     for key in ("candidates", "alerts"):
         meta["focus"][key] = [entry for entry in meta["focus"][key] if entry["id"] in shown]
     meta["focus"]["followup_ids"] = [identity for identity in meta["focus"]["followup_ids"] if identity in shown]
-    doing = card_query.select(tasks, card_query.Query(status=("doing",), hidden="include"), now=now)
-    if cfg.get("rules", {}).get("doing_limit_scope", "workspace") == "per_claimant":
-        # The limit applies to each person's own doing tasks, so the board counts the signed-in person's.
-        person = store.current_username(actor, ws=ws)
-        doing = [card for card in doing if card.frontmatter.get("claimed_by") == person]
-    meta["doing_count"] = len(doing)
     # Changes when any card is added, removed, renamed or converted, so an open card can refresh its references.
     meta["reference_revision"] = hashlib.sha256(json.dumps(sorted(
         [str(card.frontmatter["id"]), f"@{card.short_ref}", card.title, card.kind] for card in ordered

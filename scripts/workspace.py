@@ -20,9 +20,9 @@ _DETERMINISTIC_POLICY_KEYS = {
     "calendar", "lint",
 }
 _DETERMINISTIC_RULE_KEYS = {
-    "auto_sync", "done_window", "max_doing_tasks", "timer_warn_hours",
+    "auto_sync", "done_window", "timer_warn_hours",
     "show_year_progress", "show_deadline_progress", "deadline_progress_start",
-    "allow_public_origin", "max_attachment_mb", "doing_limit_scope", "local_history",
+    "allow_public_origin", "max_attachment_mb", "local_history",
 }
 
 

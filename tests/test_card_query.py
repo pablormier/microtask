@@ -57,6 +57,9 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(selected(self.cards, type="bug"), ["a"])
         self.assertEqual(selected(self.cards, project=["ALPHA", "Beta"]), ["a", "b"])
         self.assertEqual(selected(self.cards, topic="work"), ["a", "c"])
+        self.assertEqual(selected(self.cards, topic="work", no_subtopics=True), ["c"])
+        self.assertEqual(selected(self.cards, topic=["work", "work/infra"], no_subtopics=True), ["a", "c"])
+        self.assertEqual(selected(self.cards, no_subtopics=True), ["a", "b", "c", "d", "e"])
         self.assertEqual(selected(self.cards, topic=["work/infra", "home"]), ["a", "b"])
         self.assertEqual(selected(self.cards, topic="wor"), [])
         self.assertEqual(selected(self.cards, tag=["rust", "y"]), ["a", "b"])
@@ -198,7 +201,7 @@ class FocusDueTests(unittest.TestCase):
 class ParsingTests(unittest.TestCase):
     def test_round_trip_through_the_canonical_mapping(self):
         query = card_query.query_from_mapping({
-            "kind": ["task"], "status": ["doing", "active"], "topic": " Work / infra ", "tag": "x",
+            "kind": ["task"], "status": ["doing", "active"], "topic": " Work / infra ", "no_subtopics": "true", "tag": "x",
             "needs_review": "true", "updated_since": "2w", "due_before": "2026-05-01", "due": ["overdue", "none"],
             "archived": "only", "text": "two words", "match": "and"}, today=date(2026, 3, 28))
         mapping = card_query.query_to_mapping(query)
@@ -206,6 +209,7 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(card_query.query_from_mapping(mapping), query)
         self.assertEqual(mapping["updated_since"], "2026-03-14")
         self.assertEqual(mapping["topic"], ["Work/infra"])
+        self.assertIs(mapping["no_subtopics"], True)
         self.assertEqual(card_query.query_to_mapping(Query()), {})
         self.assertEqual(card_query.query_from_mapping({}), Query())
 
@@ -277,7 +281,7 @@ class ParsingTests(unittest.TestCase):
 
 QUERY_FLAGS = ["--task-type" if field == "type" else f"--{field.replace('_', '-')}"
                for field in card_query.LIST_FIELDS + card_query.DATE_FIELDS
-               + ("needs_review", "triage", "archived", "hidden")]
+               + ("no_subtopics", "needs_review", "triage", "archived", "hidden")]
 COMMANDS = (("list",), ("search",), ("focus",), ("bulk-edit",),
             ("time", "list"), ("time", "report"), ("web",))
 
@@ -315,6 +319,7 @@ class StructureTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             with self.subTest(path=path.name):
                 self.assertNotIn("topic_within(", text)
+                self.assertNotIn("topic_equals(", text)
                 self.assertIsNone(re.search(r"""["'](overdue|next7)["']""", text))
         web_queries = (SOURCE_ROOT / "tools" / "web_queries.py").read_text(encoding="utf-8")
         self.assertNotRegex(web_queries, r"def (matches|normalize_query|due_matches)\b")
@@ -370,7 +375,8 @@ class WorkspaceTests(unittest.TestCase):
         queries = [{}, {"project": ["alpha"]}, {"tag": ["RUST"]}, {"status": ["active", "waiting"]},
                    {"due": ["overdue"]}, {"due": ["week"]}, {"due": ["none"]}, {"due_before": (today + timedelta(days=10)).isoformat()},
                    {"hidden": "include"}, {"archived": "only"}, {"archived": "include", "hidden": "include"},
-                   {"needs_review": "true"}, {"triage": "true"}, {"topic": ["work"]}, {"priority": ["high"]},
+                   {"needs_review": "true"}, {"triage": "true"}, {"topic": ["work"]},
+                   {"topic": ["work"], "no_subtopics": "true"}, {"priority": ["high"]},
                    {"updated_since": "1w"}, {"updated_before": "1w"}, {"status": ["done"]}, {"completed_since": "1d"}]
         probe = """
 import json, sys

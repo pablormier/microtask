@@ -323,11 +323,7 @@ are never changed.
 Workspace settings live in `settings.yaml` and are synced with your cards.
 Overrides for one machine go in `settings.local.yaml`, which is not synced.
 `mt settings` shows the effective values, such as the defaults for new cards,
-the limit on tasks in progress, `rules.auto_sync`, and
-`rules.max_attachment_mb`. `rules.max_doing_tasks` counts all tasks in progress
-together. For a workspace several people share, set `rules.doing_limit_scope:
-per_claimant` to give each person that many; see
-[Shared workspace](hosting.md#shared-workspace).
+`rules.auto_sync`, and `rules.max_attachment_mb`.
 
 For optional calendar context in focus and weekly planning, see
 [Calendar setup](calendar.md). Your agent app supplies calendar access;

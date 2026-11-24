@@ -50,14 +50,6 @@ class RemoteModeTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(init.returncode, 0, init.stderr)
-        settings = self.workspace_dir / "settings.yaml"
-        settings.write_text(
-            settings.read_text(encoding="utf-8").replace(
-                "  max_doing_tasks: 5\n",
-                "  max_doing_tasks: 5\n  doing_limit_scope: per_claimant\n",
-            ),
-            encoding="utf-8",
-        )
         self.members_file = self.base / "team.members"
         self.members_file.write_text("alice@example.com\nbob@example.com\n", encoding="utf-8")
         self.tokens_file = self.base / "team.tokens.json"

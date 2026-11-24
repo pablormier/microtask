@@ -44,8 +44,6 @@ function taskBoard() {
     expandedTopics: {},
     workspaceTags: [],
     workspaceUsage: {},
-    maxDoingTasks: 1,
-    doingTotal: 0,
     referenceRevision: "",
     focusContext: { candidates: [], alerts: [], followup_ids: [] },
     runningTimers: {},
@@ -85,6 +83,7 @@ function taskBoard() {
     // Query parameters from the page address that no control shows, such as created_since from `mt web`.
     extraQuery: {},
     needsReviewOnly: false,
+    noSubtopics: false,
     detailLoading: false,
     detailError: "",
     detailSequence: 0,
@@ -185,6 +184,11 @@ function taskBoard() {
             this.scheduleQuery();
           });
         }
+        this.$watch("noSubtopics", () => {
+          if (!this.filterValues("topic").length) return;
+          this.writeFilterLocation();
+          this.scheduleQuery();
+        });
         this.$watch("settings", () => this.saveSettings());
         this.$watch("filters.topic", (paths) => this.expandTopicAncestors(paths));
         this.$watch("mode", () => this.updatePageTitle());
@@ -313,6 +317,7 @@ function taskBoard() {
         notes: typeof savedTree.notes === "boolean" ? savedTree.notes : true,
         archive: typeof savedTree.archive === "boolean" ? savedTree.archive : false
       };
+      try { this.noSubtopics = localStorage.getItem("mt-topic-no-subtopics-v1") === "true"; } catch (_) {}
     },
 
     saveSettings() {
@@ -392,6 +397,15 @@ function taskBoard() {
       if (!(this.mode in this.topicTreeState)) return;
       this.topicTreeState = { ...this.topicTreeState, [this.mode]: !this.topicTreeState[this.mode] };
       try { localStorage.setItem("mt-topic-tree-v1", JSON.stringify(this.topicTreeState)); } catch (_) {}
+    },
+
+    setNoSubtopics(value) {
+      this.noSubtopics = Boolean(value);
+      try { localStorage.setItem("mt-topic-no-subtopics-v1", String(this.noSubtopics)); } catch (_) {}
+    },
+
+    toggleNoSubtopics() {
+      this.setNoSubtopics(!this.noSubtopics);
     },
 
     toggleTopicExpanded(path) {
@@ -541,8 +555,6 @@ function taskBoard() {
       this.topicTree = meta.topic_tree || [];
       this.workspaceTags = meta.workspace_tags || [];
       this.workspaceUsage = meta.workspace_usage || {};
-      this.maxDoingTasks = meta.max_doing_tasks || 1;
-      this.doingTotal = meta.doing_count || 0;
       this.focusContext = meta.focus || { candidates: [], alerts: [], followup_ids: [] };
       this.runningTimers = meta.time_running || {};
       this.timerWarnHours = meta.timer_warn_hours || 8;

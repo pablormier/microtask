@@ -253,6 +253,13 @@ def topic_within(topic: object, ancestor: str) -> bool:
     return topic_key(topic)[:len(wanted)] == wanted
 
 
+def topic_equals(topic: object, target: str) -> bool:
+    """True when `topic` matches `target` directly (whole path, case-insensitive), without subtopics."""
+    if not isinstance(topic, str) or not topic:
+        return False
+    return topic_key(topic) == topic_key(target)
+
+
 def relative_date(value: str, today: date) -> date | None:
     """`today` minus an age like 0d, 2w, 3m, or 1y; months and years clamp the day. None otherwise."""
     match = re.fullmatch(r"(\d+)([dwmy])", value.strip().lower())

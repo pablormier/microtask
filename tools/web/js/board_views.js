@@ -24,7 +24,6 @@ function createBoardViews() {
     isCardsView() { return this.mode === "tasks" || this.mode === "notes" || this.mode === "archive"; },
     filtersApply() { return this.mode !== "drafts"; },
     openTasks() { return this.collectionItems("open"); },
-    doingCount() { return this.doingTotal; },
 
     footerCountLabel() {
       if (!this.ready) return "";
@@ -365,16 +364,13 @@ function createBoardViews() {
       const tasks = this.tasks;
       const statuses = this.statuses;
       const topicTree = this.topicTree;
-      const doingTotal = this.doingTotal;
-      const maxDoingTasks = this.maxDoingTasks;
       const statusLabels = this.statusLabels;
       const priorityOrder = this.priorityOrder;
       const dueKinds = this.dueKinds;
       const cache = viewGroupsCache;
       if (cache && cache.mode === mode && cache.kind === kind && cache.group === group && cache.sort === sort &&
           cache.ids === ids && cache.tasks === tasks && cache.statuses === statuses &&
-          cache.topicTree === topicTree && cache.doingTotal === doingTotal &&
-          cache.maxDoingTasks === maxDoingTasks && cache.statusLabels === statusLabels &&
+          cache.topicTree === topicTree && cache.statusLabels === statusLabels &&
           cache.priorityOrder === priorityOrder && cache.dueKinds === dueKinds) {
         return cache.value;
       }
@@ -383,7 +379,7 @@ function createBoardViews() {
       const value = groups.length ? groups : this.groupCards([], "none");
       viewGroupsCache = {
         mode, kind, group, sort, ids, tasks, statuses, topicTree,
-        doingTotal, maxDoingTasks, statusLabels, priorityOrder, dueKinds, value,
+        statusLabels, priorityOrder, dueKinds, value,
       };
       return value;
     },
@@ -411,7 +407,7 @@ function createBoardViews() {
         const all = buckets.get(key);
         return {
           key,
-          label: key === "" ? "Ungrouped" : this.groupLabel(field, key, workflow),
+          label: key === "" ? "Ungrouped" : this.groupLabel(field, key),
           items: all,
           countLabel: String(all.length),
           className: columns ? this.columnClass(key) : {},
@@ -426,9 +422,9 @@ function createBoardViews() {
       return node ? node.path : text;
     },
 
-    groupLabel(field, key, workflow) {
+    groupLabel(field, key) {
       if (field === "topic") return topicSegments(key).join(" › ");
-      if (field === "status") return workflow ? this.statusLabel(key) : this.statusText(key);
+      if (field === "status") return this.statusText(key);
       if (field === "priority") return this.priorityLabel(key).replace(/^./, c => c.toUpperCase());
       if (field === "due_kind") return key.replace(/^./, c => c.toUpperCase());
       return key;
@@ -461,16 +457,9 @@ function createBoardViews() {
       return name || "";
     },
 
-    statusLabel(status) {
-      const label = this.statusText(status);
-      if (status !== "doing") return label;
-      return label + " (" + this.doingCount() + "/" + this.maxDoingTasks + " max)";
-    },
-
     columnClass(status) {
       return {
-        "is-quiet": status === "done",
-        "is-over-limit": status === "doing" && this.doingCount() >= this.maxDoingTasks
+        "is-quiet": status === "done"
       };
     },
 

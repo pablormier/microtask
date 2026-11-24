@@ -84,7 +84,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         self.assertEqual(task.next_action, "Resume at section 3")
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
-    def test_add_rejects_invalid_options_and_rolls_back_at_doing_limit(self) -> None:
+    def test_add_rejects_invalid_options_and_claims_doing(self) -> None:
         for options in (("--status", "done"), ("--status", "invalid"),
                         ("--by", "agent:add"), ("--status", "doing", "--by", " ")):
             result = self.run_mt("add", "Invalid task", *options)
@@ -92,22 +92,13 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             self.assertEqual(list(card_files(self.root, "task")), [])
         accepted = self.run_mt("add", "Literal lifecycle heading", "--next-action", "## Comments\nInjected")
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        accepted_path = Path(accepted.stdout.strip())
         self.assertEqual(len(list(card_files(self.root, "task"))), 1)
         self.assertEqual(self.run_mt("validate").returncode, 0)
-        (self.root / "settings.local.yaml").write_text("rules:\n  max_doing_tasks: 1\n")
         self.env["MT_USERNAME"] = "agent:environment"
         first = self.run_mt("add", "First doing", "--status", "doing")
         self.assertEqual(first.returncode, 0, first.stderr)
         first_path = Path(first.stdout.strip())
-        first_bytes = first_path.read_bytes()
         self.assertEqual(tasklib.Card.read(first_path).frontmatter["claimed_by"], "agent:environment")
-        rejected = self.run_mt("add", "Second doing", "--status", "doing")
-        self.assertNotEqual(rejected.returncode, 0)
-        self.assertIn("limit exceeded", rejected.stderr)
-        self.assertEqual({path.resolve() for path in card_files(self.root, "task")},
-                         {accepted_path.resolve(), first_path.resolve()})
-        self.assertEqual(first_path.read_bytes(), first_bytes)
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
     def test_default_doing_add_claims_without_placeholder_action(self) -> None:
@@ -627,7 +618,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / "settings.local.yaml").write_text(
-            'statuses:\n  someday: "Maybe later"\ndefault_status: someday\ndefault_priority: high\ndefault_type: reminder\nrules:\n  max_doing_tasks: 2\n',
+            'statuses:\n  someday: "Maybe later"\ndefault_status: someday\ndefault_priority: high\ndefault_type: reminder\nrules:\n  timer_warn_hours: 12\n',
             encoding="utf-8")
         created = self.run_mt("add", "Review this later")
         self.assertEqual(created.returncode, 0, created.stderr)
@@ -641,7 +632,7 @@ class DeterministicCLIRegressionTests(unittest.TestCase):
         spec.loader.exec_module(module)
         policy = module.load_policy(self.root)
         self.assertEqual(policy["statuses"]["someday"], "Maybe later")
-        self.assertEqual(policy["rules"]["max_doing_tasks"], "2")
+        self.assertEqual(policy["rules"]["timer_warn_hours"], "12")
 
     def test_policy_json_hides_unknown_legacy_settings(self) -> None:
         (self.root / "settings.local.yaml").write_text(

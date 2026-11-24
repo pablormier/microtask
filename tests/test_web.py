@@ -759,14 +759,13 @@ view_labels:
         self.assertEqual(collections["notes"], [self.note.stem])
         self.assertNotIn(self.note.stem, collections["tasks"])
 
-    def test_embedded_policy_metadata_includes_priority_order_and_wip_limit(self) -> None:
+    def test_embedded_policy_metadata_includes_priority_order(self) -> None:
         self.render_dashboard()
         rendered = self.output.read_text(encoding="utf-8")
         meta_blob = self.payload_json("meta")
         meta = json.loads(meta_blob)
         self.assertEqual(meta["priority_order"], ["urgent", "high", "medium", "low", "none"])
         self.assertEqual(meta["due_kinds"], ["deadline", "target", "reminder"])
-        self.assertEqual(meta["max_doing_tasks"], 5)
         self.assertEqual(meta["focus"]["mode"], "auto")
         self.assertTrue(meta["focus"]["candidates"])
         self.assertIn("alerts", meta["focus"])
@@ -777,7 +776,6 @@ view_labels:
         self.assertNotIn("interactive", meta)
         self.assertEqual(meta["api_token"], "test-token")
         self.assertIn("const MT_CONFIG = JSON.parse", rendered)
-        self.assertIn("this.maxDoingTasks = meta.max_doing_tasks", rendered)
 
     def test_dashboard_renders_shared_detail_controls(self) -> None:
         self.assertEqual(self.render_dashboard().returncode, 0)
@@ -907,7 +905,7 @@ view_labels:
             f'eval({js_source} + `\n'
             'const app = taskBoard(); app.collections = normalCollections; app.applyPayload({tasks: typeof data === "undefined" ? [] : data, meta: typeof meta === "undefined" ? {} : meta, statuses: typeof statuses === "undefined" ? [] : statuses}); app.ready = true; const ids = items => items.map(t => t.id); const cards = kind => app.collectionItems(kind === "note" ? "notes" : "tasks");\n'
             'const normal = {doing: ids(cards("task").filter(t => t.status === "doing")), notes: ids(cards("note")), '
-            'focus: app.focusTask().id, dates: ids(app.deadlineItems()), count: app.doingCount()};\n'
+            'focus: app.focusTask().id, dates: ids(app.deadlineItems())};\n'
             'app.showHidden = true; app.collections = hiddenCollections;\n'
             'const included = {doing: ids(cards("task").filter(t => t.status === "doing")), notes: ids(cards("note")), '
             'focus: app.focusTask().id};\n'
@@ -928,7 +926,6 @@ view_labels:
         self.assertEqual(set(payload["normal"]["dates"]), {self.tasks[1].stem, self.note.stem})
         self.assertNotIn(archived.stem, payload["normal"]["dates"])
         self.assertNotIn(self.tasks[3].stem, payload["normal"]["dates"])
-        self.assertEqual(payload["normal"]["count"], 1)
         self.assertEqual(payload["included"]["doing"], [self.tasks[1].stem])
         self.assertEqual(payload["included"]["notes"], [self.note.stem])
         self.assertNotEqual(payload["included"]["focus"], self.tasks[1].stem)
@@ -1336,7 +1333,6 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             # Only matching cards are sent; filter choices and counts still cover the workspace.
             self.assertEqual([item["id"] for item in payload["tasks"]], [self.tasks[0].stem])
             self.assertEqual(payload["meta"]["workspace_projects"], ["Alpha", "Beta"])
-            self.assertEqual(payload["meta"]["doing_count"], 1)
             self.assertEqual([entry["id"] for entry in payload["meta"]["focus"]["candidates"]], payload["collections"]["open"])
             everything = self.get_json(url + "api/items")
             self.assertEqual(len(everything["tasks"]), 5)
@@ -1713,7 +1709,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         self.assertNotIn("commandPrefix", rendered)
         self.assertNotIn("restart_commands", rendered)
 
-    def test_due_cues_restart_badges_and_wip_warning_are_present(self) -> None:
+    def test_due_cues_and_restart_badges_are_present(self) -> None:
         self.render_dashboard()
         rendered = self.output.read_text(encoding="utf-8")
         self.assertIn(".mt-card.is-overdue", rendered)
@@ -1723,10 +1719,7 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
         self.assertIn("dueClass(task)", rendered)
         self.assertIn("needs restart step", rendered)
         self.assertIn("task.needs_restart", rendered)
-        self.assertIn("statusLabel(status)", rendered)
-        self.assertIn('return label + " (" + this.doingCount() + "/" + this.maxDoingTasks + " max)";', rendered)
         self.assertIn("columnClass(status)", rendered)
-        self.assertIn("is-over-limit", rendered)
         self.assertIn("width: fit-content", rendered)
         self.assertNotIn("mt-wip", rendered)
         self.assertNotIn(".mt-overview.is-compact", rendered)
@@ -2663,6 +2656,17 @@ taskweb.serve_dashboard(taskweb.Workspace.resolve(), '127.0.0.1', 0, no_open=Tru
             'app.selectTopicNode("Learning", { metaKey: true });\n'
             'app.selectTopicNode("Learning/Rust", { ctrlKey: true });\n'
             'assert.deepEqual(app.filters.topic, ["Learning", "Learning/Rust"]);\n'
+            'assert.equal(app.noSubtopics, false);\n'
+            'assert.equal(app.collectionQuery().no_subtopics, undefined);\n'
+            'app.toggleNoSubtopics(); assert.equal(app.noSubtopics, true);\n'
+            'assert.equal(app.collectionQuery().no_subtopics, "true");\n'
+            'const topicFacet = app.filterFacets().find(f => f.key === "topic");\n'
+            'assert.ok(topicFacet.summary.endsWith(" (no subtopics)"));\n'
+            'app.clearFilter("topic"); assert.equal(app.collectionQuery().no_subtopics, undefined);\n'
+            'app.applyFilterParams(new URLSearchParams("topic=work&no_subtopics=true"));\n'
+            'assert.deepEqual(app.filters.topic, ["work"]); assert.equal(app.noSubtopics, true);\n'
+            'app.applyFilterParams(new URLSearchParams("topic=work"));\n'
+            'assert.deepEqual(app.filters.topic, ["work"]); assert.equal(app.noSubtopics, false);\n'
             '`);'
         )
         result = subprocess.run([node], input=probe, text=True, capture_output=True)
@@ -2768,6 +2772,36 @@ class FooterTests(unittest.TestCase):
             )
             self.assertEqual(len(filtered["collections"]["tasks"]), 1)
             self.assertEqual(filtered["meta"]["collection_totals"]["tasks"], 3)
+
+    def test_dashboard_payload_no_subtopics_filters_direct_cards_and_keeps_topic_tree_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cards").mkdir()
+            (root / "settings.yaml").write_text(
+                (SOURCE_ROOT / "templates" / "settings.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            ws = taskweb.Workspace.at(root)
+            for idx, topic in enumerate(("work", "work/infra", "work/infra/k8s")):
+                (root / "cards" / f"2026-06-22-09000{idx}-t{idx}.md").write_text(
+                    f"---\nid: 2026-06-22-09000{idx}-t{idx}\ntitle: Task {idx}\nkind: task\nstatus: active\npriority: medium\n"
+                    f"type: task\ntopic: {topic}\ncreated: 2026-06-22\nupdated: 2026-06-22\n---\n# Task {idx}\n",
+                    encoding="utf-8",
+                )
+            cache = taskweb.store.CardCache()
+            with_subtopics = taskweb.dashboard_payload(
+                ws, cache, query=taskweb.request_query(ws, {"topic": ["work"]}),
+            )
+            self.assertEqual(len(with_subtopics["collections"]["tasks"]), 3)
+            direct_only = taskweb.dashboard_payload(
+                ws, cache, query=taskweb.request_query(ws, {"topic": ["work"], "no_subtopics": "true"}),
+            )
+            self.assertEqual(direct_only["collections"]["tasks"], ["2026-06-22-090000-t0"])
+            self.assertEqual(direct_only["query"], {"topic": ["work"], "no_subtopics": True})
+            tree_by_path = {node["path"]: (node["count"], node["own"]) for node in direct_only["meta"]["topic_trees"]["tasks"]}
+            self.assertEqual(tree_by_path["work"], (3, 1))
+            self.assertEqual(tree_by_path["work/infra"], (2, 1))
+            self.assertEqual(tree_by_path["work/infra/k8s"], (1, 1))
 
     def test_footer_count_label_across_views_in_js(self) -> None:
         node = shutil.which("node")
