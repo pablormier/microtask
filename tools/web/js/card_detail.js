@@ -9,6 +9,15 @@ function createDetailController() {
       this.trapDialogFocus(event, this.$refs.detailDialog);
     },
 
+    // The Properties sidebar sticks just under the sticky header, whose height follows the title.
+    observeDetailHeader(header) {
+      const dialog = header && header.parentElement;
+      if (!dialog || typeof ResizeObserver === "undefined") return;
+      const sync = () => dialog.style.setProperty("--mt-detail-header-height", `${header.offsetHeight}px`);
+      new ResizeObserver(sync).observe(header);
+      sync();
+    },
+
     trapDialogFocus(event, dialog) {
       if (!dialog || !dialog.querySelectorAll) return;
       const focusable = Array.from(dialog.querySelectorAll(

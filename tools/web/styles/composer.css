@@ -166,13 +166,13 @@
 .mt-composer .mt-extra-summary .mt-extra-chevron { order: -1; width: .4rem; height: .4rem; margin: 0 4px 0 2px; border-color: currentColor; }
 .mt-composer .mt-metadata-more > summary { padding: 4px 6px 4px 2px; font-weight: 600; }
 .mt-capture-properties { margin-bottom: var(--mt-space-2); }
+/* Properties read as a sidebar column, set off by a hairline rather than a filled box,
+   so the card content stays the brightest thing in the dialog. */
 .mt-properties-panel {
   align-self: start;
   min-width: 0;
-  padding: 14px 16px 4px;
-  border: 1px solid var(--mt-border);
-  border-radius: var(--mt-radius-lg);
-  background: var(--mt-surface-subdued);
+  padding: 0 0 4px 20px;
+  border-left: 1px solid var(--mt-border);
 }
 .mt-properties-header {
   display: flex;

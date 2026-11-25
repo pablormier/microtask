@@ -6,7 +6,7 @@
                    @pointermove="$el.classList.remove('is-zen-typing')" @pointerdown="$el.classList.remove('is-zen-typing')"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
                    @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }">
-            <header class="mt-detail-header">
+            <header class="mt-detail-header" x-init="observeDetailHeader($el)">
               <div class="mt-detail-heading">
                 <div class="mt-detail-identity"><span class="mt-ref" x-text="selected?.ref"></span><span x-text="selected?.kind === 'note' ? 'Note' : 'Task'"></span><span x-show="selected?.archived">Archived</span><span x-show="selected?.hidden">Hidden</span></div>
                 <h2 id="mt-detail-title" class="mt-detail-title">

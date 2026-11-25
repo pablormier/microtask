@@ -9,10 +9,11 @@
   overflow: auto;
 }
 .mt-detail {
+  --mt-detail-max-height: 90vh;
   width: min(1100px, 100%);
   min-width: 0;
   max-width: 100%;
-  max-height: 90vh;
+  max-height: var(--mt-detail-max-height);
   padding: 20px 24px 18px;
   overflow: auto;
 }
@@ -28,11 +29,31 @@
   padding: 20px 24px 4px;
   background: var(--mt-surface);
 }
+/* Once content scrolls under the sticky header, a hairline marks where it is cut off. */
+@supports (animation-timeline: scroll()) {
+  .mt-detail:not(.is-zen) .mt-detail-header {
+    animation: mt-detail-header-rule linear both;
+    animation-timeline: scroll(nearest block);
+    animation-range: 0 16px;
+  }
+  @keyframes mt-detail-header-rule { to { box-shadow: 0 1px 0 var(--mt-border); } }
+}
 .mt-detail-heading { flex: 1 1 auto; min-width: 0; }
 .mt-detail-heading h2 { overflow-wrap: anywhere; }
 .mt-detail-identity { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mt-space-2); margin-bottom: 6px; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
 .mt-detail-identity > span:not(.mt-ref):not([style*="display: none"]) { padding: 0 7px; border-radius: var(--mt-radius-pill); background: var(--mt-surface-hover); font-weight: 600; line-height: 1.6; }
-.mt-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 24px; margin-top: var(--mt-space-4); }
+.mt-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; margin-top: var(--mt-space-4); }
+/* Like a code host's issue sidebar, Properties stay in view while the content scrolls.
+   They stick just under the sticky header (whose visible part is its height minus the
+   dialog's 20px top padding) and scroll on their own when taller than the dialog. */
+.mt-detail:not(.is-zen) .mt-properties-panel {
+  position: sticky;
+  top: calc(var(--mt-detail-header-height, 72px) - 8px);
+  max-height: calc(var(--mt-detail-max-height) - var(--mt-detail-header-height, 72px) - 10px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mt-border-strong) transparent;
+}
 .mt-detail-content { min-width: 0; }
 .mt-content-header { display: flex; justify-content: space-between; align-items: center; gap: var(--mt-space-2); margin-bottom: var(--mt-space-3); }
 .mt-content-header h3,
@@ -111,7 +132,7 @@ textarea.mt-content-input { min-height: 22rem; margin: 0; font-family: var(--mt-
   column-gap: 6px;
 }
 .mt-detail-footer-label { color: var(--mt-text-muted); font-weight: 500; }
-.mt-detail-footer time { padding-left: 9px; color: var(--mt-text-muted); font-variant-numeric: tabular-nums; }
+.mt-detail-footer time { padding-left: 9px; color: var(--mt-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mt-detail-owner { color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
 .mt-detail-header h2 { margin: 0; color: var(--mt-text); font-size: var(--mt-font-size-xl); font-weight: 650; letter-spacing: -.01em; line-height: 1.3; }
 /* The title is edited in place: it reads as the heading and shows a field only on hover or focus. */
@@ -177,18 +198,15 @@ textarea.mt-detail-title-input:disabled { opacity: 1; cursor: default; }
 .mt-preview :is(h4, h5, h6) { font-size: .95rem; }
 .mt-preview > h2 { font-size: 1.15rem; }
 .mt-preview > :first-child { margin-top: 0; }
-/* Next action and processing instructions: labelled sections with in-place editors. */
-/* Each one is a callout attached to the content, so no rule is needed between them. */
+/* Next action and processing instructions: labelled sections with in-place editors.
+   A side rule ties each one to the content without a filled box competing with it. */
 .mt-text-property {
   min-width: 0;
-  margin-top: var(--mt-space-4);
-  padding: 10px 14px 12px;
-  border: 1px solid var(--mt-border);
-  border-left: 3px solid var(--mt-border-strong);
-  border-radius: var(--mt-radius-md);
-  background: var(--mt-surface-subdued);
+  margin-top: 20px;
+  padding: 0 0 2px 14px;
+  border-left: 2px solid var(--mt-border-strong);
 }
-.mt-text-property + .mt-text-property { margin-top: var(--mt-space-2); }
+.mt-text-property + .mt-text-property { margin-top: var(--mt-space-4); }
 .mt-text-property.is-next-action { border-left-color: var(--mt-accent); }
 .mt-text-property-header {
   display: flex;
@@ -197,9 +215,6 @@ textarea.mt-detail-title-input:disabled { opacity: 1; cursor: default; }
   gap: var(--mt-space-2);
   min-height: var(--mt-control-size-compact);
   margin-bottom: var(--mt-space-1);
-}
-.mt-text-property.is-next-action .mt-text-property-header h3 {
-  color: var(--mt-accent);
 }
 button.mt-button.mt-text-property-edit {
   color: var(--mt-text-muted);
@@ -227,16 +242,14 @@ button.mt-button.mt-text-property-edit {
 }
 .mt-text-property-editor .mt-layout-group { justify-content: flex-end; gap: var(--mt-space-2); }
 
-/* Activity (comments and time entries) is a tinted panel that matches Properties,
-   so the card's content visibly ends where the panel begins. Entries are separated
-   by spacing, not rules. */
+/* Activity (comments and time entries) sits after the card's content, below a rule
+   across the content column: the card ends at the rule. It has no fill or colour of its
+   own, so it reads as secondary to the content above it. */
 .mt-detail-activity {
   min-width: 0;
-  margin-top: 28px;
-  padding: 14px 16px 16px;
-  border: 1px solid var(--mt-border);
-  border-radius: var(--mt-radius-lg);
-  background: var(--mt-surface-subdued);
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mt-border);
 }
 .mt-activity-header {
   display: flex;
@@ -317,8 +330,8 @@ button.mt-button.mt-activity-tab[aria-selected="true"] {
   line-height: 1.45;
 }
 button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
-  background: var(--mt-accent-soft);
-  color: var(--mt-accent);
+  background: var(--mt-surface-hover);
+  color: var(--mt-text);
 }
 /* No gap on .mt-activity-panels and no box padding/border on .mt-activity-panel itself,
    so hidden="until-found" panels leave zero empty strip while remaining searchable. */
@@ -335,19 +348,20 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
   color: var(--mt-text-muted);
   font-size: var(--mt-font-size-sm);
 }
-.mt-comment-history { display: grid; gap: var(--mt-space-2); }
-/* Each comment is a light card on the activity panel; reset Pico's <article> styling. */
+.mt-comment-history { display: grid; }
+/* Comments are a plain list split by hairlines; reset Pico's <article> styling. */
 .mt-comment-entry {
   min-width: 0;
   margin: 0;
-  padding: 10px 12px 11px;
-  border: 1px solid var(--mt-border);
-  border-radius: var(--mt-radius-md);
-  background: var(--mt-surface);
+  padding: 10px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
   overflow-wrap: anywhere;
 }
-.mt-comment-entry.is-editing { padding: 8px; }
+.mt-comment-entry + .mt-comment-entry { border-top: 1px solid var(--mt-border); }
+.mt-comment-history > .mt-comment-entry:first-child { padding-top: 2px; }
 .mt-comment-meta {
   display: flex;
   flex-wrap: wrap;
@@ -412,10 +426,7 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
 .mt-time-entry-list {
   display: grid;
   margin: 0;
-  padding: 4px;
-  border: 1px solid var(--mt-border);
-  border-radius: var(--mt-radius-md);
-  background: var(--mt-surface);
+  padding: 0;
   list-style: none;
 }
 .mt-time-entry {
@@ -424,11 +435,10 @@ button.mt-button.mt-activity-tab[aria-selected="true"] .mt-activity-tab-count {
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 12px;
-  padding: 7px 10px;
-  border-radius: var(--mt-radius-sm);
+  padding: 7px 0;
   font-size: var(--mt-font-size-sm);
 }
-.mt-time-entry:nth-child(even) { background: var(--mt-surface-subdued); }
+.mt-time-entry + .mt-time-entry { border-top: 1px solid var(--mt-border); }
 .mt-time-entry-when {
   display: flex;
   flex-wrap: wrap;
@@ -575,9 +585,9 @@ textarea.mt-comment-input {
   width: 100%;
   height: auto;
   min-width: 0;
-  min-height: 3.5rem;
+  min-height: 0;
   field-sizing: content;
-  min-block-size: 3lh;
+  min-block-size: 2lh;
   max-block-size: 12lh;
   margin: 0;
   padding: 10px 12px 6px;
@@ -614,7 +624,7 @@ textarea.mt-field.is-drag-over {
 /* Breakpoint: compact (70rem, 1120px). See styles/README.md. */
 @media (max-width: 70rem) {
   .mt-detail-backdrop { padding: 12px; place-items: start stretch; }
-  .mt-detail { max-height: calc(100vh - 24px); }
+  .mt-detail { --mt-detail-max-height: calc(100vh - 24px); }
 }
 
 
@@ -728,13 +738,12 @@ textarea.mt-field.is-drag-over {
   justify-content: flex-end;
   gap: 8px;
   position: sticky;
-  bottom: -18px;
+  bottom: 0;
   z-index: 2;
-  margin: 16px -16px 0;
-  padding: 10px 16px;
+  margin: 16px 0 0;
+  padding: 10px 0;
   border-top: 1px solid var(--mt-border);
-  border-radius: 0 0 var(--mt-radius-lg) var(--mt-radius-lg);
-  background: var(--mt-surface-subdued);
+  background: var(--mt-surface);
 }
 .mt-unsaved-indicator { margin-right: auto; color: var(--mt-text-muted); font-size: var(--mt-font-size-xs); }
 .mt-unsaved-indicator::before {
@@ -754,7 +763,9 @@ textarea.mt-field.is-drag-over {
   .mt-detail-backdrop { padding: 8px; }
   .mt-detail { padding: 14px 14px; width: 100%; }
   .mt-detail-layout { grid-template-columns: minmax(0, 1fr); gap: var(--mt-space-4); }
-  .mt-properties-panel { padding: 12px 12px 0; }
+  /* One column: Properties follow the activity, after a rule, and scroll with the dialog. */
+  .mt-detail:not(.is-zen) .mt-properties-panel { position: static; max-height: none; overflow: visible; padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--mt-border); }
+  .mt-detail:not(.is-zen) .mt-properties-footer { bottom: -14px; }
   /* The header has no room for the property summary beside the title. */
   .mt-detail-navigation .mt-zen-meta-badge { display: none; }
   .mt-detail-navigation { gap: var(--mt-space-1); }
@@ -863,9 +874,13 @@ textarea.mt-field.is-drag-over {
   max-height: calc(100% - var(--mt-zen-pad-top) - var(--mt-zen-bar) - var(--mt-zen-pad-bottom) - 12px);
   overflow: auto;
   overscroll-behavior: contain;
+  padding: 14px 16px 4px;
+  border: 1px solid var(--mt-border);
+  border-radius: var(--mt-radius-lg);
   background: var(--mt-surface);
   box-shadow: var(--mt-shadow-popover);
 }
+.mt-detail.is-zen .mt-properties-panel.is-zen-open .mt-properties-footer { bottom: -4px; margin: 16px -16px 0; padding: 10px 16px; }
 .mt-detail.is-zen .mt-detail-layout {
   display: flex;
   flex: 1 1 auto;
