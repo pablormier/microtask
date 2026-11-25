@@ -2,6 +2,8 @@
         <div class="mt-detail-backdrop mt-dialog-backdrop" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" @click.self="if (!(contentEditor.open && contentEditor.zen)) clearSelection()" @keydown.escape.window="if (hoverCard) { clearHoverCard(); } else if (commentMention?.mention?.open) { commentMention.closeMention(); } else if (commentEditMention?.mention?.open) { commentEditMention.closeMention(); } else if (commentEditingIndex !== -1) { cancelEditComment(); } else if (contentEditor.open && contentEditor.handleEscape(contentContext())) { /* handled by editor */ } else if (!captureComposer.open && !quickSearch.open) { clearSelection(); }">
           <section class="mt-detail mt-dialog" role="dialog" :class="{ 'is-zen': Boolean(contentEditor.open && contentEditor.zen) }" aria-modal="true" aria-labelledby="mt-detail-title"
                    x-ref="detailDialog" tabindex="-1" @keydown.tab="trapDetailFocus($event)"
+                   @input="if (contentEditor.zen && $event.target.closest('textarea.mt-content-input')) $el.classList.add('is-zen-typing')"
+                   @pointermove="$el.classList.remove('is-zen-typing')" @pointerdown="$el.classList.remove('is-zen-typing')"
                    @keydown.meta.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }"
                    @keydown.ctrl.shift.f.stop.prevent="if (contentEditor.open) { contentEditor.toggleZen(contentContext()); } else if (selected && typeof selected.body === 'string' && !busy && !draftBusy && !detailLoading && !detailError) { openSelectedInZen(); }">
             <header class="mt-detail-header">
@@ -22,9 +24,9 @@
               <!-- Zen editing tools sit in the top bar beside the card actions; the title runs full width below. -->
               <div class="mt-zen-bar-tools" x-show="contentEditor.open && contentEditor.zen">
                 <div class="mt-segmented mt-zen-view-toggle" role="group" aria-label="Zen editor view">
-                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'write'" @click="contentEditor.setZenView(contentContext(), 'write')">Write</button>
-                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'split'" @click="contentEditor.setZenView(contentContext(), 'split')">Split</button>
-                  <button class="mt-segment" type="button" :aria-pressed="contentEditor.zenView === 'preview'" @click="contentEditor.setZenView(contentContext(), 'preview')">Preview</button>
+                  <button class="mt-segment mt-zen-view-write" aria-label="Write" type="button" :aria-pressed="contentEditor.zenView === 'write'" @click="contentEditor.setZenView(contentContext(), 'write')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Write</span></button>
+                  <button class="mt-segment mt-zen-view-split" aria-label="Split" type="button" :aria-pressed="contentEditor.zenView === 'split'" @click="contentEditor.setZenView(contentContext(), 'split')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>Split</span></button>
+                  <button class="mt-segment mt-zen-view-preview" aria-label="Preview" type="button" :aria-pressed="contentEditor.zenView === 'preview'" @click="contentEditor.setZenView(contentContext(), 'preview')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span>Preview</span></button>
                 </div>
                 <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-attach"
                         aria-label="Attach file" title="Attach file or paste image"
@@ -40,7 +42,7 @@
                         :aria-expanded="contentEditor.zenMetaOpen"
                         aria-controls="mt-detail-properties-panel"
                         @click="contentEditor.zenMetaOpen = !contentEditor.zenMetaOpen">
-                  <span>Properties</span>
+                  <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Properties</span>
                   <span class="mt-zen-meta-badge" x-show="!contentEditor.zenMetaOpen && contentEditor.zenMetaSummary(propertyEditor.form)" x-text="contentEditor.zenMetaSummary(propertyEditor.form)"></span>
                 </button>
                 <button class="mt-button mt-button-quiet mt-button-compact mt-detail-back" type="button" aria-label="Back to previous card" x-show="canGoBackReference()" @click="backReference()"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>Back</span></button>

@@ -125,7 +125,6 @@
   border-top: 1px solid var(--mt-border);
 }
 .mt-composer-footer .mt-composer-discard { margin-right: auto; }
-.mt-composer-body-label-row button.mt-composer-template { color: var(--mt-accent); }
 .mt-composer-body-actions {
   display: flex;
   align-items: center;
@@ -314,7 +313,7 @@ li.mt-mention-option.is-active .mt-mention-meta {
   --mt-zen-pad-right: max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
   --mt-zen-pad-bottom: max(10px, env(safe-area-inset-bottom, 0px));
   --mt-zen-pad-left: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px));
-  --mt-zen-bar: 36px;
+  --mt-zen-bar: var(--mt-control-size-compact);
   --mt-zen-column: min(76ch, 100%);
   position: relative;
   width: 100%;
@@ -344,7 +343,7 @@ li.mt-mention-option.is-active .mt-mention-meta {
   white-space: nowrap;
 }
 .mt-composer.is-zen .mt-composer-header .mt-zen-meta-toggle { margin-inline-start: auto; }
-/* Attach and the meeting template live in the bar, so the row above the text is dropped. */
+/* Attach lives in the bar, so the row above the text is dropped. */
 .mt-composer.is-zen .mt-composer-body-label-row { display: none; }
 .mt-composer.is-zen .mt-composer-title-field { margin: 10px 0 6px; }
 .mt-composer.is-zen .mt-composer-content {
@@ -369,10 +368,8 @@ li.mt-mention-option.is-active .mt-mention-meta {
   border-color: transparent;
   box-shadow: none;
 }
-.mt-composer.is-zen .mt-composer-body.mt-field:focus-visible {
-  outline: 2px solid var(--mt-focus);
-  outline-offset: 4px;
-}
+/* The caret marks focus in the writing area; a ring around the whole page is noise. */
+.mt-composer.is-zen .mt-composer-body.mt-field:focus-visible { outline: none; }
 .mt-composer.is-zen .mt-composer-footer { margin-top: 8px; padding-top: 8px; }
 /* Properties open as a popover under the bar on the side of their toggle, over the text,
    so opening them never moves the title or the text. */
@@ -401,12 +398,7 @@ li.mt-mention-option.is-active .mt-mention-meta {
 }
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
-  .mt-composer.is-zen .mt-composer-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .mt-composer.is-zen .mt-zen-meta-badge,
-  .mt-composer.is-zen .mt-zen-attach > span { display: none; }
+  .mt-composer.is-zen .mt-zen-meta-badge { display: none; }
   .mt-composer.is-zen .mt-composer-title-field { margin-top: 6px; }
   /* On phones the bar can wrap, so Properties open as a sheet from the bottom edge. */
   .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
@@ -423,10 +415,87 @@ li.mt-mention-option.is-active .mt-mention-meta {
     overscroll-behavior: contain;
   }
 }
+/* Zen bar, shared by the card editor and the composer. Every control is drawn at the
+   compact size so the bar is one slim row. On touch screens an invisible layer extends each
+   control to a tap target of at least 44px (Apple HIG), without making it look bigger. */
+:is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) {
+  --mt-zen-control: var(--mt-control-size-compact);
+}
+:is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(button.mt-button:not(.mt-card-menu-items > *), summary.mt-menu-trigger) {
+  min-height: var(--mt-zen-control);
+  height: var(--mt-zen-control);
+}
+:is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(button.mt-button-icon, summary.mt-menu-trigger) {
+  width: var(--mt-zen-control);
+  min-width: var(--mt-zen-control);
+}
+/* The card menu reads as one more quiet icon in the bar, not a raised box. */
+.mt-detail.is-zen .mt-detail-header summary.mt-menu-trigger:not(:hover) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+:is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-segmented { padding: 2px; }
+:is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-segmented .mt-segment {
+  min-height: calc(var(--mt-zen-control) - 4px);
+  padding: 2px 10px;
+}
+/* View segments show words; their icons are for phones. */
+.mt-zen-view-toggle .mt-segment > .mt-icon { display: none; }
 @media (pointer: coarse) {
-  .mt-composer.is-zen { --mt-zen-bar: 44px; }
-  .mt-composer.is-zen .mt-composer-header :is(button.mt-button, .mt-segmented .mt-segment) {
-    min-block-size: 44px;
-    min-inline-size: 44px;
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(button.mt-button:not(.mt-card-menu-items > *), summary.mt-menu-trigger, .mt-segmented .mt-segment) {
+    position: relative;
   }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(button.mt-button:not(.mt-card-menu-items > *), summary.mt-menu-trigger)::before {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((var(--mt-zen-control) - 44px) / 2));
+  }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-segmented .mt-segment::before {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((var(--mt-zen-control) - 48px) / 2)) -6px;
+  }
+}
+/* Breakpoint: phone (42rem, 672px). See styles/README.md. The whole bar fits one row:
+   buttons keep their icons and drop their words, the view toggle becomes icons, and Split
+   (which stacks on a phone) is offered only while it is the current view. */
+@media (max-width: 42rem) {
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) { column-gap: 4px; }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(.mt-zen-attach, .mt-zen-meta-toggle) > span:not(.mt-zen-meta-badge) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) :is(.mt-zen-attach, .mt-zen-meta-toggle) { width: var(--mt-zen-control); padding: 0; justify-content: center; }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-zen-view-toggle .mt-segment > .mt-icon { display: inline-block; }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-zen-view-toggle .mt-segment > span { display: none; }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-segmented .mt-segment { padding-inline: 8px; }
+  :is(.mt-detail.is-zen .mt-detail-header, .mt-composer.is-zen .mt-composer-header) .mt-zen-view-toggle .mt-zen-view-split:not([aria-pressed="true"]) { display: none; }
+}
+/* Scrollbars in the writing column stay thin and quiet, so they do not read as a rule
+   beside the text. */
+:is(.mt-detail.is-zen, .mt-composer.is-zen) :is(textarea.mt-content-input, textarea.mt-composer-body, .mt-zen-preview) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mt-border-strong) transparent;
+}
+/* While you type, the bar and the save row fade out and leave only the text. Moving the
+   pointer, tapping, or tabbing into the bar brings them back. */
+:is(.mt-detail.is-zen .mt-detail-header > :not(.mt-detail-heading), .mt-detail.is-zen .mt-content-footer,
+    .mt-composer.is-zen .mt-composer-header, .mt-composer.is-zen .mt-composer-footer) {
+  transition: opacity .2s ease;
+}
+:is(.mt-detail.is-zen.is-zen-typing .mt-detail-header:not(:focus-within) > :not(.mt-detail-heading),
+    .mt-detail.is-zen.is-zen-typing .mt-content-footer:not(:focus-within),
+    .mt-composer.is-zen.is-zen-typing .mt-composer-header:not(:focus-within),
+    .mt-composer.is-zen.is-zen-typing .mt-composer-footer:not(:focus-within)) {
+  opacity: 0;
+  transition: opacity .6s ease .3s;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.mt-detail.is-zen .mt-detail-header > *, .mt-detail.is-zen .mt-content-footer,
+      .mt-composer.is-zen .mt-composer-header, .mt-composer.is-zen .mt-composer-footer) { transition: none !important; }
 }

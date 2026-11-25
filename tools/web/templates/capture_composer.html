@@ -2,6 +2,8 @@
         <div class="mt-composer-backdrop mt-dialog-backdrop" :class="{ 'is-zen': captureComposer.zen }" @click.self="if (!captureComposer.zen) captureComposer.close(captureContext())">
           <section class="mt-composer mt-dialog" role="dialog" :class="{ 'is-zen': captureComposer.zen }" aria-modal="true"
                    x-ref="composerDialog" @keydown.tab="trapComposerFocus($event)"
+                   @input="if (captureComposer.zen && $event.target.closest('textarea.mt-composer-body')) $el.classList.add('is-zen-typing')"
+                   @pointermove="$el.classList.remove('is-zen-typing')" @pointerdown="$el.classList.remove('is-zen-typing')"
                    aria-labelledby="mt-composer-title" aria-describedby="mt-composer-help"
                    @keydown.escape.stop.prevent="captureComposer.handleEscape(captureContext())"
                    @keydown.meta.shift.f.stop.prevent="captureComposer.toggleZen(captureContext())"
@@ -19,9 +21,9 @@
                 </div>
               </template>
               <div class="mt-segmented mt-zen-view-toggle" role="group" aria-label="Zen editor view" x-show="captureComposer.zen">
-                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'write'" @click="captureComposer.setZenView(captureContext(), 'write')">Write</button>
-                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'split'" @click="captureComposer.setZenView(captureContext(), 'split')">Split</button>
-                <button type="button" class="mt-segment" :aria-pressed="captureComposer.zenView === 'preview'" @click="captureComposer.setZenView(captureContext(), 'preview')">Preview</button>
+                <button type="button" class="mt-segment mt-zen-view-write" aria-label="Write" :aria-pressed="captureComposer.zenView === 'write'" @click="captureComposer.setZenView(captureContext(), 'write')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Write</span></button>
+                <button type="button" class="mt-segment mt-zen-view-split" aria-label="Split" :aria-pressed="captureComposer.zenView === 'split'" @click="captureComposer.setZenView(captureContext(), 'split')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>Split</span></button>
+                <button type="button" class="mt-segment mt-zen-view-preview" aria-label="Preview" :aria-pressed="captureComposer.zenView === 'preview'" @click="captureComposer.setZenView(captureContext(), 'preview')"><svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><span>Preview</span></button>
               </div>
               <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-attach"
                       x-show="captureComposer.zen && captureComposer.draft"
@@ -31,17 +33,12 @@
                 <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                 <span>Attach</span>
               </button>
-              <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-template"
-                      x-show="captureComposer.zen && captureComposer.draft?.kind === 'note'"
-                      title="Insert meeting template"
-                      :disabled="captureComposer.saving"
-                      @click="captureComposer.applyMeetingTemplate(captureContext())">Meeting template</button>
               <button type="button" class="mt-button mt-button-quiet mt-button-compact mt-zen-meta-toggle"
                       x-show="captureComposer.zen && captureComposer.draft"
                       :aria-expanded="captureComposer.zenMetaOpen"
                       aria-controls="mt-composer-zen-meta"
                       @click="captureComposer.zenMetaOpen = !captureComposer.zenMetaOpen">
-                <span>Properties</span>
+                <svg class="mt-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Properties</span>
                 <span class="mt-zen-meta-badge" x-show="captureComposer.zenMetaSummary()" x-text="captureComposer.zenMetaSummary()"></span>
               </button>
               <button type="button" class="mt-button mt-button-quiet mt-button-icon mt-zen-toggle"
@@ -80,8 +77,6 @@
                     </svg>
                     <span>Attach</span>
                   </button>
-                  <button type="button" class="mt-button mt-button-compact mt-button-quiet mt-composer-template" @click="captureComposer.applyMeetingTemplate(captureContext())"
-                          x-show="captureComposer.draft && captureComposer.draft?.kind === 'note'" :disabled="captureComposer.saving">Insert meeting template</button>
                 </div>
               </div>
               <div class="mt-zen-workspace" :class="{ 'is-zen': captureComposer.zen, 'is-split': captureComposer.zen && captureComposer.zenView === 'split', 'is-preview': captureComposer.zen && captureComposer.zenView === 'preview' }">
@@ -139,7 +134,6 @@
               </div>
               <p class="mt-composer-recovery-warning" role="status" x-show="captureComposer.recoveryWarning" x-text="captureComposer.recoveryWarning"></p>
               <p class="mt-composer-storage-status" role="status" aria-live="polite" x-show="draftWorkspaceStatus" :class="{ 'is-error': draftWorkspaceStatus === 'Error' }" x-text="draftWorkspaceStatus"></p>
-              <p class="mt-composer-recovery-warning" x-show="captureComposer.draft && captureComposer.draft?.kind === 'note' && captureComposer.isMeetingTemplateOnly()">Add note text under a heading before saving the template.</p>
               <p class="mt-composer-recovery-warning" x-show="captureComposer.draft && captureComposer.draft.taskOptions?.due && !captureComposer.draft.taskOptions?.due_kind">Choose a date meaning before saving.</p>
               <p class="mt-composer-action-status" role="status" aria-live="polite"
                  :class="{ 'is-error': captureComposer.messageError }" x-text="captureComposer.message"></p>

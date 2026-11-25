@@ -171,14 +171,13 @@ class NoteCaptureTests(unittest.TestCase):
         self.assertNotIn("needs_review", snapshot["properties"])
         self.assertEqual(self.run_mt("validate").returncode, 0)
 
-    def test_editor_capture_saves_exact_body_and_template_headings_are_literal(self) -> None:
+    def test_editor_capture_saves_exact_body_and_skips_an_empty_draft(self) -> None:
         log = Path(self.temporary.name) / "editor.log"
         env = self.env.copy()
         env.update({"VISUAL": str(self.editor), "EDITOR_LOG": str(log), "EDITOR_MODE": "unchanged"})
-        unchanged = self.run_mt_terminal("note", "--template", "meeting", env=env)
+        unchanged = self.run_mt_terminal("note", env=env)
         self.assertEqual(unchanged.returncode, 0, unchanged.stderr.decode("utf-8", errors="replace"))
-        template = "### Discussion\n\n### Decisions\n\n### Actions\n"
-        self.assertEqual(log.read_bytes(), template.encode())
+        self.assertEqual(log.read_bytes(), b"")
         self.assertEqual(list(card_files(self.root, "note")), [])
 
         source = "First line\r\n\r\n## Notes\r\n````\r\nraw\r\n````\r\n"

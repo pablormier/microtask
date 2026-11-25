@@ -265,10 +265,9 @@ def command_note_editor(args: argparse.Namespace, ws: Workspace | None = None) -
     if not sys.stdin.isatty():
         print("error: interactive note editor requires a terminal; pass --file or inline text", file=sys.stderr)
         return 2
-    template = "### Discussion\n\n### Decisions\n\n### Actions\n" if args.template == "meeting" else ""
     timestamp = now_stamp()  # Capture creation time when the editor opens.
     try:
-        draft_path = create_editor_recovery_copy("new-note", template.encode("utf-8"), ws=resolved)
+        draft_path = create_editor_recovery_copy("new-note", b"", ws=resolved)
     except OSError as error:
         print(f"error: could not prepare note draft: {error}", file=sys.stderr)
         return 1
@@ -285,11 +284,7 @@ def command_note_editor(args: argparse.Namespace, ws: Workspace | None = None) -
             print(f"error: editor exited with status {edited.returncode}; note was not saved", file=sys.stderr)
             return edited.returncode
         candidate = draft_path.read_bytes().decode("utf-8")
-        unchanged_template = template and (
-            [line.strip() for line in candidate.splitlines() if line.strip()] ==
-            [line.strip() for line in template.splitlines() if line.strip()]
-        )
-        if unchanged_template or not candidate.strip():
+        if not candidate.strip():
             keep_draft = False
             if getattr(args, "as_json", False):
                 print(json.dumps({"saved": False, "changed": False, "reason": "no_changes"}, ensure_ascii=False))
@@ -1052,14 +1047,10 @@ def _validate_capture_args(root_parser: argparse.ArgumentParser, args: argparse.
                for name in ("status", "task_type", "next_action", "next_action_file", "by")):
             root_parser.error("--status, --task-type, --next-action, --next-action-file, and --by are task-only options")
     else:
-        if args.template:
-            root_parser.error("--template applies only to notes")
         if not has_input:
             root_parser.error("add requires text or --file")
     if args.capture and not has_input:
         root_parser.error("--capture requires text or --file")
-    if args.template and has_input:
-        root_parser.error("--template cannot be combined with capture text or --file")
     if not has_input and (args.instructions is not None or args.instructions_file is not None):
         root_parser.error("--instructions requires text or --file")
     if args.capture_id is not None and not args.capture:

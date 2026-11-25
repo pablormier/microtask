@@ -197,30 +197,6 @@ function createCaptureComposer() {
       await ctx.discardWorkspaceDraft(draft, true);
     },
 
-    meetingTemplateText() {
-      return "### Discussion\n\n### Decisions\n\n### Actions";
-    },
-
-    applyMeetingTemplate(ctx) {
-      if (!this.draft || this.saving) return;
-      const headings = this.meetingTemplateText();
-      if (this.draft.body.includes(headings)) {
-        this.message = "The meeting template is already in this note.";
-        this.messageError = false;
-        return;
-      }
-      if (!this.draft.body) this.draft.body = headings;
-      else {
-        const separator = this.draft.body.endsWith("\n\n") ? "" : (this.draft.body.endsWith("\n") ? "\n" : "\n\n");
-        this.draft.body += separator + headings;
-      }
-      this.persist(ctx);
-      this.schedulePreview();
-      this.message = "Meeting headings added. Existing text was kept.";
-      this.messageError = false;
-      ctx.focusInput();
-    },
-
     canSave(ctx) {
       const draft = this.draft;
       if (!draft || (draft.workspaceKey && draft.workspaceKey !== ctx.workspaceKey) || ctx.busy || ctx.attachmentUploading) return false;
@@ -236,13 +212,7 @@ function createCaptureComposer() {
         if (options.type && !Object.prototype.hasOwnProperty.call(ctx.taskTypePolicy, options.type)) return false;
         return true;
       }
-      return Boolean(draft.body.trim() && !this.isMeetingTemplateOnly());
-    },
-
-    isMeetingTemplateOnly() {
-      if (!this.draft) return false;
-      const nonemptyLines = text => text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-      return JSON.stringify(nonemptyLines(this.draft.body)) === JSON.stringify(nonemptyLines(this.meetingTemplateText()));
+      return Boolean(draft.body.trim());
     },
 
     async save(ctx) {

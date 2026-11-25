@@ -410,16 +410,14 @@ def capture_title(text: str) -> str:
 
 
 def title_from_note_body(text: str) -> str:
-    meeting_headings = {"### Discussion", "### Decisions", "### Actions"}
-    is_meeting = meeting_headings <= {line.strip() for line in text.splitlines()}
     for line in text.splitlines():
         value = line.strip()
-        if not value or (is_meeting and value in meeting_headings):
+        if not value:
             continue
         value = capture_title(re.sub(r"^#{1,6}\s+", "", value))
         if value:
             return value
-    return "Meeting notes" if is_meeting else "Untitled note"
+    return "Untitled note"
 
 
 def apply_exact_body_replacements(body: str, raw_json: str) -> str:

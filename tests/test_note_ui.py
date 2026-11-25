@@ -1198,18 +1198,6 @@ console.log(JSON.stringify({ first: first_app.reloads, looped, later: later.relo
         self.assertEqual(result["body"], "before \n")
         self.assertEqual(result["stashed"]["body"], "before \n")
 
-    def test_meeting_template_guard_requires_content(self) -> None:
-        result = self.run_node(r"""
-const makeApp=()=>{const app=taskBoard();app.$nextTick=()=>{};app.$refs={};app.scheduleDraftSave=()=>{};return app;};
-const template=makeApp();template.captureComposer.beginNew(template.captureContext());
-template.captureComposer.setKind(template.captureContext(),'note');
-template.captureComposer.applyMeetingTemplate(template.captureContext());
-const blocked=!template.captureComposer.canSave(template.captureContext());
-template.captureComposer.draft.body+='\n\nAn actual decision.';
-console.log(JSON.stringify({blocked,ready:template.captureComposer.canSave(template.captureContext())}));
-""")
-        self.assertEqual(result, {'blocked':True,'ready':True})
-
     def test_only_body_preview_checkboxes_are_enabled_with_indexes(self) -> None:
         result = self.run_node(r"""
 const mk=()=>{const el={attrs:{},classes:[],removeAttribute(n){delete this.attrs[n];},

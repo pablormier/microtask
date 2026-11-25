@@ -793,7 +793,7 @@ textarea.mt-field.is-drag-over {
   --mt-zen-pad-right: max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
   --mt-zen-pad-bottom: max(10px, env(safe-area-inset-bottom, 0px));
   --mt-zen-pad-left: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px));
-  --mt-zen-bar: 36px;
+  --mt-zen-bar: var(--mt-control-size-compact);
   --mt-zen-column: min(76ch, 100%);
   position: relative;
   display: flex;
@@ -831,7 +831,9 @@ textarea.mt-field.is-drag-over {
   min-width: 0;
   min-height: var(--mt-zen-bar);
 }
-.mt-detail.is-zen .mt-detail-navigation { grid-area: nav; min-height: var(--mt-zen-bar); align-items: center; }
+.mt-detail.is-zen .mt-detail-navigation { grid-area: nav; min-height: var(--mt-zen-bar); align-items: center; gap: 4px; }
+/* Moving to another card does not belong in a writing view. */
+.mt-detail.is-zen .mt-detail-back { display: none; }
 .mt-detail.is-zen .mt-detail-heading {
   grid-area: title;
   justify-self: center;
@@ -900,10 +902,8 @@ textarea.mt-field.is-drag-over {
   border-color: transparent;
   box-shadow: none;
 }
-.mt-detail.is-zen textarea.mt-content-input:focus-visible {
-  outline: 2px solid var(--mt-focus);
-  outline-offset: 4px;
-}
+/* The caret marks focus in the writing area; a ring around the whole page is noise. */
+.mt-detail.is-zen textarea.mt-content-input:focus-visible { outline: none; }
 /* Breakpoint: narrow (56rem, 896px). See styles/README.md. The property summary would
    crowd the bar. */
 @media (max-width: 56rem) {
@@ -911,13 +911,6 @@ textarea.mt-field.is-drag-over {
 }
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
-  .mt-detail.is-zen .mt-zen-attach > span { display: none; }
-  /* The tools and the card actions do not fit on one phone row: actions first, tools below. */
-  .mt-detail.is-zen .mt-detail-header {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "nav" "tools" "title";
-  }
-  .mt-detail.is-zen .mt-detail-navigation { justify-self: end; }
   .mt-detail.is-zen .mt-detail-heading { margin-top: 6px; }
   /* On phones the bar can wrap, so Properties open as a sheet from the bottom edge. */
   .mt-detail.is-zen .mt-properties-panel.is-zen-open {
@@ -926,13 +919,6 @@ textarea.mt-field.is-drag-over {
     left: var(--mt-zen-pad-left);
     width: auto;
     max-height: 70%;
-  }
-}
-@media (pointer: coarse) {
-  .mt-detail.is-zen { --mt-zen-bar: 44px; }
-  .mt-detail.is-zen .mt-detail-header :is(button.mt-button, .mt-segmented .mt-segment, .mt-menu-trigger) {
-    min-block-size: 44px;
-    min-inline-size: 44px;
   }
 }
 

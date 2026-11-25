@@ -336,8 +336,6 @@ def _register_capture_parsers(sub: argparse._SubParsersAction) -> None:
                              help="task only: claim identity for doing; defaults to MT_USERNAME, default_username, or the system username")
         capture.add_argument("--capture", action="store_true",
                              help="save supplied text as a quick capture (notes default to needing review)")
-        capture.add_argument("--template", choices=("meeting",),
-                             help="note only: seed an editor draft with a meeting outline")
         capture.add_argument("--capture-id", help=argparse.SUPPRESS)
         capture.add_argument("--created-at", help=argparse.SUPPRESS)
         capture.add_argument("--json", dest="as_json", action="store_true",
