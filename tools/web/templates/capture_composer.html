@@ -109,7 +109,8 @@
                 </div>
                 <div class="mt-preview mt-zen-preview" x-show="captureComposer.zen && (captureComposer.zenView === 'split' || captureComposer.zenView === 'preview')" x-html="captureComposer.previewHtml"></div>
               </div>
-              <div id="mt-composer-zen-meta" class="mt-composer-meta-group" x-show="!captureComposer.zen || captureComposer.zenMetaOpen" :class="{ 'is-zen-popover': captureComposer.zen }">
+              <div id="mt-composer-zen-meta" class="mt-composer-meta-group" x-show="!captureComposer.zen || captureComposer.zenMetaOpen" :class="{ 'is-zen-popover': captureComposer.zen }"
+                   @click.outside="if (captureComposer.zen && captureComposer.zenMetaOpen && !$event.target.closest('.mt-zen-meta-toggle')) captureComposer.zenMetaOpen = false">
                 <template x-if="captureComposer.draft">
                   <div class="mt-capture-properties" x-data="cardMetadataEditor(captureComposer.draft?.taskOptions || {}, true, 'capture', cardMetadataConfig(), captureComposer.draft?.taskMetadataErrors || {}, captureComposer.draft?.kind)"
                        x-effect="disabled = captureComposer.saving || busy; cardKind = captureComposer.draft?.kind || 'note'; fieldErrors = captureComposer.draft?.taskMetadataErrors || {}; if (['type', 'project', 'topic', 'tags'].some(field => fieldErrors[field])) morePropertiesOpen = true"

@@ -307,7 +307,16 @@ li.mt-mention-option.is-active .mt-mention-meta {
   padding: 0;
   place-items: stretch;
 }
+/* Zen geometry matches the card editor's (detail.css): the same padding, bar height and
+   writing column, and the Properties popover sits right under the bar. */
 .mt-composer.is-zen {
+  --mt-zen-pad-top: max(10px, env(safe-area-inset-top, 0px));
+  --mt-zen-pad-right: max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
+  --mt-zen-pad-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  --mt-zen-pad-left: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px));
+  --mt-zen-bar: 36px;
+  --mt-zen-column: min(76ch, 100%);
+  position: relative;
   width: 100%;
   max-width: 100%;
   height: 100vh;
@@ -315,20 +324,17 @@ li.mt-mention-option.is-active .mt-mention-meta {
   max-height: 100vh;
   max-height: 100dvh;
   border-radius: 0;
-  padding:
-    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-top, 0px))
-    max(clamp(16px, 4vw, 40px), env(safe-area-inset-right, 0px))
-    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-bottom, 0px))
-    max(clamp(16px, 4vw, 40px), env(safe-area-inset-left, 0px));
+  padding: var(--mt-zen-pad-top) var(--mt-zen-pad-right) var(--mt-zen-pad-bottom) var(--mt-zen-pad-left);
 }
+.mt-composer.is-zen:has(.mt-zen-workspace.is-split) { --mt-zen-column: min(150ch, 100%); }
 .mt-composer.is-zen .mt-composer-content,
 .mt-composer.is-zen .mt-composer-footer {
-  width: min(72ch, 100%);
+  width: var(--mt-zen-column);
   margin-inline: auto;
 }
 /* Zen header: one bar across the screen. Kind, view and Attach sit on the left;
    Properties, exit and close on the right. The dialog heading stays for screen readers. */
-.mt-composer.is-zen .mt-composer-header { width: 100%; gap: 6px 10px; }
+.mt-composer.is-zen .mt-composer-header { width: 100%; min-height: var(--mt-zen-bar); margin: 0; gap: 6px 10px; }
 .mt-composer.is-zen .mt-composer-header > div:first-child {
   position: absolute;
   width: 1px;
@@ -340,17 +346,14 @@ li.mt-mention-option.is-active .mt-mention-meta {
 .mt-composer.is-zen .mt-composer-header .mt-zen-meta-toggle { margin-inline-start: auto; }
 /* Attach and the meeting template live in the bar, so the row above the text is dropped. */
 .mt-composer.is-zen .mt-composer-body-label-row { display: none; }
-.mt-composer.is-zen .mt-composer-title-field { margin-top: clamp(12px, 4vh, 40px); }
+.mt-composer.is-zen .mt-composer-title-field { margin: 10px 0 6px; }
 .mt-composer.is-zen .mt-composer-content {
   padding-right: 0;
   margin-right: auto;
 }
-.mt-composer.is-zen:has(.mt-zen-workspace.is-split) .mt-composer-content,
-.mt-composer.is-zen:has(.mt-zen-workspace.is-split) .mt-composer-footer {
-  width: min(140ch, 100%);
-}
 .mt-composer.is-zen .mt-composer-title-field input.mt-field {
-  font-size: clamp(1.35rem, 2.2vw, 1.85rem);
+  padding-inline: 0;
+  font-size: clamp(1.4rem, 2vw, 1.75rem);
 }
 .mt-composer.is-zen .mt-zen-preview { min-height: 0; }
 .mt-composer.is-zen .mt-composer-body.mt-field {
@@ -370,17 +373,24 @@ li.mt-mention-option.is-active .mt-mention-meta {
   outline: 2px solid var(--mt-focus);
   outline-offset: 4px;
 }
+.mt-composer.is-zen .mt-composer-footer { margin-top: 8px; padding-top: 8px; }
+/* Properties open as a popover under the bar on the side of their toggle, over the text,
+   so opening them never moves the title or the text. */
 .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
-  flex: 0 0 auto;
-  max-height: 36vh;
-  max-height: 36dvh;
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--mt-zen-pad-top) + var(--mt-zen-bar) + 6px);
+  right: var(--mt-zen-pad-right);
+  width: min(30rem, calc(100% - var(--mt-zen-pad-left) - var(--mt-zen-pad-right)));
+  max-height: calc(100% - var(--mt-zen-pad-top) - var(--mt-zen-bar) - var(--mt-zen-pad-bottom) - 12px);
   overflow: auto;
   overscroll-behavior: contain;
-  margin-top: var(--mt-space-4);
+  margin: 0;
   padding: 14px 16px;
   border: 1px solid var(--mt-border);
   border-radius: var(--mt-radius-lg);
-  background: var(--mt-surface-subdued);
+  background: var(--mt-surface);
+  box-shadow: var(--mt-shadow-popover);
 }
 /* Breakpoint: narrow (56rem, 896px). See styles/README.md. */
 @media (max-width: 56rem) {
@@ -397,7 +407,15 @@ li.mt-mention-option.is-active .mt-mention-meta {
   }
   .mt-composer.is-zen .mt-zen-meta-badge,
   .mt-composer.is-zen .mt-zen-attach > span { display: none; }
-  .mt-composer.is-zen .mt-composer-title-field { margin-top: 8px; }
+  .mt-composer.is-zen .mt-composer-title-field { margin-top: 6px; }
+  /* On phones the bar can wrap, so Properties open as a sheet from the bottom edge. */
+  .mt-composer.is-zen .mt-composer-meta-group.is-zen-popover {
+    top: auto;
+    bottom: var(--mt-zen-pad-bottom);
+    left: var(--mt-zen-pad-left);
+    width: auto;
+    max-height: 70%;
+  }
   .mt-zen-workspace.is-zen.is-split {
     flex: 1 1 auto;
     grid-template-rows: minmax(10rem, 1fr) minmax(10rem, 1fr);
@@ -406,6 +424,7 @@ li.mt-mention-option.is-active .mt-mention-meta {
   }
 }
 @media (pointer: coarse) {
+  .mt-composer.is-zen { --mt-zen-bar: 44px; }
   .mt-composer.is-zen .mt-composer-header :is(button.mt-button, .mt-segmented .mt-segment) {
     min-block-size: 44px;
     min-inline-size: 44px;

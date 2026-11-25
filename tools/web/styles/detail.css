@@ -786,7 +786,16 @@ textarea.mt-field.is-drag-over {
   padding: 0;
   place-items: stretch;
 }
+/* Zen geometry. The padding and bar height are variables so the Properties popover can
+   sit right under the bar without measuring it. */
 .mt-detail.is-zen {
+  --mt-zen-pad-top: max(10px, env(safe-area-inset-top, 0px));
+  --mt-zen-pad-right: max(clamp(12px, 2vw, 24px), env(safe-area-inset-right, 0px));
+  --mt-zen-pad-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  --mt-zen-pad-left: max(clamp(12px, 2vw, 24px), env(safe-area-inset-left, 0px));
+  --mt-zen-bar: 36px;
+  --mt-zen-column: min(76ch, 100%);
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -796,39 +805,42 @@ textarea.mt-field.is-drag-over {
   max-height: 100vh;
   max-height: 100dvh;
   border-radius: 0;
-  padding:
-    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-top, 0px))
-    max(clamp(16px, 4vw, 40px), env(safe-area-inset-right, 0px))
-    max(clamp(14px, 2.5vw, 24px), env(safe-area-inset-bottom, 0px))
-    max(clamp(16px, 4vw, 40px), env(safe-area-inset-left, 0px));
+  padding: var(--mt-zen-pad-top) var(--mt-zen-pad-right) var(--mt-zen-pad-bottom) var(--mt-zen-pad-left);
   overflow: hidden;
 }
-/* Zen header: one bar across the screen (editing tools left, card actions right),
-   then the title as the document heading across the full writing column. */
+.mt-detail.is-zen:has(.mt-zen-workspace.is-split) { --mt-zen-column: min(150ch, 100%); }
+/* Zen header: a grid, so the title always gets its own row whatever the bar holds.
+   Row one is the bar (editing tools left, card actions right); row two is the title,
+   aligned with the writing column. */
 .mt-detail.is-zen .mt-detail-header {
   position: static;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "tools nav" "title title";
   align-items: center;
-  gap: 8px 12px;
+  column-gap: 12px;
   width: 100%;
   margin: 0;
   padding: 0;
 }
-.mt-detail.is-zen .mt-zen-bar-tools { order: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.mt-detail.is-zen .mt-detail-navigation { order: 2; margin-inline-start: auto; }
+.mt-detail.is-zen .mt-zen-bar-tools {
+  grid-area: tools;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: var(--mt-zen-bar);
+}
+.mt-detail.is-zen .mt-detail-navigation { grid-area: nav; min-height: var(--mt-zen-bar); align-items: center; }
 .mt-detail.is-zen .mt-detail-heading {
-  order: 3;
-  flex: 1 1 100%;
-  max-width: min(72ch, 100%);
-  margin: clamp(12px, 4vh, 40px) auto 14px;
+  grid-area: title;
+  justify-self: center;
+  width: var(--mt-zen-column);
+  margin: 10px 0 6px;
 }
 .mt-detail.is-zen .mt-detail-identity,
 .mt-detail.is-zen .mt-content-editor-toolbar { display: none; }
-.mt-detail.is-zen .mt-detail-header h2 { font-size: clamp(1.45rem, 2.2vw, 1.85rem); }
-.mt-detail.is-zen:has(.mt-zen-workspace.is-split) .mt-detail-heading { max-width: min(140ch, 100%); }
-.mt-detail.is-zen:has(.mt-zen-workspace.is-split) .mt-detail-layout {
-  width: min(140ch, 100%);
-}
+.mt-detail.is-zen .mt-detail-header h2 { margin: 0; font-size: clamp(1.4rem, 2vw, 1.75rem); line-height: 1.25; }
 .mt-detail.is-zen .mt-detail-workbar,
 .mt-detail.is-zen .mt-properties-panel:not(.is-zen-open),
 .mt-detail.is-zen .mt-detail-activity,
@@ -837,23 +849,27 @@ textarea.mt-field.is-drag-over {
 .mt-detail.is-zen .mt-content-header {
   display: none;
 }
-/* The Properties toggle opens the sidebar panel above the editor. Saving goes through
-   the content editor's Save button; the panel keeps Reset for conflicts. */
+/* Properties open as a popover under the bar, on the side of their toggle, over the
+   text. The editor keeps its place, so opening them never shifts the title or the text.
+   Saving goes through the content editor's Save button; the panel keeps Reset for conflicts. */
 .mt-detail.is-zen .mt-properties-panel.is-zen-open {
-  order: -1;
-  align-self: stretch;
-  max-height: 45vh;
-  max-height: 45dvh;
+  position: absolute;
+  z-index: 5;
+  top: calc(var(--mt-zen-pad-top) + var(--mt-zen-bar) + 6px);
+  right: var(--mt-zen-pad-right);
+  width: min(26rem, calc(100% - var(--mt-zen-pad-left) - var(--mt-zen-pad-right)));
+  max-height: calc(100% - var(--mt-zen-pad-top) - var(--mt-zen-bar) - var(--mt-zen-pad-bottom) - 12px);
   overflow: auto;
   overscroll-behavior: contain;
-  margin-block-end: var(--mt-space-4);
+  background: var(--mt-surface);
+  box-shadow: var(--mt-shadow-popover);
 }
 .mt-detail.is-zen .mt-detail-layout {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  width: min(72ch, 100%);
+  width: var(--mt-zen-column);
   margin: 0 auto;
 }
 .mt-detail.is-zen .mt-detail-content,
@@ -862,9 +878,11 @@ textarea.mt-field.is-drag-over {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  margin: 0;
 }
+.mt-detail.is-zen .mt-content-editor { gap: 8px; }
 /* In Zen the workspace row sets the height. Fixed minimums from the inline editor
-   would push the editor and preview past the buttons when the properties panel is open. */
+   would push the editor and preview past the buttons. */
 .mt-detail.is-zen .mt-zen-preview { min-height: 0; }
 .mt-detail.is-zen textarea.mt-content-input {
   flex: 1 1 auto;
@@ -894,9 +912,24 @@ textarea.mt-field.is-drag-over {
 /* Breakpoint: phone (42rem, 672px). See styles/README.md. */
 @media (max-width: 42rem) {
   .mt-detail.is-zen .mt-zen-attach > span { display: none; }
-  .mt-detail.is-zen .mt-detail-heading { margin-top: 8px; }
+  /* The tools and the card actions do not fit on one phone row: actions first, tools below. */
+  .mt-detail.is-zen .mt-detail-header {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "nav" "tools" "title";
+  }
+  .mt-detail.is-zen .mt-detail-navigation { justify-self: end; }
+  .mt-detail.is-zen .mt-detail-heading { margin-top: 6px; }
+  /* On phones the bar can wrap, so Properties open as a sheet from the bottom edge. */
+  .mt-detail.is-zen .mt-properties-panel.is-zen-open {
+    top: auto;
+    bottom: var(--mt-zen-pad-bottom);
+    left: var(--mt-zen-pad-left);
+    width: auto;
+    max-height: 70%;
+  }
 }
 @media (pointer: coarse) {
+  .mt-detail.is-zen { --mt-zen-bar: 44px; }
   .mt-detail.is-zen .mt-detail-header :is(button.mt-button, .mt-segmented .mt-segment, .mt-menu-trigger) {
     min-block-size: 44px;
     min-inline-size: 44px;

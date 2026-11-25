@@ -371,7 +371,8 @@
                   </div>
                 </section>
               </section>
-              <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }">
+              <aside class="mt-properties-panel" id="mt-detail-properties-panel" aria-label="Card properties" :class="{ 'is-zen-open': Boolean(contentEditor.open && contentEditor.zen && contentEditor.zenMetaOpen) }"
+                     @click.outside="if (contentEditor.zen && contentEditor.zenMetaOpen && !$event.target.closest('.mt-zen-meta-toggle')) contentEditor.zenMetaOpen = false">
                 <header class="mt-properties-header"><h3>Properties</h3></header>
                 <form class="mt-properties-form" id="mt-properties-form" x-effect="propertyEditor.persist(workspaceKey, selected?.id)" @submit.prevent="contentEditor.open && contentEditor.zen ? contentEditor.save(contentContext()) : propertyEditor.apply(propertyContext())">
                   <!-- Keyed by card so the shared editor re-initializes for each card's kind and values. -->
