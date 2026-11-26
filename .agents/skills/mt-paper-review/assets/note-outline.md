@@ -1,6 +1,12 @@
 [Verified citation and source link or uploaded filename. Mark missing
 bibliographic details rather than filling them from memory.]
 
+## Elevator pitch & key lesson
+
+[One short, jargon-free paragraph: what is genuinely interesting, surprising, or
+transferable from this paper (not an abstract summary or "another method for X"),
+plus the main cautionary lesson if any. If nothing is surprising, say so plainly.]
+
 ## Paper map
 
 [Plain-language summary of paper type, the problem it solves, main contribution,
@@ -30,3 +36,10 @@ assessment.]
 [Include when code is available: inspected repository version/commit and only
 the paper-vs-code discrepancies, bugs, or missing components that affect
 validity or reproducibility.]
+
+## Context and related work
+
+[Include when relevant: closely related prior or concurrent papers, omitted
+baselines, or known critiques found via verified search, plus links to related
+microtask cards or past paper reviews. Keep external findings clearly separated
+from the paper's own claims.]

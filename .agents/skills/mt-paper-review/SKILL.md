@@ -22,14 +22,31 @@ focus. Obtain the paper before reviewing it; an abstract alone is not a full
 paper. If access is incomplete, identify what you could read and limit claims
 accordingly. Ask for missing source material when needed.
 
-Begin each new paper with a clear, readable paper map: problem and motivation,
-core idea, datasets and baselines (in a compact table), main claims, and key
-uncertainties. Favor plain-language intuition and concrete examples over dense
-terminology, metric dumps, or exhaustive equation lists. Include equations or
-low-level technical details in the initial review only when they are essential
-to explain the core mechanism, a major weakness, a falsification test, or a
-paper-vs-code discrepancy. Mark missing details as not reported rather than
-guessing.
+Before drafting the initial overview, gather brief external and local context
+when available:
+- **Literature context:** If web or literature search is available, run a few
+  targeted queries (not an exhaustive survey) for closely related prior or
+  concurrent papers, standard baselines the authors may have omitted, or notable
+  critiques/replications. Use this to reality-check the **elevator pitch & key
+  lesson** (what is genuinely new vs. incremental) and **critical assessment**.
+  Cite only verified sources and label external findings separately from the
+  paper's claims; if search is unavailable, note that novelty is assessed from
+  the paper alone.
+- **Workspace context:** Inside a microtask workspace, briefly check existing
+  cards/notes (e.g., `./mt search` or `./mt list --tag paper-review`) for
+  related past paper reviews or active projects so the review connects to the
+  user's ongoing work.
+
+Begin each new paper with a 1-paragraph plain-language **elevator pitch & key
+lesson** (what is genuinely surprising, different, or transferable—not an
+abstract summary or "another method for X"—plus any key cautionary lesson),
+followed by a clear, readable paper map: problem and motivation, core idea,
+datasets and baselines (in a compact table), main claims, and key uncertainties.
+Favor plain-language intuition and concrete examples over dense terminology,
+metric dumps, or exhaustive equation lists. Include equations or low-level
+technical details in the initial review only when they are essential to explain
+the core mechanism, a major weakness, a falsification test, or a paper-vs-code
+discrepancy. Mark missing details as not reported rather than guessing.
 
 Identify the most consequential assumption and a simple baseline or test that
 could challenge it. For methods papers, also propose one simple, strong
